@@ -6,7 +6,6 @@
 
 ### 大型表单处理
 - 使用 `debounceReactions` 选项减少频繁触发的反应
-- 对不常变化的字段使用 `once` 事件监听器
 - 考虑使用虚拟滚动处理大型列表数据
 
 ### 异步验证优化
@@ -19,7 +18,7 @@
 ### 全局错误处理
 ```typescript
 const errorHandler = new ErrorHandler();
-errorHandler.onError(ErrorType.ALL, (error) => {
+errorHandler.onError(ErrorType.UNKNOWN, (error) => {
   console.error('发生错误:', error);
   // 显示全局错误通知
 });

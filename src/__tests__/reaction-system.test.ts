@@ -1,4 +1,6 @@
 import { createModel, Model } from '../index';
+import { ReactionSystem } from '../reaction-system';
+import { ErrorHandler } from '../error-handler';
 
 describe('ModelManager - Reaction System', () => {
     beforeEach(() => {
@@ -141,5 +143,167 @@ describe('ModelManager - Reaction System', () => {
         expect(consoleSpy).toHaveBeenCalledWith(
             expect.stringContaining('Circular dependency detected')
         );
+    });
+
+    test('should handle reaction error when dependency access throws', () => {
+        const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+        const handler = new ErrorHandler();
+
+        const setError = jest.fn();
+        const system = new ReactionSystem(
+            {
+                a: { type: 'string', default: '' },
+                b: {
+                    type: 'string',
+                    default: '',
+                    reaction: {
+                        fields: ['a'],
+                        computed: (values) => values.a
+                    }
+                }
+            },
+            { debounceReactions: 0 },
+            {
+                getValue: () => {
+                    throw new Error('getValue failed');
+                },
+                setValue: async () => true,
+                emit: () => {},
+                setError
+            },
+            handler
+        );
+
+        system.triggerReactions('a');
+
+        expect(setError).toHaveBeenCalledWith(
+            '__reactions',
+            expect.objectContaining({ rule: 'reaction_error' })
+        );
+        expect(errorSpy).toHaveBeenCalledWith(
+            expect.stringContaining('[reaction] field b: getValue failed')
+        );
+    });
+
+    test('should clear pending reaction timeouts on dispose', () => {
+        jest.useFakeTimers();
+        const clearSpy = jest.spyOn(global, 'clearTimeout');
+        const handler = new ErrorHandler();
+
+        const system = new ReactionSystem(
+            {
+                input: { type: 'string', default: '' },
+                output: {
+                    type: 'string',
+                    default: '',
+                    reaction: {
+                        fields: ['input'],
+                        computed: (values) => values.input.toUpperCase()
+                    }
+                }
+            },
+            { debounceReactions: 100 },
+            {
+                getValue: () => 'x',
+                setValue: async () => true,
+                emit: () => {},
+                setError: () => {}
+            },
+            handler
+        );
+
+        system.triggerReactions('input');
+        system.dispose();
+
+        expect(clearSpy).toHaveBeenCalled();
+
+        jest.useRealTimers();
+    });
+
+    test('should clear previous timeout when re-scheduling debounced reactions', () => {
+        jest.useFakeTimers();
+        const clearSpy = jest.spyOn(global, 'clearTimeout');
+        const handler = new ErrorHandler();
+
+        const system = new ReactionSystem(
+            {
+                input: { type: 'string', default: '' },
+                output: {
+                    type: 'string',
+                    default: '',
+                    reaction: {
+                        fields: ['input'],
+                        computed: (values) => values.input.toUpperCase()
+                    }
+                }
+            },
+            { debounceReactions: 50 },
+            {
+                getValue: () => 'x',
+                setValue: async () => true,
+                emit: () => {},
+                setError: () => {}
+            },
+            handler
+        );
+
+        system.triggerReactions('input');
+        system.triggerReactions('input');
+
+        expect(clearSpy).toHaveBeenCalled();
+
+        jest.useRealTimers();
+    });
+
+    test('should use default reactionStack in scheduleReaction', () => {
+        const handler = new ErrorHandler();
+        const reaction = {
+            fields: ['input'],
+            computed: (values: Record<string, any>) => values.input
+        };
+
+        const system = new ReactionSystem(
+            {
+                input: { type: 'string', default: '' },
+                output: { type: 'string', default: '', reaction }
+            },
+            { debounceReactions: 0 },
+            {
+                getValue: () => 'x',
+                setValue: async () => true,
+                emit: () => {},
+                setError: () => {}
+            },
+            handler
+        );
+
+        const anySystem = system as any;
+        anySystem.scheduleReaction('output', reaction, 0);
+    });
+
+    test('should use default reactionStack in processReaction', () => {
+        const handler = new ErrorHandler();
+        const reaction = {
+            fields: ['input'],
+            computed: (values: Record<string, any>) => values.input
+        };
+
+        const system = new ReactionSystem(
+            {
+                input: { type: 'string', default: '' },
+                output: { type: 'string', default: '', reaction }
+            },
+            { debounceReactions: 0 },
+            {
+                getValue: () => 'x',
+                setValue: async () => true,
+                emit: () => {},
+                setError: () => {}
+            },
+            handler
+        );
+
+        const anySystem = system as any;
+        anySystem.processReaction('output', reaction);
     });
 });

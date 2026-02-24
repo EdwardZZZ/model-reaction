@@ -45,8 +45,7 @@ const userModel = createModel<User>({
   name: {
     type: 'string',
     validator: [
-      ValidationRules.required,
-      // ValidationRules.minLength(2)
+      ValidationRules.required
     ],
     default: '',
   },
@@ -111,24 +110,24 @@ console.log('Dirty data after clearing:', userModel.getDirtyData());
 ### Asynchronous Validation Example
 
 ```typescript
-import { createModel, Model, ValidationRules } from 'model-reaction';
-
-ValidationRules.asyncUnique: (fieldName: string) => new Rule(
-    'asyncUnique',
-    `${fieldName} already exists`,
-    async (v) => {
-        return new Promise((resolve) => {
-            setTimeout(() => {
-                resolve(!!v);
-            }, 500);
-        });
-    }
-)
+import { createModel, Model, ValidationRules, Rule } from 'model-reaction';
 
 interface AsyncUser {
   name: string;
   username: string;
 }
+
+const asyncUniqueRule = new Rule(
+  'asyncUnique',
+  'Username already exists',
+  async (value: string): Promise<boolean> => {
+    return new Promise<boolean>((resolve) => {
+      setTimeout(() => {
+        resolve(value !== 'admin');
+      }, 100);
+    });
+  }
+);
 
 // Define model schema
 const asyncUserModel = createModel<AsyncUser>({
@@ -141,17 +140,7 @@ const asyncUserModel = createModel<AsyncUser>({
     type: 'string',
     validator: [
       ValidationRules.required.withMessage('Account cannot be empty'),
-      ValidationRules.asyncUnique(
-        async (value: string): Promise<boolean> => {
-          // Simulate asynchronous check if username already exists
-          return new Promise<boolean>((resolve) => {
-            setTimeout(() => {
-              // Assume 'admin' is already taken
-              resolve(value !== 'admin');
-            }, 100);
-          });
-        }
-      ).withMessage('Username already exists')
+      asyncUniqueRule
     ],
     default: ''
   }
@@ -203,7 +192,6 @@ createModel<T>(schema: Model<T>, options?: ModelOptions);
 - `validation:error`: Triggered when validation error occurs
 - `reaction:error`: Triggered when reaction processing error occurs
 - `field:not-found`: Triggered when attempting to access a non-existent field
-- `error`: General error event triggered when any error occurs
 
 ### ModelOptions
 
@@ -219,7 +207,7 @@ Model configuration options:
 Error handler provides unified error management:
 
 - `onError(type: ErrorType, callback: (error: AppError) => void): void`: Subscribe to specific type of error
-- `offError(type: ErrorType, callback?: (error: AppError) => void): void`: Unsubscribe from specific type of error
+- `offError(type: ErrorType, callback: (error: AppError) => void): void`: Unsubscribe from specific type of error
 - `triggerError(error: AppError): void`: Trigger error
 - `createValidationError(field: string, message: string): AppError`: Create validation error
 - `createFieldNotFoundError(field: string): AppError`: Create field not found error
@@ -228,9 +216,10 @@ Error handler provides unified error management:
 ### ErrorType Enum
 
 - `VALIDATION`: Validation error
+- `REACTION`: Reaction processing error
 - `FIELD_NOT_FOUND`: Field not found error
-- `REACTION_ERROR`: Reaction processing error
-- `ASYNC_VALIDATION_TIMEOUT`: Asynchronous validation timeout error
+- `DEPENDENCY_ERROR`: Dependency error in reactions
+- `CIRCULAR_DEPENDENCY`: Circular dependency error
 - `UNKNOWN`: Unknown error
 
 ### Type Definitions
@@ -308,7 +297,7 @@ const model = createModel({
 });
 ```
 
-### Asynchronous Transformation and Validation
+### Transformation and Asynchronous Validation
 
 ```typescript
 import { createModel, Model, Rule } from 'model-reaction';
@@ -316,10 +305,7 @@ import { createModel, Model, Rule } from 'model-reaction';
 const asyncModel = createModel({
   field: {
     type: 'string',
-    transform: async (value: string) => {
-      // Asynchronously transform value
-      return value.toUpperCase();
-    },
+    transform: (value: string) => value.toUpperCase(),
     validator: [
       new Rule(
         'asyncValidator',

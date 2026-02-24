@@ -6,7 +6,6 @@
 
 ### Large Form Handling
 - Use the `debounceReactions` option to reduce frequently triggered reactions
-- Use `once` event listeners for fields that don't change often
 - Consider using virtual scrolling for large list data
 
 ### Asynchronous Validation Optimization
@@ -19,7 +18,7 @@
 ### Global Error Handling
 ```typescript
 const errorHandler = new ErrorHandler();
-errorHandler.onError(ErrorType.ALL, (error) => {
+errorHandler.onError(ErrorType.UNKNOWN, (error) => {
   console.error('Error occurred:', error);
   // Display global error notification
 });

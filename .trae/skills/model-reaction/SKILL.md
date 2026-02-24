@@ -40,13 +40,19 @@ const userModel = createModel({
 ### 2. Validation Rules
 - **Built-in**: `ValidationRules.required`, `ValidationRules.email`, `ValidationRules.min(n)`, etc.
 - **Custom**: Use `new Rule(...)`.
-- **Async**: Use `ValidationRules.asyncUnique` or custom async logic.
+- **Async**: Use custom async `Rule` or custom async `validate` logic.
 
 ```typescript
 // Custom Async Rule
-ValidationRules.asyncUnique(async (value) => {
-  return await checkApi(value);
-}).withMessage('Value already exists');
+import { Rule } from 'model-reaction';
+
+const asyncUnique = new Rule(
+  'asyncUnique',
+  'Value already exists',
+  async (value) => {
+    return await checkApi(value);
+  }
+);
 ```
 
 ### 3. Reactions

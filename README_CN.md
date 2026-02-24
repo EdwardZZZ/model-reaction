@@ -45,8 +45,7 @@ const userModel = createModel<User>({
   name: {
     type: 'string',
     validator: [
-      ValidationRules.required,
-      // ValidationRules.minLength(2)
+      ValidationRules.required
     ],
     default: '',
   },
@@ -111,24 +110,24 @@ console.log('清除后脏数据:', userModel.getDirtyData());
 ### 异步验证示例
 
 ```typescript
-import { createModel, Model, ValidationRules } from 'model-reaction';
-
-ValidationRules.asyncUnique: (fieldName: string) => new Rule(
-    'asyncUnique',
-    `${fieldName} 已存在`,
-    async (v) => {
-        return new Promise((resolve) => {
-            setTimeout(() => {
-                resolve(!!v);
-            }, 500);
-        });
-    }
-)
+import { createModel, Model, ValidationRules, Rule } from 'model-reaction';
 
 interface AsyncUser {
   name: string;
   username: string;
 }
+
+const asyncUniqueRule = new Rule(
+  'asyncUnique',
+  '用户名已存在',
+  async (value: string): Promise<boolean> => {
+    return new Promise<boolean>((resolve) => {
+      setTimeout(() => {
+        resolve(value !== 'admin');
+      }, 100);
+    });
+  }
+);
 
 // 定义模型架构
 const asyncUserModel = createModel<AsyncUser>({
@@ -141,17 +140,7 @@ const asyncUserModel = createModel<AsyncUser>({
     type: 'string',
     validator: [
       ValidationRules.required.withMessage('账号不能为空'),
-      ValidationRules.asyncUnique(
-        async (value: string): Promise<boolean> => {
-          // 模拟异步检查用户名是否已存在
-          return new Promise<boolean>((resolve) => {
-            setTimeout(() => {
-              // 假设 'admin' 已被占用
-              resolve(value !== 'admin');
-            }, 100);
-          });
-        }
-      ).withMessage('用户名已存在')
+      asyncUniqueRule
     ],
     default: ''
   }
@@ -203,7 +192,6 @@ createModel<T>(schema: Model<T>, options?: ModelOptions);
 - `validation:error`: 验证错误时触发
 - `reaction:error`: 反应处理错误时触发
 - `field:not-found`: 尝试访问不存在的字段时触发
-- `error`: 任何错误发生时都会触发的通用错误事件
 
 ### ModelOptions
 
@@ -219,7 +207,7 @@ createModel<T>(schema: Model<T>, options?: ModelOptions);
 错误处理器提供统一的错误管理：
 
 - `onError(type: ErrorType, callback: (error: AppError) => void): void`: 订阅特定类型的错误
-- `offError(type: ErrorType, callback?: (error: AppError) => void): void`: 取消订阅特定类型的错误
+- `offError(type: ErrorType, callback: (error: AppError) => void): void`: 取消订阅特定类型的错误
 - `triggerError(error: AppError): void`: 触发错误
 - `createValidationError(field: string, message: string): AppError`: 创建验证错误
 - `createFieldNotFoundError(field: string): AppError`: 创建字段不存在错误
@@ -228,9 +216,10 @@ createModel<T>(schema: Model<T>, options?: ModelOptions);
 ### ErrorType 枚举
 
 - `VALIDATION`: 验证错误
+- `REACTION`: 反应处理错误
 - `FIELD_NOT_FOUND`: 字段不存在错误
-- `REACTION_ERROR`: 反应处理错误
-- `ASYNC_VALIDATION_TIMEOUT`: 异步验证超时错误
+- `DEPENDENCY_ERROR`: 反应依赖错误
+- `CIRCULAR_DEPENDENCY`: 反应循环依赖错误
 - `UNKNOWN`: 未知错误
 
 ### 类型定义
@@ -308,7 +297,7 @@ const model = createModel({
 });
 ```
 
-### 异步转换和验证
+### 转换与异步验证
 
 ```typescript
 import { createModel, Model, Rule } from 'model-reaction';
@@ -316,10 +305,7 @@ import { createModel, Model, Rule } from 'model-reaction';
 const asyncModel = createModel({
   field: {
     type: 'string',
-    transform: async (value: string) => {
-      // 异步转换值
-      return value.toUpperCase();
-    },
+    transform: (value: string) => value.toUpperCase(),
     validator: [
       new Rule(
         'asyncValidator',

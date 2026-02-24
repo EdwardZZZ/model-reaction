@@ -128,88 +128,86 @@ interface FieldSchema {
 #### 4.3.1 广告模块字段
 
 ```typescript
+import { ValidationRules, Rule } from 'model-reaction';
+
+const generateAdId = () => `ad_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+const minLength = (min: number) => new Rule('minLength', `Min length is ${min}`, (v) => typeof v === 'string' && v.length >= min);
+const maxLength = (max: number) => new Rule('maxLength', `Max length is ${max}`, (v) => typeof v === 'string' && v.length <= max);
+const oneOf = (options: string[]) => new Rule('oneOf', `Must be one of ${options.join(', ')}`, (v) => options.includes(v));
+const url = new Rule('url', 'Invalid URL', (v) => typeof v === 'string' && /^https?:\\/\\//.test(v));
+const minItems = (min: number) => new Rule('minItems', `Min items is ${min}`, (v) => Array.isArray(v) && v.length >= min);
+
 const adModelSchema = {
-  // 广告基本信息
-  basic: {
-    adId: {
-      type: 'string',
-      default: () => `ad_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
-    },
-    adName: {
-      type: 'string',
-      validator: [ValidationRules.required, ValidationRules.minLength(3), ValidationRules.maxLength(50)],
-      default: ''
-    },
-    status: {
-      type: 'enum',
-      validator: [ValidationRules.oneOf(['draft', 'pending', 'approved', 'rejected', 'active', 'paused'])],
-      default: 'draft'
-    },
-    createdAt: {
-      type: 'date',
-      default: () => new Date()
-    },
-    updatedAt: {
-      type: 'date',
-      default: () => new Date()
-    }
+  'basic.adId': {
+    type: 'string',
+    default: generateAdId()
   },
-  
-  // 广告创意信息
-  creative: {
-    title: {
-      type: 'string',
-      validator: [ValidationRules.required, ValidationRules.maxLength(20)],
-      default: ''
-    },
-    description: {
-      type: 'string',
-      validator: [ValidationRules.required, ValidationRules.maxLength(100)],
-      default: ''
-    },
-    imageUrl: {
-      type: 'string',
-      validator: [ValidationRules.required, ValidationRules.url],
-      default: ''
-    },
-    landingPageUrl: {
-      type: 'string',
-      validator: [ValidationRules.required, ValidationRules.url],
-      default: ''
-    }
+  'basic.adName': {
+    type: 'string',
+    validator: [ValidationRules.required, minLength(3), maxLength(50)],
+    default: ''
   },
-  
-  // 广告投放设置
-  targeting: {
-    budget: {
-      type: 'number',
-      validator: [ValidationRules.required, ValidationRules.min(100)],
-      default: 1000
-    },
-    dailyBudget: {
-      type: 'number',
-      validator: [ValidationRules.required, ValidationRules.min(10)],
-      default: 100
-    },
-    startDate: {
-      type: 'date',
-      validator: [ValidationRules.required],
-      default: () => new Date()
-    },
-    endDate: {
-      type: 'date',
-      validator: [ValidationRules.required],
-      default: () => new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
-    },
-    targetAudience: {
-      type: 'array',
-      default: []
-    },
-    platforms: {
-      type: 'array',
-      validator: [ValidationRules.required, ValidationRules.minLength(1)],
-      default: []
-    }
+  'basic.status': {
+    type: 'enum',
+    validator: [oneOf(['draft', 'pending', 'approved', 'rejected', 'active', 'paused'])],
+    default: 'draft'
+  },
+  'basic.createdAt': {
+    type: 'date',
+    default: new Date()
+  },
+  'basic.updatedAt': {
+    type: 'date',
+    default: new Date()
+  },
+  'creative.title': {
+    type: 'string',
+    validator: [ValidationRules.required, maxLength(20)],
+    default: ''
+  },
+  'creative.description': {
+    type: 'string',
+    validator: [ValidationRules.required, maxLength(100)],
+    default: ''
+  },
+  'creative.imageUrl': {
+    type: 'string',
+    validator: [ValidationRules.required, url],
+    default: ''
+  },
+  'creative.landingPageUrl': {
+    type: 'string',
+    validator: [ValidationRules.required, url],
+    default: ''
+  },
+  'targeting.budget': {
+    type: 'number',
+    validator: [ValidationRules.required, ValidationRules.min(100)],
+    default: 1000
+  },
+  'targeting.dailyBudget': {
+    type: 'number',
+    validator: [ValidationRules.required, ValidationRules.min(10)],
+    default: 100
+  },
+  'targeting.startDate': {
+    type: 'date',
+    validator: [ValidationRules.required],
+    default: new Date()
+  },
+  'targeting.endDate': {
+    type: 'date',
+    validator: [ValidationRules.required],
+    default: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
+  },
+  'targeting.targetAudience': {
+    type: 'array',
+    default: []
+  },
+  'targeting.platforms': {
+    type: 'array',
+    validator: [ValidationRules.required, minItems(1)],
+    default: []
   }
 };
 ```
@@ -218,89 +216,30 @@ const adModelSchema = {
 
 ```typescript
 const adAnalyticsSchema = {
-  // 广告ID关联
-  adReference: {
-    adId: {
-      type: 'string',
-      validator: [ValidationRules.required],
-      default: ''
-    }
+  'adReference.adId': {
+    type: 'string',
+    validator: [ValidationRules.required],
+    default: ''
   },
-  
-  // 展示数据
-  impressions: {
-    total: {
-      type: 'number',
-      default: 0
-    },
-    unique: {
-      type: 'number',
-      default: 0
-    },
-    byPlatform: {
-      type: 'object',
-      default: {}
-    }
+  'impressions.total': {
+    type: 'number',
+    default: 0
   },
-  
-  // 点击数据
-  clicks: {
-    total: {
-      type: 'number',
-      default: 0
-    },
-    ctr: {
-      type: 'number',
-      default: 0
-    }
-  }
-    }
+  'impressions.unique': {
+    type: 'number',
+    default: 0
   },
-  
-  // 订单商品信息
-  items: {
-    type: 'array',
-    default: []
+  'impressions.byPlatform': {
+    type: 'object',
+    default: {}
   },
-  
-  // 订单金额信息
-  pricingInfo: {
-    subtotal: {
-      type: 'number',
-      default: 0
-    },
-    tax: {
-      type: 'number',
-      default: 0
-    },
-    discount: {
-      type: 'number',
-      default: 0
-    },
-    total: {
-      type: 'number',
-      default: 0,
-      reaction: {
-        fields: ['pricingInfo.subtotal', 'pricingInfo.tax', 'pricingInfo.discount'],
-        computed: (values) => values['pricingInfo.subtotal'] + values['pricingInfo.tax'] - values['pricingInfo.discount']
-      }
-    }
+  'clicks.total': {
+    type: 'number',
+    default: 0
   },
-  
-  // 支付信息
-  paymentInfo: {
-    paymentMethod: {
-      type: 'string',
-      default: ''
-    },
-    paymentStatus: {
-      type: 'string',
-      default: 'unpaid'
-    },
-    paymentDate: {
-      type: 'date',
-      default: null
-    }
+  'clicks.ctr': {
+    type: 'number',
+    default: 0
   }
 };
 ```
@@ -311,7 +250,7 @@ const adAnalyticsSchema = {
 
 ```tsx
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { createModel, ValidationRules } from '../src/index';
+import { createModel, ValidationRules, Rule } from '../src/index';
 import { ModelReturn, ValidationError } from '../src/types';
 
 // 广告创意接口
@@ -370,6 +309,12 @@ export const AdProvider: React.FC<{ children: React.ReactNode }> = ({ children }
   };
 
   // 初始化广告模型
+  const minLength = (min: number) => new Rule('minLength', `Min length is ${min}`, (v) => typeof v === 'string' && v.length >= min);
+  const maxLength = (max: number) => new Rule('maxLength', `Max length is ${max}`, (v) => typeof v === 'string' && v.length <= max);
+  const oneOf = (options: string[]) => new Rule('oneOf', `Must be one of ${options.join(', ')}`, (v) => options.includes(v));
+  const url = new Rule('url', 'Invalid URL', (v) => typeof v === 'string' && /^https?:\\/\\//.test(v));
+  const minItems = (min: number) => new Rule('minItems', `Min items is ${min}`, (v) => Array.isArray(v) && v.length >= min);
+
   const adModel = createModel({
     // 基本信息
     'basic.adId': {
@@ -378,12 +323,12 @@ export const AdProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     },
     'basic.adName': {
       type: 'string',
-      validator: [ValidationRules.required, ValidationRules.minLength(3), ValidationRules.maxLength(50)],
+      validator: [ValidationRules.required, minLength(3), maxLength(50)],
       default: ''
     },
     'basic.status': {
       type: 'string',
-      validator: [ValidationRules.oneOf(['draft', 'pending', 'approved', 'rejected', 'active', 'paused'])],
+      validator: [oneOf(['draft', 'pending', 'approved', 'rejected', 'active', 'paused'])],
       default: 'draft'
     },
     'basic.createdAt': {
@@ -398,22 +343,22 @@ export const AdProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     // 创意信息
     'creative.title': {
       type: 'string',
-      validator: [ValidationRules.required, ValidationRules.maxLength(20)],
+      validator: [ValidationRules.required, maxLength(20)],
       default: ''
     },
     'creative.description': {
       type: 'string',
-      validator: [ValidationRules.required, ValidationRules.maxLength(100)],
+      validator: [ValidationRules.required, maxLength(100)],
       default: ''
     },
     'creative.imageUrl': {
       type: 'string',
-      validator: [ValidationRules.required, ValidationRules.url],
+      validator: [ValidationRules.required, url],
       default: ''
     },
     'creative.landingPageUrl': {
       type: 'string',
-      validator: [ValidationRules.required, ValidationRules.url],
+      validator: [ValidationRules.required, url],
       default: ''
     },
 
@@ -444,7 +389,7 @@ export const AdProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     },
     'targeting.platforms': {
       type: 'array',
-      validator: [ValidationRules.required],
+      validator: [ValidationRules.required, minItems(1)],
       default: []
     }
   });

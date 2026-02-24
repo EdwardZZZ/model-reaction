@@ -238,4 +238,41 @@ describe('ModelManager Direct Tests', () => {
         const model = createModel<Schema>(schema);
         expect(model.data).toEqual({ field: 'val' });
     });
+
+    test('should forward reaction-system emit through model manager', () => {
+        interface Schema {
+            field: string;
+        }
+        const schema: Model<Schema> = { field: { type: 'string', default: 'val' } };
+        const manager = new ModelManager(schema);
+        const cb = jest.fn();
+        manager.on('custom:event', cb);
+
+        const internal = manager as any;
+        internal.reactionSystem.callbacks.emit('custom:event', { value: 1 });
+
+        expect(cb).toHaveBeenCalledWith({ value: 1 });
+    });
+
+    test('should reuse existing validation error array in reaction setError', () => {
+        interface Schema {
+            field: string;
+        }
+        const schema: Model<Schema> = { field: { type: 'string', default: 'val' } };
+        const manager = new ModelManager(schema);
+        const internal = manager as any;
+
+        internal.reactionSystem.callbacks.setError('field', {
+            field: 'field',
+            rule: 'reaction_error',
+            message: 'first'
+        });
+        internal.reactionSystem.callbacks.setError('field', {
+            field: 'field',
+            rule: 'reaction_error',
+            message: 'second'
+        });
+
+        expect(manager.validationErrors.field?.length).toBe(2);
+    });
 });

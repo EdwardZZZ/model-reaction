@@ -72,4 +72,49 @@ describe('ErrorHandler', () => {
         expect(errorCallback.mock.calls[0][0].type).toBe(ErrorType.FIELD_NOT_FOUND);
         expect(errorCallback.mock.calls[0][0].field).toBe('nonexistentField');
     });
+
+    test('should initialize missing listener arrays in onError', () => {
+        const anyHandler = errorHandler as any;
+        delete anyHandler.errorListeners[ErrorType.VALIDATION];
+
+        const cb = jest.fn();
+        errorHandler.onError(ErrorType.VALIDATION, cb);
+
+        expect(Array.isArray(anyHandler.errorListeners[ErrorType.VALIDATION])).toBe(true);
+        expect(anyHandler.errorListeners[ErrorType.VALIDATION]).toContain(cb);
+    });
+
+    test('should handle triggerError without field and missing listener buckets', () => {
+        const anyHandler = errorHandler as any;
+
+        const unknownCb = jest.fn();
+        errorHandler.onError(ErrorType.UNKNOWN, unknownCb);
+
+        delete anyHandler.errorListeners[ErrorType.REACTION];
+
+        errorHandler.triggerError({ type: ErrorType.REACTION, message: 'boom' } as any);
+
+        expect((console.error as any) as jest.Mock).toHaveBeenCalledWith('[reaction] boom');
+        expect(unknownCb).toHaveBeenCalledWith(expect.objectContaining({ type: ErrorType.REACTION, message: 'boom' }));
+    });
+
+    test('should not fail when unknown listeners are missing', () => {
+        const anyHandler = errorHandler as any;
+        delete anyHandler.errorListeners[ErrorType.UNKNOWN];
+
+        const cb = jest.fn();
+        errorHandler.onError(ErrorType.VALIDATION, cb);
+
+        const err = errorHandler.createValidationError('name', 'Name cannot be empty');
+        errorHandler.triggerError(err);
+
+        expect(cb).toHaveBeenCalledWith(err);
+    });
+
+    test('should ignore offError when listener buckets are missing', () => {
+        const anyHandler = errorHandler as any;
+        delete anyHandler.errorListeners[ErrorType.FIELD_NOT_FOUND];
+
+        expect(() => errorHandler.offError(ErrorType.FIELD_NOT_FOUND, jest.fn())).not.toThrow();
+    });
 });
