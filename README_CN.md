@@ -200,6 +200,7 @@ createModel<T>(schema: Model<T>, options?: ModelOptions);
 - `debounceReactions?: number`: 反应触发的防抖时间（毫秒）
 - `asyncValidationTimeout?: number`: 异步验证的超时时间（毫秒）
 - `errorFormatter?: (error: ValidationError) => string`: 自定义错误格式化函数
+- `strictMode?: boolean`: 严格模式。如果为 true，尝试设置不在 schema 中定义的字段时将抛出 Error 异常。
 - `failFast?: boolean`: 验证策略。如果为 true，则在遇到第一个错误后停止验证字段。默认为 false。
 
 ### ErrorHandler
@@ -294,6 +295,41 @@ const model = createModel({
   }
 }, {
   errorHandler: errorHandler
+});
+```
+
+### 条件验证与交叉字段验证
+
+您可以定义仅在特定条件下才执行的验证规则，或者使用 `data` 参数基于其他字段的值来验证当前字段：
+
+```typescript
+import { createModel, ValidationRules, Rule } from 'model-reaction';
+
+const model = createModel({
+  hasDiscount: { type: 'boolean', default: false },
+  discountCode: {
+    type: 'string',
+    validator: [
+      // 条件验证：此规则仅在 hasDiscount 为 true 时执行
+      {
+        ...ValidationRules.required.withMessage('启用折扣时，折扣码为必填项'),
+        condition: (data) => data.hasDiscount === true
+      },
+      // 交叉字段验证：根据其他字段的数据检查折扣码是否有效
+      new Rule(
+        'validCode',
+        '无效的折扣码',
+        (value, data) => {
+          // 您可以通过 `data` 参数访问模型中的其他字段值
+          if (data?.hasDiscount && value !== 'PROMO2024') {
+            return false;
+          }
+          return true;
+        }
+      )
+    ],
+    default: ''
+  }
 });
 ```
 

@@ -200,6 +200,7 @@ Model configuration options:
 - `debounceReactions?: number`: Debounce time for reaction triggering (in milliseconds)
 - `asyncValidationTimeout?: number`: Timeout time for asynchronous validation (in milliseconds)
 - `errorFormatter?: (error: ValidationError) => string`: Custom error formatting function
+- `strictMode?: boolean`: Strict mode. If true, attempting to set a field that doesn't exist in the schema will throw an Error.
 - `failFast?: boolean`: Validation strategy. If true, stops validating a field after the first error. Default is false.
 
 ### ErrorHandler
@@ -294,6 +295,41 @@ const model = createModel({
   }
 }, {
   errorHandler: errorHandler
+});
+```
+
+### Conditional and Cross-field Validation
+
+You can define rules that only run when specific conditions are met, or rules that validate a field based on the values of other fields using the `data` parameter:
+
+```typescript
+import { createModel, ValidationRules, Rule } from 'model-reaction';
+
+const model = createModel({
+  hasDiscount: { type: 'boolean', default: false },
+  discountCode: {
+    type: 'string',
+    validator: [
+      // Conditional Validation: This rule only runs if hasDiscount is true
+      {
+        ...ValidationRules.required.withMessage('Discount code is required when discount is enabled'),
+        condition: (data) => data.hasDiscount === true
+      },
+      // Cross-field Validation: Check if the code is valid based on other data
+      new Rule(
+        'validCode',
+        'Invalid discount code',
+        (value, data) => {
+          // You can access other field values from the `data` parameter
+          if (data?.hasDiscount && value !== 'PROMO2024') {
+            return false;
+          }
+          return true;
+        }
+      )
+    ],
+    default: ''
+  }
 });
 ```
 
