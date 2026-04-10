@@ -25,6 +25,7 @@ export interface ValidateFieldOptions {
     timeout?: number;
     errorHandler: ErrorHandler;
     failFast?: boolean;
+    data?: Record<string, any>;
 }
 
 export interface AppError {

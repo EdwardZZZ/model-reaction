@@ -84,7 +84,7 @@ export class ReactionSystem {
         }
     }
 
-    private processReaction(field: string, reaction: Reaction, reactionStack: string[] = []): void {
+    private async processReaction(field: string, reaction: Reaction, reactionStack: string[] = []): Promise<void> {
         try {
             const dependentValues = reaction.fields.reduce((values, f) => {
                 const val = this.callbacks.getValue(f);
@@ -98,7 +98,7 @@ export class ReactionSystem {
 
             try {
                 const computedValue = reaction.computed(dependentValues);
-                this.callbacks.setValue(field, computedValue, { reactionStack });
+                await this.callbacks.setValue(field, computedValue, { reactionStack });
                 if (reaction.action) {
                     reaction.action({ ...dependentValues, computed: computedValue });
                 }

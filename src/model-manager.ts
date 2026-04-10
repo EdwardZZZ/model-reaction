@@ -103,6 +103,9 @@ export class ModelManager<T extends Record<string, any> = Record<string, any>> {
         if (!schema) {
             const error = this.errorHandler.createFieldNotFoundError(field);
             this.errorHandler.triggerError(error);
+            if (this.options.strictMode) {
+                throw new Error(error.message);
+            }
             return false;
         }
 
@@ -147,18 +150,17 @@ export class ModelManager<T extends Record<string, any> = Record<string, any>> {
             field, 
             timeout: this.asyncValidationTimeout, 
             errorHandler: this.errorHandler,
-            failFast: this.options.failFast ?? false
+            failFast: this.options.failFast ?? false,
+            data: this.data as Record<string, any>
         });
     }
 
     // Handle valid field value
     private handleValidField(field: string, value: any, reactionStack: string[] = [], suppressReactions: boolean = false): void {
-        // If value hasn't changed, don't trigger reactions
         const valueChanged = !deepEqual(this.data[field], value);
         if (valueChanged) {
             this.data[field as keyof T] = value;
-            // Remove from dirtyData if exists
-            if (this.dirtyData[field]) {
+            if (field in this.dirtyData) {
                 delete this.dirtyData[field];
             }
             this.emit(ModelEvents.FIELD_CHANGE, { field, value });
@@ -228,8 +230,7 @@ export class ModelManager<T extends Record<string, any> = Record<string, any>> {
     // Validate and update single field
     private async validateAndUpdateField(field: string): Promise<boolean> {
         const schema = this.schema[field] as FieldSchema;
-        // Prefer value from dirtyData, if not available use value from data
-        const value = this.dirtyData[field] !== undefined ? this.dirtyData[field] : this.data[field];
+        const value = field in this.dirtyData ? this.dirtyData[field] : this.data[field];
         this.validationErrors[field] = [];
         
         const isValid = await validateField({
@@ -239,15 +240,14 @@ export class ModelManager<T extends Record<string, any> = Record<string, any>> {
             field, 
             timeout: this.asyncValidationTimeout, 
             errorHandler: this.errorHandler,
-            failFast: this.options.failFast ?? false
+            failFast: this.options.failFast ?? false,
+            data: this.data as Record<string, any>
         });
         
         if (!isValid) {
-            // Validation failed, ensure value is in dirtyData
             (this.dirtyData as any)[field] = value;
         } else {
-            // Validation passed, remove from dirtyData
-            if (this.dirtyData[field as keyof T] !== undefined) {
+            if (field in this.dirtyData) {
                 delete this.dirtyData[field as keyof T];
             }
             // Update value in data

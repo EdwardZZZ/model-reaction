@@ -3,30 +3,37 @@ import { ErrorHandler } from './error-handler';
 
 // Unified validation function - supports both synchronous and asynchronous validation
 export async function validateField(options: ValidateFieldOptions): Promise<boolean> {
-    const { schema, value, errors, field, timeout = 5000, errorHandler, failFast = false } = options;
+    const { schema, value, errors, field, timeout = 5000, errorHandler, failFast = false, data } = options;
     if (!schema.validator) return true;
     let isValid = true;
 
     if (failFast) {
-        // Sequential validation for failFast
         for (const validator of schema.validator) {
-            const result = await executeValidator(validator, value, field, timeout, errors, errorHandler);
+            if (validator.condition && data && !validator.condition(data)) {
+                continue;
+            }
+            const result = await executeValidator(validator, value, field, timeout, errors, errorHandler, data);
             if (!result) {
                 isValid = false;
-                break; // Stop on first error
+                break;
             }
         }
     } else {
-        // Parallel validation (original behavior)
-        const validationPromises = schema.validator.map(validator => 
-            executeValidator(validator, value, field, timeout, errors, errorHandler)
+        const applicableValidators = schema.validator.filter(validator => {
+            if (validator.condition && data && !validator.condition(data)) {
+                return false;
+            }
+            return true;
+        });
+
+        const validationPromises = applicableValidators.map(validator => 
+            executeValidator(validator, value, field, timeout, errors, errorHandler, data)
                 .then(res => {
                     if (!res) isValid = false;
                     return res;
                 })
         );
 
-        // Wait for all validations to complete
         await Promise.all(validationPromises);
     }
 
@@ -39,15 +46,15 @@ async function executeValidator(
     field: string,
     timeout: number,
     errors: Record<string, ValidationError[]>,
-    errorHandler: ErrorHandler
+    errorHandler: ErrorHandler,
+    data?: Record<string, any>
 ): Promise<boolean> {
-    // Handle synchronous validation
     if (!validator.validate) {
         return true;
     }
 
     try {
-        const result = validator.validate(value);
+        const result = validator.validate(value, data);
         
         // Check if result is a promise
         if (result instanceof Promise) {
@@ -122,17 +129,27 @@ function handleExceptionError(
     errorHandler.triggerError(appError);
 }
 
-// Deep comparison of two values for equality
-export function deepEqual(a: any, b: any): boolean {
-    // If references are the same, return true directly
+export function deepEqual(a: any, b: any, seen = new WeakSet<object>()): boolean {
     if (a === b) return true;
 
-    // If one is null or not an object, return false
     if (a === null || b === null || typeof a !== 'object' || typeof b !== 'object') {
         return false;
     }
 
-    // Handle arrays
+    if (seen.has(a) || seen.has(b)) return a === b;
+    seen.add(a);
+    seen.add(b);
+
+    if (a instanceof Date && b instanceof Date) {
+        return a.getTime() === b.getTime();
+    }
+    if (a instanceof Date !== b instanceof Date) return false;
+
+    if (a instanceof RegExp && b instanceof RegExp) {
+        return a.source === b.source && a.flags === b.flags;
+    }
+    if (a instanceof RegExp !== b instanceof RegExp) return false;
+
     const isArrayA = Array.isArray(a);
     const isArrayB = Array.isArray(b);
 
@@ -141,19 +158,18 @@ export function deepEqual(a: any, b: any): boolean {
     if (isArrayA && isArrayB) {
         if (a.length !== b.length) return false;
         for (let i = 0; i < a.length; i++) {
-            if (!deepEqual(a[i], b[i])) return false;
+            if (!deepEqual(a[i], b[i], seen)) return false;
         }
         return true;
     }
 
-    // Handle objects
     const keysA = Object.keys(a);
     const keysB = Object.keys(b);
 
     if (keysA.length !== keysB.length) return false;
 
     for (const key of keysA) {
-        if (!Object.prototype.hasOwnProperty.call(b, key) || !deepEqual(a[key], b[key])) {
+        if (!Object.prototype.hasOwnProperty.call(b, key) || !deepEqual(a[key], b[key], seen)) {
             return false;
         }
     }
