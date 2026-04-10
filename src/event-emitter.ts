@@ -26,7 +26,11 @@ export class EventEmitter {
     // Trigger event
     emit(event: string, data: any): void {
         if (this.events[event]) {
-            this.events[event].forEach((callback) => callback(data));
+            this.events[event].forEach((callback) => {
+                try {
+                    callback(data);
+                } catch { /* prevent one listener from breaking others */ }
+            });
         }
     }
 

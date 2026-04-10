@@ -11,6 +11,7 @@ export interface ReactionCallbacks {
 export class ReactionSystem {
     private reactionDeps: Map<string, Array<{ field: string; reaction: Reaction }>> = new Map();
     private reactionTimeouts: Map<Reaction, any> = new Map();
+    private settledResolvers: Array<() => void> = [];
     private schema: Model;
     private options: ModelOptions;
     private callbacks: ReactionCallbacks;
@@ -76,11 +77,20 @@ export class ReactionSystem {
         if (debounceTime > 0) {
             const timeoutId = setTimeout(() => {
                 this.reactionTimeouts.delete(reaction);
-                this.processReaction(field, reaction, reactionStack);
+                this.processReaction(field, reaction, reactionStack).finally(() => {
+                    this.notifySettledIfIdle();
+                });
             }, debounceTime);
             this.reactionTimeouts.set(reaction, timeoutId);
         } else {
             this.processReaction(field, reaction, reactionStack);
+        }
+    }
+
+    private notifySettledIfIdle(): void {
+        if (this.reactionTimeouts.size === 0 && this.settledResolvers.length > 0) {
+            const resolvers = this.settledResolvers.splice(0);
+            resolvers.forEach(resolve => resolve());
         }
     }
 
@@ -127,20 +137,15 @@ export class ReactionSystem {
         });
         this.reactionTimeouts.clear();
         this.reactionDeps.clear();
+        const resolvers = this.settledResolvers.splice(0);
+        resolvers.forEach(resolve => resolve());
     }
 
     public async settled(): Promise<void> {
         if (this.reactionTimeouts.size === 0) return;
         
         return new Promise<void>(resolve => {
-            const check = () => {
-                if (this.reactionTimeouts.size === 0) {
-                    resolve();
-                } else {
-                    setTimeout(check, 10);
-                }
-            };
-            check();
+            this.settledResolvers.push(resolve);
         });
     }
 }

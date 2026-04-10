@@ -17,6 +17,8 @@ export class ModelManager<T extends Record<string, any> = Record<string, any>> {
     private readonly reactionSystem: ReactionSystem;
     private asyncValidationTimeout: number;
     private validationRequestIds: Record<string, number> = {};
+    private requestIdCounter = 0;
+    private disposed = false;
 
     constructor(schema: Model, options?: ModelOptions) {
         this.schema = schema;
@@ -93,7 +95,14 @@ export class ModelManager<T extends Record<string, any> = Record<string, any>> {
     }
 
     // Update: Set field value (async)
+    private ensureNotDisposed(): void {
+        if (this.disposed) {
+            throw new Error('ModelManager has been disposed and cannot be used');
+        }
+    }
+
     async setField<K extends keyof T>(field: K, value: T[K]): Promise<boolean> {
+        this.ensureNotDisposed();
         return this.updateField(field as string, value);
     }
 
@@ -110,7 +119,7 @@ export class ModelManager<T extends Record<string, any> = Record<string, any>> {
         }
 
         // Track request ID for race condition handling
-        const requestId = Date.now() + Math.random();
+        const requestId = ++this.requestIdCounter;
         this.validationRequestIds[field] = requestId;
 
         // Clear previous errors
@@ -179,6 +188,7 @@ export class ModelManager<T extends Record<string, any> = Record<string, any>> {
 
     // Update: Batch update fields (async)
     async setFields(fields: Partial<T>): Promise<boolean> {
+        this.ensureNotDisposed();
         let allValid = true;
         
         // First validate and update each field
@@ -214,6 +224,7 @@ export class ModelManager<T extends Record<string, any> = Record<string, any>> {
 
     // Update: Validate all fields (async)
     async validateAll(): Promise<boolean> {
+        this.ensureNotDisposed();
         // Validate all fields
         const validationPromises = Object.keys(this.schema).map(field => this.validateAndUpdateField(field));
         
@@ -287,10 +298,14 @@ export class ModelManager<T extends Record<string, any> = Record<string, any>> {
 
     // Clean up resources
     dispose(): void {
+        if (this.disposed) return;
+        this.disposed = true;
         this.reactionSystem.dispose();
         this.eventEmitter.clear();
+        this.errorHandler.dispose();
         this.data = {} as T;
         this.dirtyData = {};
         this.validationErrors = {};
+        this.validationRequestIds = {};
     }
 }

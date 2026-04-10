@@ -102,4 +102,10 @@ export class ErrorHandler {
             message: `Circular dependency detected: ${path} -> ${field}`,
         };
     }
+
+    dispose(): void {
+        Object.keys(this.errorListeners).forEach((key) => {
+            this.errorListeners[key as ErrorType] = [];
+        });
+    }
 }
