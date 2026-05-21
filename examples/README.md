@@ -21,6 +21,9 @@ Shows how to listen for events such as field changes and validation completion.
 ### Complex Form Example (complex-form.ts)
 Demonstrates field correlation, dependency validation, and error handling mechanisms in complex form scenarios.
 
+### React Bindings Example (react-bindings.tsx)
+Shows how to use the `model-reaction/react` adapter (`useModelField`, `useModelSelector`) for field-level and selector-level component subscriptions, plus schema type inference. Copy-paste-ready into any React 18+ project (not runnable from the CLI).
+
 ## Running Examples
 
 Use the following commands to run the examples:
@@ -32,3 +35,6 @@ npm run example:async
 npm run example:event
 npm run example:complex
 ```
+
+> The React example (`examples/react-bindings.tsx`) is a standalone snippet —
+> import it from a real React app rather than running it via `ts-node`.

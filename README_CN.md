@@ -182,6 +182,8 @@ createModel<T>(schema: Model<T>, options?: ModelOptions);
 - `dispose(): void`: 销毁模型，清除所有定时器和监听器
 - `on(event: string, callback: (data: any) => void): void`: 订阅事件
 - `off(event: string, callback?: (data: any) => void): void`: 取消订阅事件
+- `subscribeField<K extends keyof T>(field: K, callback: (value: T[K]) => void): () => void`: 订阅单个字段，仅在该字段变化时回调，返回取消订阅函数
+- `subscribe<R>(selector: (data: T) => R, callback: (value: R, prev: R) => void, isEqual?: (a: R, b: R) => boolean): () => void`: 订阅派生值，仅在 selector 结果变化时回调（默认 `Object.is`），返回取消订阅函数
 - `get data(): T`: 获取所有字段值
 - `get validationErrors(): Record<string, ValidationError[]>`: 获取所有验证错误
 
@@ -391,6 +393,66 @@ console.log(model.getField('target')); // ''
 await model.settled();
 
 console.log(model.getField('target')); // 'HELLO'
+```
+
+### React 绑定
+
+包内置了 React 适配层，入口为 `model-reaction/react`，导出了 `useModelField`
+和 `useModelSelector`：将组件订阅到单个字段或派生值，组件仅在被订阅的切片
+真正发生变化时重渲染。
+
+`react` 声明为可选 peer 依赖（`>=18.0.0`），仅当你使用此入口时需要在应用
+里安装。
+
+```tsx
+import { createModel, ValidationRules } from 'model-reaction';
+import { useModelField, useModelSelector } from 'model-reaction/react';
+
+interface Cart {
+    qty: number;
+    price: number;
+    coupon: string;
+    name: string;
+}
+
+const cart = createModel<Cart>({
+    qty:    { type: 'number', default: 1 },
+    price:  { type: 'number', default: 100 },
+    coupon: { type: 'string', default: '' },
+    name:   { type: 'string', default: '', validator: [ValidationRules.required] },
+});
+
+function NameInput() {
+    // 仅在 name 变化时重渲染
+    const name = useModelField(cart, 'name');
+    return <input value={name} onChange={(e) => cart.setField('name', e.target.value)} />;
+}
+
+function Total() {
+    // 仅在 qty * price 变化时重渲染
+    // coupon 或 name 改变不会触发此组件重渲染
+    const total = useModelSelector(cart, (d) => d.qty * d.price);
+    return <span>Total: {total}</span>;
+}
+```
+
+完整示例见 `examples/react-bindings.tsx`。
+
+### Schema 类型推导
+
+`createModel` 支持两种调用方式：
+
+```ts
+// 1. 显式传入类型参数（复杂模型推荐）：
+const user = createModel<User>(userSchema);
+
+// 2. 从 schema 字面量推导（每个 type 加 `as const`）：
+const m = createModel({
+    name: { type: 'string'  as const, default: '' },
+    age:  { type: 'number'  as const, default: 0 },
+    ok:   { type: 'boolean' as const, default: false },
+});
+// m.data 类型为 { name: string; age: number; ok: boolean }
 ```
 
 ## 示例

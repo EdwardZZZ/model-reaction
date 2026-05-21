@@ -181,6 +181,47 @@ export class ModelManager<
     }
 
     // -------------------------------------------------------------------------
+    // Selector / field subscriptions (UI binding layer)
+    // -------------------------------------------------------------------------
+
+    /**
+     * Subscribe to a single field. Callback fires only when that field's
+     * committed value changes. Returns an unsubscribe function.
+     */
+    subscribeField<K extends keyof T>(
+        field: K,
+        callback: (value: T[K]) => void
+    ): () => void {
+        const handler = (e: { field: string; value: any }): void => {
+            if (e.field === field) callback(e.value as T[K]);
+        };
+        this.eventEmitter.on(ModelEvents.FIELD_CHANGE, handler);
+        return () => this.eventEmitter.off(ModelEvents.FIELD_CHANGE, handler);
+    }
+
+    /**
+     * Subscribe to a derived value. Callback fires only when `selector(data)`
+     * changes (compared via `isEqual`, default `Object.is`).
+     */
+    subscribe<R>(
+        selector: (data: T) => R,
+        callback: (value: R, prev: R) => void,
+        isEqual: (a: R, b: R) => boolean = Object.is
+    ): () => void {
+        let prev = selector(this.data);
+        const handler = (): void => {
+            const next = selector(this.data);
+            if (!isEqual(next, prev)) {
+                const old = prev;
+                prev = next;
+                callback(next, old);
+            }
+        };
+        this.eventEmitter.on(ModelEvents.FIELD_CHANGE, handler);
+        return () => this.eventEmitter.off(ModelEvents.FIELD_CHANGE, handler);
+    }
+
+    // -------------------------------------------------------------------------
     // Public read API
     // -------------------------------------------------------------------------
 

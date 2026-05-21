@@ -182,6 +182,8 @@ createModel<T>(schema: Model<T>, options?: ModelOptions);
 - `dispose(): void`: Dispose the model, clear all timers and listeners
 - `on(event: string, callback: (data: any) => void): void`: Subscribe to events
 - `off(event: string, callback?: (data: any) => void): void`: Unsubscribe from events
+- `subscribeField<K extends keyof T>(field: K, callback: (value: T[K]) => void): () => void`: Subscribe to a single field; callback fires only when that field changes. Returns an unsubscribe function.
+- `subscribe<R>(selector: (data: T) => R, callback: (value: R, prev: R) => void, isEqual?: (a: R, b: R) => boolean): () => void`: Subscribe to a derived value; callback fires only when the selected value changes (default `Object.is`). Returns an unsubscribe function.
 - `get data(): T`: Get all field values
 - `get validationErrors(): Record<string, ValidationError[]>`: Get all validation errors
 
@@ -391,6 +393,67 @@ console.log(model.getField('target')); // ''
 await model.settled();
 
 console.log(model.getField('target')); // 'HELLO'
+```
+
+### React Bindings
+
+The package ships a React adapter at `model-reaction/react`. It exposes
+`useModelField` and `useModelSelector`, which subscribe a component to a
+single field or a derived value. Components re-render only when the watched
+slice actually changes.
+
+`react` is declared as an optional peer dependency (`>=18.0.0`); install it
+in your app if you use this entry point.
+
+```tsx
+import { createModel, ValidationRules } from 'model-reaction';
+import { useModelField, useModelSelector } from 'model-reaction/react';
+
+interface Cart {
+    qty: number;
+    price: number;
+    coupon: string;
+    name: string;
+}
+
+const cart = createModel<Cart>({
+    qty:    { type: 'number', default: 1 },
+    price:  { type: 'number', default: 100 },
+    coupon: { type: 'string', default: '' },
+    name:   { type: 'string', default: '', validator: [ValidationRules.required] },
+});
+
+function NameInput() {
+    // Re-renders only when `name` changes.
+    const name = useModelField(cart, 'name');
+    return <input value={name} onChange={(e) => cart.setField('name', e.target.value)} />;
+}
+
+function Total() {
+    // Re-renders only when (qty * price) changes.
+    // Mutating `coupon` or `name` does not trigger a re-render here.
+    const total = useModelSelector(cart, (d) => d.qty * d.price);
+    return <span>Total: {total}</span>;
+}
+```
+
+A complete sample lives at `examples/react-bindings.tsx`.
+
+### Schema Type Inference
+
+`createModel` supports two call styles:
+
+```ts
+// 1. Explicit type argument (recommended for complex models):
+const user = createModel<User>(userSchema);
+
+// 2. Inferred from a schema literal (use `as const` on each `type`):
+const m = createModel({
+    name: { type: 'string'  as const, default: '' },
+    age:  { type: 'number'  as const, default: 0 },
+    ok:   { type: 'boolean' as const, default: false },
+});
+// m.data is typed as { name: string; age: number; ok: boolean }
 ```
 
 ## Examples

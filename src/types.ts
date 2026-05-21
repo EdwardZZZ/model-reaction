@@ -79,6 +79,29 @@ export type Model<T = Record<string, any>> = {
     [K in keyof T]-?: FieldSchema;
 };
 
+/**
+ * Map a `FieldSchema['type']` literal to its TypeScript value type.
+ * Used by `InferModelData` to derive the data shape from a schema.
+ */
+export type InferFieldType<S extends FieldSchema> =
+    S['type'] extends 'string' ? string :
+    S['type'] extends 'number' ? number :
+    S['type'] extends 'boolean' ? boolean :
+    S['type'] extends 'date' ? Date :
+    S['type'] extends 'array' ? any[] :
+    S['type'] extends 'object' ? Record<string, any> :
+    S['type'] extends 'enum' ? any :
+    any;
+
+/**
+ * Derive the model data shape from a schema literal.
+ * Lets `createModel(schema)` infer `T` automatically without an explicit
+ * type argument.
+ */
+export type InferModelData<S extends Record<string, FieldSchema>> = {
+    [K in keyof S]: InferFieldType<S[K]>;
+};
+
 export interface ModelOptions {
     // Async validation timeout in milliseconds
     asyncValidationTimeout?: number;
@@ -109,4 +132,18 @@ export interface ModelReturn<T = Record<string, any>> {
     // Wait for all pending reactions and validations to complete
     settled: () => Promise<void>;
     dispose: () => void;
+    /** Subscribe to a single field; returns an unsubscribe function. */
+    subscribeField: <K extends keyof T>(
+        field: K,
+        callback: (value: T[K]) => void
+    ) => () => void;
+    /**
+     * Subscribe to a derived value via a selector. The callback fires only
+     * when the selected value changes (compared with `isEqual`, default Object.is).
+     */
+    subscribe: <R>(
+        selector: (data: T) => R,
+        callback: (value: R, prev: R) => void,
+        isEqual?: (a: R, b: R) => boolean
+    ) => () => void;
 }

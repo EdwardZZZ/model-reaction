@@ -21,6 +21,9 @@
 ### 复杂表单示例 (complex-form.ts)
 展示复杂表单场景下的字段关联、依赖验证和错误处理机制。
 
+### React 绑定示例 (react-bindings.tsx)
+展示如何使用 `model-reaction/react` 适配层（`useModelField`、`useModelSelector`）实现字段级与 selector 级的组件订阅，以及 Schema 类型推导。可直接拷贝到 React 18+ 项目中使用（不能通过 CLI 直接运行）。
+
 ## 运行示例
 
 使用以下命令运行示例：
@@ -32,3 +35,6 @@ npm run example:async
 npm run example:event
 npm run example:complex
 ```
+
+> React 示例（`examples/react-bindings.tsx`）是独立片段，请在真实的 React
+> 应用中 import，不要用 `ts-node` 直接执行。

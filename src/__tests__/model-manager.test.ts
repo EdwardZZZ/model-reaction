@@ -877,3 +877,117 @@ describe('ModelManager - Type checks', () => {
         manager.dispose();
     });
 });
+
+describe('ModelManager - selector subscriptions', () => {
+    interface Cart {
+        qty: number;
+        price: number;
+        coupon: string;
+    }
+    const cartSchema: Model<Cart> = {
+        qty: { type: 'number', default: 1 },
+        price: { type: 'number', default: 100 },
+        coupon: { type: 'string', default: '' },
+    };
+
+    let model: ModelReturn<Cart>;
+    beforeEach(() => {
+        model = createModel<Cart>(cartSchema);
+    });
+    afterEach(() => model.dispose());
+
+    test('subscribeField fires only for the matching field', async () => {
+        const cb = jest.fn();
+        model.subscribeField('qty', cb);
+
+        await model.setField('coupon', 'X');
+        expect(cb).not.toHaveBeenCalled();
+
+        await model.setField('qty', 5);
+        expect(cb).toHaveBeenCalledTimes(1);
+        expect(cb).toHaveBeenCalledWith(5);
+    });
+
+    test('subscribeField returns an unsubscribe function', async () => {
+        const cb = jest.fn();
+        const unsub = model.subscribeField('qty', cb);
+        unsub();
+        await model.setField('qty', 5);
+        expect(cb).not.toHaveBeenCalled();
+    });
+
+    test('subscribe with selector fires only when derived value changes', async () => {
+        const cb = jest.fn();
+        model.subscribe((d) => d.qty * d.price, cb);
+
+        // Mutating coupon does not change total → no callback
+        await model.setField('coupon', 'SAVE10');
+        expect(cb).not.toHaveBeenCalled();
+
+        // qty changes → total changes
+        await model.setField('qty', 2);
+        expect(cb).toHaveBeenCalledTimes(1);
+        expect(cb).toHaveBeenCalledWith(200, 100);
+
+        // Setting price to its current value should not fire (Object.is)
+        await model.setField('price', 100);
+        expect(cb).toHaveBeenCalledTimes(1);
+    });
+
+    test('subscribe accepts custom isEqual for structural comparison', async () => {
+        interface ListModel {
+            items: string[];
+            filter: string;
+        }
+        const m = createModel<ListModel>({
+            items: { type: 'array', default: ['a', 'ab', 'b'] },
+            filter: { type: 'string', default: '' },
+        });
+
+        const cb = jest.fn();
+        m.subscribe(
+            (d) => d.items.filter((x) => x.includes(d.filter)),
+            cb,
+            (a, b) => a.length === b.length && a.every((v, i) => v === b[i])
+        );
+
+        // Same filtered result → no callback
+        await m.setField('items', ['a', 'ab', 'b']);
+        expect(cb).not.toHaveBeenCalled();
+
+        await m.setField('filter', 'a');
+        expect(cb).toHaveBeenCalledTimes(1);
+        expect(cb.mock.calls[0][0]).toEqual(['a', 'ab']);
+
+        m.dispose();
+    });
+
+    test('subscribe unsubscribe stops further notifications', async () => {
+        const cb = jest.fn();
+        const unsub = model.subscribe((d) => d.qty, cb);
+        await model.setField('qty', 2);
+        expect(cb).toHaveBeenCalledTimes(1);
+        unsub();
+        await model.setField('qty', 3);
+        expect(cb).toHaveBeenCalledTimes(1);
+    });
+});
+
+describe('createModel - schema type inference', () => {
+    test('infers data shape from schema literal without explicit type arg', async () => {
+        const m = createModel({
+            name: { type: 'string' as const, default: 'a' },
+            age: { type: 'number' as const, default: 0 },
+            active: { type: 'boolean' as const, default: false },
+        });
+
+        // Type is inferred from schema; runtime values verify the data shape.
+        expect(m.data.name).toBe('a');
+        expect(m.data.age).toBe(0);
+        expect(m.data.active).toBe(false);
+
+        await m.setField('age', 42);
+        expect(m.getField('age')).toBe(42);
+        m.dispose();
+    });
+});

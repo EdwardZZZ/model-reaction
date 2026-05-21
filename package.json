@@ -1,9 +1,22 @@
 {
   "name": "model-reaction",
   "version": "0.1.2",
-  "main": "dist/index.js",
+  "main": "dist/index.cjs.js",
   "module": "dist/index.esm.js",
   "types": "dist/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/types/index.d.ts",
+      "import": "./dist/index.esm.js",
+      "require": "./dist/index.cjs.js",
+      "default": "./dist/index.js"
+    },
+    "./react": {
+      "types": "./dist/types/react.d.ts",
+      "import": "./dist/react.esm.js",
+      "require": "./dist/react.cjs.js"
+    }
+  },
   "sideEffects": false,
   "files": [
     "dist",
@@ -22,11 +35,12 @@
     "lint:fix": "eslint \"src/**/*.{ts,js}\" --fix",
     "prepublishOnly": "npm run lint && npm test && npm run build",
     "example:basic": "ts-node -O '{\"module\":\"commonjs\",\"moduleResolution\":\"node\"}' examples/basic-usage.ts",
+    "example:react": "tsx examples/react-bindings.tsx",
     "example:reaction": "ts-node -O '{\"module\":\"commonjs\",\"moduleResolution\":\"node\"}' examples/reaction-system.ts",
     "example:async": "ts-node -O '{\"module\":\"commonjs\",\"moduleResolution\":\"node\"}' examples/async-validation.ts",
     "example:event": "ts-node -O '{\"module\":\"commonjs\",\"moduleResolution\":\"node\"}' examples/event-listening.ts",
     "example:complex": "ts-node -O '{\"module\":\"commonjs\",\"moduleResolution\":\"node\"}' examples/complex-form.ts",
-    "examples": "npm run example:basic && npm run example:reaction && npm run example:async && npm run example:event && npm run example:complex"
+    "examples": "npm run example:basic && npm run example:reaction && npm run example:async && npm run example:event && npm run example:complex && npm run example:react"
   },
   "keywords": [
     "model",
@@ -46,6 +60,14 @@
   "bugs": {
     "url": "https://github.com/Umajs/model-reaction/issues"
   },
+  "peerDependencies": {
+    "react": ">=18.0.0"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    }
+  },
   "devDependencies": {
     "@eslint/js": "^9.39.2",
     "@rollup/plugin-alias": "^5.1.1",
@@ -56,16 +78,21 @@
     "@rollup/plugin-typescript": "^12.1.4",
     "@types/jest": "^30.0.0",
     "@types/node": "^24.2.1",
+    "@types/react": "^19.2.15",
+    "@types/react-dom": "^19.2.3",
     "eslint": "^9.39.2",
     "eslint-config-prettier": "^10.1.8",
     "globals": "^16.5.0",
     "jest": "^30.0.5",
     "prettier": "^3.7.4",
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6",
     "rimraf": "^6.0.1",
     "rollup": "^2.79.2",
     "ts-jest": "^29.4.1",
     "ts-node": "^10.9.2",
     "tslib": "^2.8.1",
+    "tsx": "^4.22.3",
     "typescript": "^5.9.2",
     "typescript-eslint": "^8.51.0"
   }
