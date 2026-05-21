@@ -3,16 +3,17 @@ import { ErrorHandler } from './error-handler';
 
 // Unified validation function - supports both synchronous and asynchronous validation
 export async function validateField(options: ValidateFieldOptions): Promise<boolean> {
-    const { schema, value, errors, field, timeout = 5000, errorHandler, failFast = false, data } = options;
+    const { schema, value, errors, field, timeout = 5000, errorHandler, failFast = false, data, isCurrent } = options;
     if (!schema.validator) return true;
     let isValid = true;
+    const ctxData = data || {};
 
     if (failFast) {
         for (const validator of schema.validator) {
-            if (validator.condition && data && !validator.condition(data)) {
+            if (validator.condition && !validator.condition(ctxData)) {
                 continue;
             }
-            const result = await executeValidator(validator, value, field, timeout, errors, errorHandler, data);
+            const result = await executeValidator(validator, value, field, timeout, errors, errorHandler, ctxData, isCurrent);
             if (!result) {
                 isValid = false;
                 break;
@@ -20,14 +21,14 @@ export async function validateField(options: ValidateFieldOptions): Promise<bool
         }
     } else {
         const applicableValidators = schema.validator.filter(validator => {
-            if (validator.condition && data && !validator.condition(data)) {
+            if (validator.condition && !validator.condition(ctxData)) {
                 return false;
             }
             return true;
         });
 
         const validationPromises = applicableValidators.map(validator => 
-            executeValidator(validator, value, field, timeout, errors, errorHandler, data)
+            executeValidator(validator, value, field, timeout, errors, errorHandler, ctxData, isCurrent)
                 .then(res => {
                     if (!res) isValid = false;
                     return res;
@@ -47,7 +48,8 @@ async function executeValidator(
     timeout: number,
     errors: Record<string, ValidationError[]>,
     errorHandler: ErrorHandler,
-    data?: Record<string, any>
+    data?: Record<string, any>,
+    isCurrent?: () => boolean
 ): Promise<boolean> {
     if (!validator.validate) {
         return true;
@@ -68,12 +70,14 @@ async function executeValidator(
                 const res = await Promise.race([result, timeoutPromise]);
                 clearTimeout(timeoutId!);
                 if (!res) {
+                    if (isCurrent && !isCurrent()) return false;
                     handleValidationError(field, validator, validator.message, errors, errorHandler);
                     return false;
                 }
                 return true;
             } catch (error) {
                 clearTimeout(timeoutId!);
+                if (isCurrent && !isCurrent()) return false;
                 const errorMessage = error instanceof Error ? error.message : String(error);
                 handleExceptionError(field, errorMessage, errors, errorHandler);
                 return false;
@@ -81,6 +85,7 @@ async function executeValidator(
         } else {
             // Synchronous validation - no timeout needed
             if (!result) {
+                if (isCurrent && !isCurrent()) return false;
                 handleValidationError(field, validator, validator.message, errors, errorHandler);
                 return false;
             }
@@ -88,6 +93,7 @@ async function executeValidator(
         }
     } catch (error) {
         // Handle synchronous validation errors
+        if (isCurrent && !isCurrent()) return false;
         const errorMessage = error instanceof Error ? error.message : String(error);
         handleExceptionError(field, errorMessage, errors, errorHandler);
         return false;

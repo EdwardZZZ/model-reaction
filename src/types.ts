@@ -26,6 +26,8 @@ export interface ValidateFieldOptions {
     errorHandler: ErrorHandler;
     failFast?: boolean;
     data?: Record<string, any>;
+    // Race-condition guard: returns true if this validation request is still the latest
+    isCurrent?: () => boolean;
 }
 
 export interface AppError {

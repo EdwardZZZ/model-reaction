@@ -152,6 +152,7 @@ export class ModelManager<T extends Record<string, any> = Record<string, any>> {
 
     // Validate single field
     private async validateSingleField(schema: FieldSchema, value: any, field: string): Promise<boolean> {
+        const requestId = this.validationRequestIds[field];
         return validateField({
             schema, 
             value, 
@@ -160,7 +161,8 @@ export class ModelManager<T extends Record<string, any> = Record<string, any>> {
             timeout: this.asyncValidationTimeout, 
             errorHandler: this.errorHandler,
             failFast: this.options.failFast ?? false,
-            data: this.data as Record<string, any>
+            data: this.data as Record<string, any>,
+            isCurrent: () => this.validationRequestIds[field] === requestId
         });
     }
 
@@ -242,8 +244,10 @@ export class ModelManager<T extends Record<string, any> = Record<string, any>> {
     private async validateAndUpdateField(field: string): Promise<boolean> {
         const schema = this.schema[field] as FieldSchema;
         const value = field in this.dirtyData ? this.dirtyData[field] : this.data[field];
+        const requestId = ++this.requestIdCounter;
+        this.validationRequestIds[field] = requestId;
         this.validationErrors[field] = [];
-        
+
         const isValid = await validateField({
             schema, 
             value, 
@@ -252,8 +256,13 @@ export class ModelManager<T extends Record<string, any> = Record<string, any>> {
             timeout: this.asyncValidationTimeout, 
             errorHandler: this.errorHandler,
             failFast: this.options.failFast ?? false,
-            data: this.data as Record<string, any>
+            data: this.data as Record<string, any>,
+            isCurrent: () => this.validationRequestIds[field] === requestId
         });
+
+        if (this.validationRequestIds[field] !== requestId) {
+            return false;
+        }
         
         if (!isValid) {
             (this.dirtyData as any)[field] = value;

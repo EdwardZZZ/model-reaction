@@ -12,6 +12,7 @@ export class ReactionSystem {
     private reactionDeps: Map<string, Array<{ field: string; reaction: Reaction }>> = new Map();
     private reactionTimeouts: Map<Reaction, any> = new Map();
     private settledResolvers: Array<() => void> = [];
+    private pendingReactions = 0;
     private schema: Model;
     private options: ModelOptions;
     private callbacks: ReactionCallbacks;
@@ -77,18 +78,24 @@ export class ReactionSystem {
         if (debounceTime > 0) {
             const timeoutId = setTimeout(() => {
                 this.reactionTimeouts.delete(reaction);
-                this.processReaction(field, reaction, reactionStack).finally(() => {
-                    this.notifySettledIfIdle();
-                });
+                this.runReaction(field, reaction, reactionStack);
             }, debounceTime);
             this.reactionTimeouts.set(reaction, timeoutId);
         } else {
-            this.processReaction(field, reaction, reactionStack);
+            this.runReaction(field, reaction, reactionStack);
         }
     }
 
+    private runReaction(field: string, reaction: Reaction, reactionStack: string[]): void {
+        this.pendingReactions++;
+        this.processReaction(field, reaction, reactionStack).finally(() => {
+            this.pendingReactions--;
+            this.notifySettledIfIdle();
+        });
+    }
+
     private notifySettledIfIdle(): void {
-        if (this.reactionTimeouts.size === 0 && this.settledResolvers.length > 0) {
+        if (this.reactionTimeouts.size === 0 && this.pendingReactions === 0 && this.settledResolvers.length > 0) {
             const resolvers = this.settledResolvers.splice(0);
             resolvers.forEach(resolve => resolve());
         }
@@ -97,13 +104,12 @@ export class ReactionSystem {
     private async processReaction(field: string, reaction: Reaction, reactionStack: string[] = []): Promise<void> {
         try {
             const dependentValues = reaction.fields.reduce((values, f) => {
-                const val = this.callbacks.getValue(f);
-                if (val === undefined) {
+                if (!(f in this.schema)) {
                     const error = this.errorHandler.createDependencyError(field, f);
                     this.errorHandler.triggerError(error);
                     return { ...values, [f]: undefined };
                 }
-                return { ...values, [f]: val };
+                return { ...values, [f]: this.callbacks.getValue(f) };
             }, {} as Record<string, any>);
 
             try {
@@ -142,8 +148,8 @@ export class ReactionSystem {
     }
 
     public async settled(): Promise<void> {
-        if (this.reactionTimeouts.size === 0) return;
-        
+        if (this.reactionTimeouts.size === 0 && this.pendingReactions === 0) return;
+
         return new Promise<void>(resolve => {
             this.settledResolvers.push(resolve);
         });

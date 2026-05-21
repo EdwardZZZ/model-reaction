@@ -129,7 +129,7 @@ const orderFormModel = createModel<OrderForm>({
       computed: (values) => {
         if (!Array.isArray(values.products)) return 0;
         return values.products.reduce((sum, product) => {
-          return sum + (product.price || 0) * (product.quantity || null);
+          return sum + (product.price || 0) * (product.quantity || 0);
         }, 0);
       }
     }
