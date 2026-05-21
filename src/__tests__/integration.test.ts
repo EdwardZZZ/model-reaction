@@ -1257,7 +1257,7 @@ describe('Integration Tests — Full Documentation Scenarios', () => {
     // =========================================================================
     describe('Edge: Rapid consecutive setField (race condition)', () => {
         test('should use the last setField result for async validation', async () => {
-            let resolvers: Array<(v: boolean) => void> = [];
+            const resolvers: Array<(v: boolean) => void> = [];
             const asyncRule = new Rule(
                 'async',
                 'Failed',

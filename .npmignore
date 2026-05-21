@@ -1,7 +1,11 @@
 src
 examples
+coverage
 .vscode
-.eslintrc.js
+.github
+eslint.config.mjs
 jest.config.js
 rollup.config.js
 tsconfig.json
+.prettierrc
+CHANGELOG.md

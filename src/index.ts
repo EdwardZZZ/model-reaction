@@ -1,9 +1,19 @@
-import { Model, ModelOptions, ModelReturn, ErrorType } from './types';
+import { Model, ModelOptions, ModelReturn } from './types';
 import { ModelManager } from './model-manager';
 
 // Export common types and validation rules
-export type { Model, ModelOptions, ModelReturn };
-export { ErrorType };
+export type {
+    Model,
+    ModelOptions,
+    ModelReturn,
+    Validator,
+    Reaction,
+    FieldSchema,
+    ValidationError,
+    AppError,
+    ValidateFieldOptions,
+} from './types';
+export { ErrorType, ModelEvents } from './types';
 export { ValidationRules, Rule } from './validators';
 export { ErrorHandler } from './error-handler';
 

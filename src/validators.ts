@@ -14,7 +14,9 @@ export class Rule {
         this.type = type;
         this.message = message;
         this.validate = validate;
-        this.condition = condition;
+        if (condition) {
+            this.condition = condition;
+        }
     }
 
     // Allow custom error message

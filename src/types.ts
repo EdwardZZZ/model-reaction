@@ -12,6 +12,7 @@ export enum ErrorType {
 export enum ModelEvents {
   VALIDATION_ERROR = 'validation:error',
   REACTION_ERROR = 'reaction:error',
+  DEPENDENCY_ERROR = 'dependency:error',
   FIELD_NOT_FOUND = 'field:not-found',
   FIELD_CHANGE = 'field:change',
   VALIDATION_COMPLETE = 'validation:complete',

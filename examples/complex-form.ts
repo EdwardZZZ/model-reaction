@@ -95,14 +95,9 @@ const orderFormModel = createModel<OrderForm>({
       )
     ],
     reaction: {
+      // computed 返回值即为字段新值，框架会自动写入。无需在 action 中再调用 setField。
       fields: ['userInfo'],
-      computed: (values) => values.userInfo?.email || '',
-      action: (values) => {
-        // 当userInfo.email变化时同步更新email字段
-        if (values.computed !== orderFormModel.getField('email')) {
-          orderFormModel.setField('email', values.computed);
-        }
-      }
+      computed: (values) => values.userInfo?.email || ''
     },
     default: ''
  },
@@ -179,7 +174,7 @@ const orderFormModel = createModel<OrderForm>({
     default: ''
   },
 
-  // 信用卡信息 - 条件验证
+  // 信用卡信息 - 条件验证（使用 condition + data 跨字段 API）
   creditCardInfo: {
     type: 'object',
     default: {},
@@ -188,19 +183,13 @@ const orderFormModel = createModel<OrderForm>({
         'creditCardValidation',
         '信用卡信息无效',
         async (value) => {
-          // 只有当支付方式为信用卡时才验证
-          if (orderFormModel.getField('paymentMethod') !== 'creditCard') return true;
           if (!value || typeof value !== 'object') return false;
-
-          // 验证卡号
           const isCardValid = await validateCreditCard(value.cardNumber || '');
-          // 验证过期日期和CVV
           const isExpiryValid = /^\d{2}\/\d{2}$/.test(value.expiry || '');
           const isCvvValid = /^\d{3,4}$/.test(value.cvv || '');
-
           return isCardValid && isExpiryValid && isCvvValid;
         }
-      )
+      ).when((data) => data.paymentMethod === 'creditCard')
     ]
   }
 }, {
@@ -245,6 +234,9 @@ async function runExample() {
     expiry: '12/25',
     cvv: '123'
   });
+
+  // 等待所有 debounced reaction 与 in-flight 异步校验全部完成
+  await orderFormModel.settled();
 
   // 6. 验证整个表单
   const isValid = await orderFormModel.validateAll();

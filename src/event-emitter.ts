@@ -26,10 +26,19 @@ export class EventEmitter {
     // Trigger event
     emit(event: string, data: any): void {
         if (this.events[event]) {
-            this.events[event].forEach((callback) => {
+            // Snapshot listeners so on/off during dispatch don't affect this iteration
+            const listeners = this.events[event].slice();
+            listeners.forEach((callback) => {
                 try {
                     callback(data);
-                } catch { /* prevent one listener from breaking others */ }
+                } catch (err) {
+                    /* eslint-disable no-console */
+                    console.error(
+                        `[EventEmitter] listener for event "${event}" threw`,
+                        err
+                    );
+                    /* eslint-enable no-console */
+                }
             });
         }
     }

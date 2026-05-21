@@ -76,7 +76,7 @@ describe('Utils', () => {
             const schema: FieldSchema = {
                 type: 'string',
                 validator: [
-                    // @ts-ignore - simulating invalid validator object
+                    // @ts-expect-error - simulating invalid validator object
                     {
                         type: 'custom',
                         message: 'error'
