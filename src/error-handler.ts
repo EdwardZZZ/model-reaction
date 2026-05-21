@@ -14,8 +14,6 @@ export class ErrorHandler {
         [ErrorType.UNKNOWN]: [],
     };
 
-    constructor() {}
-
     // Subscribe to errors
     onError(type: ErrorType, listener: (error: AppError) => void): void {
         if (!this.errorListeners[type]) {

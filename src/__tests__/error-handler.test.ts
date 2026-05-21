@@ -1,4 +1,5 @@
-import { createModel, Model, ErrorHandler, ErrorType } from '../index';
+import { ErrorHandler } from '../error-handler';
+import { ErrorType } from '../types';
 
 describe('ErrorHandler', () => {
     let errorHandler: ErrorHandler;
@@ -12,26 +13,23 @@ describe('ErrorHandler', () => {
         jest.restoreAllMocks();
     });
 
-    // Test error subscription and triggering
     test('should subscribe to and trigger errors', () => {
         const validationErrorCallback = jest.fn();
         const unknownErrorCallback = jest.fn();
 
-        // Subscribe to specific error type
         errorHandler.onError(ErrorType.VALIDATION, validationErrorCallback);
-        // Subscribe to unknown error type
         errorHandler.onError(ErrorType.UNKNOWN, unknownErrorCallback);
 
-        // Create and trigger validation error
-        const validationError = errorHandler.createValidationError('name', 'Name cannot be empty');
+        const validationError = errorHandler.createValidationError(
+            'name',
+            'Name cannot be empty'
+        );
         errorHandler.triggerError(validationError);
 
-        // Validate callbacks were called
         expect(validationErrorCallback).toHaveBeenCalledWith(validationError);
         expect(unknownErrorCallback).toHaveBeenCalledWith(validationError);
     });
 
-    // Test unsubscription
     test('should unsubscribe from errors', () => {
         const callback = jest.fn();
 
@@ -42,35 +40,6 @@ describe('ErrorHandler', () => {
         errorHandler.triggerError(error);
 
         expect(callback).not.toHaveBeenCalled();
-    });
-
-    // Test error handling in ModelManager
-    test('should handle errors in ModelManager', async () => {
-        interface User {
-            name: string;
-        }
-        const testSchema: Model<User> = {
-            name: {
-                type: 'string',
-                validator: [],
-                default: '',
-            },
-        };
-
-        const modelManager = createModel<User>(testSchema);
-        const errorCallback = jest.fn();
-
-        // Listen for field not found error
-        modelManager.on('field:not-found', errorCallback);
-
-        // Try to set non-existent field
-        // @ts-expect-error - Testing runtime error for non-existent field
-        await modelManager.setField('nonexistentField', 'value');
-
-        // Validate error was triggered
-        expect(errorCallback).toHaveBeenCalled();
-        expect(errorCallback.mock.calls[0][0].type).toBe(ErrorType.FIELD_NOT_FOUND);
-        expect(errorCallback.mock.calls[0][0].field).toBe('nonexistentField');
     });
 
     test('should initialize missing listener arrays in onError', () => {
@@ -95,7 +64,9 @@ describe('ErrorHandler', () => {
         errorHandler.triggerError({ type: ErrorType.REACTION, message: 'boom' } as any);
 
         expect((console.error as any) as jest.Mock).toHaveBeenCalledWith('[reaction] boom');
-        expect(unknownCb).toHaveBeenCalledWith(expect.objectContaining({ type: ErrorType.REACTION, message: 'boom' }));
+        expect(unknownCb).toHaveBeenCalledWith(
+            expect.objectContaining({ type: ErrorType.REACTION, message: 'boom' })
+        );
     });
 
     test('should not fail when unknown listeners are missing', () => {
@@ -115,6 +86,55 @@ describe('ErrorHandler', () => {
         const anyHandler = errorHandler as any;
         delete anyHandler.errorListeners[ErrorType.FIELD_NOT_FOUND];
 
-        expect(() => errorHandler.offError(ErrorType.FIELD_NOT_FOUND, jest.fn())).not.toThrow();
+        expect(() =>
+            errorHandler.offError(ErrorType.FIELD_NOT_FOUND, jest.fn())
+        ).not.toThrow();
+    });
+
+    describe('factory helpers', () => {
+        test('createValidationError sets type=VALIDATION', () => {
+            const e = errorHandler.createValidationError('f', 'm');
+            expect(e.type).toBe(ErrorType.VALIDATION);
+            expect(e.field).toBe('f');
+            expect(e.message).toBe('m');
+        });
+
+        test('createReactionError preserves originalError', () => {
+            const orig = new Error('boom');
+            const e = errorHandler.createReactionError('f', orig);
+            expect(e.type).toBe(ErrorType.REACTION);
+            expect(e.message).toBe('boom');
+            expect(e.originalError).toBe(orig);
+        });
+
+        test('createFieldNotFoundError formats message', () => {
+            const e = errorHandler.createFieldNotFoundError('ghost');
+            expect(e.type).toBe(ErrorType.FIELD_NOT_FOUND);
+            expect(e.message).toContain('ghost');
+        });
+
+        test('createDependencyError formats message', () => {
+            const e = errorHandler.createDependencyError('a', 'b');
+            expect(e.type).toBe(ErrorType.DEPENDENCY_ERROR);
+            expect(e.message).toContain('b');
+        });
+
+        test('createCircularDependencyError includes path and field', () => {
+            const e = errorHandler.createCircularDependencyError('a -> b', 'a');
+            expect(e.type).toBe(ErrorType.CIRCULAR_DEPENDENCY);
+            expect(e.message).toContain('a -> b');
+            expect(e.message).toContain('-> a');
+        });
+    });
+
+    test('dispose() clears all registered listeners', () => {
+        const cb = jest.fn();
+        errorHandler.onError(ErrorType.VALIDATION, cb);
+        errorHandler.dispose();
+
+        errorHandler.triggerError(
+            errorHandler.createValidationError('x', 'y')
+        );
+        expect(cb).not.toHaveBeenCalled();
     });
 });

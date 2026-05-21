@@ -1,4 +1,4 @@
-import { createModel, Model, ValidationRules, Rule, ErrorHandler, ErrorType } from '../index';
+import { createModel, ValidationRules, Rule, ErrorHandler, ErrorType } from '../index';
 
 describe('Integration Tests — Full Documentation Scenarios', () => {
     beforeEach(() => {
@@ -1403,7 +1403,7 @@ describe('Integration Tests — Full Documentation Scenarios', () => {
                     type: 'string',
                     validator: [
                         new Rule('asyncFail', 'First fails', async () => false),
-                        new Rule('asyncPass', 'Second', async (v) => {
+                        new Rule('asyncPass', 'Second', async (_v) => {
                             secondValidatorCalled();
                             return true;
                         })

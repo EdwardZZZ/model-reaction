@@ -47,7 +47,7 @@ export class ReactionSystem {
     }
 
     public triggerReactionsForFields(changedFields: string[], reactionStack: string[] = []): void {
-        const debounceTime = this.options.debounceReactions || 0;
+        const debounceTime = this.options.debounceReactions ?? 0;
         const reactionsToTrigger = new Map<Reaction, string>();
 
         changedFields.forEach(changedField => {
@@ -112,14 +112,10 @@ export class ReactionSystem {
                 return { ...values, [f]: this.callbacks.getValue(f) };
             }, {} as Record<string, any>);
 
-            try {
-                const computedValue = reaction.computed(dependentValues);
-                await this.callbacks.setValue(field, computedValue, { reactionStack });
-                if (reaction.action) {
-                    reaction.action({ ...dependentValues, computed: computedValue });
-                }
-            } catch (error) {
-                this.handleReactionError(field, error as Error);
+            const computedValue = reaction.computed(dependentValues);
+            await this.callbacks.setValue(field, computedValue, { reactionStack });
+            if (reaction.action) {
+                reaction.action({ ...dependentValues, computed: computedValue });
             }
         } catch (error) {
             this.handleReactionError(field, error as Error);

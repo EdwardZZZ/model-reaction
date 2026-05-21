@@ -14,7 +14,7 @@ export type {
     ValidateFieldOptions,
 } from './types';
 export { ErrorType, ModelEvents } from './types';
-export { ValidationRules, Rule } from './validators';
+export { ValidationRules, Rule } from './rules';
 export { ErrorHandler } from './error-handler';
 
 // Factory function - create model instance
