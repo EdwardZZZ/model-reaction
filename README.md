@@ -534,3 +534,9 @@ For more examples, please check the files in the `examples/` directory.
 ## Best Practices
 
 Please refer to the best practices guide in the `BEST_PRACTICES.md` file.
+
+## Comparison with Redux & zustand
+
+For a side-by-side comparison with Redux Toolkit and zustand — including
+feature matrix, mental model, code style, and decision tree — see
+[COMPARISON.md](COMPARISON.md).

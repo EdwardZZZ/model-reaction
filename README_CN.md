@@ -533,3 +533,8 @@ const m = createModel({
 ## 最佳实践
 
 请参考 `BEST_PRACTICES.md` 文件中的最佳实践指南。
+
+## 与 Redux、zustand 的对比
+
+与 Redux Toolkit、zustand 的并排对比（含特性矩阵、心智模型、代码风格、
+选型决策树）见 [COMPARISON_CN.md](COMPARISON_CN.md)。
