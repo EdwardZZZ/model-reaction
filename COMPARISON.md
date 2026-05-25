@@ -220,7 +220,82 @@ Real projects often combine them:
 
 ---
 
-## 8. TL;DR
+## 8. Real Benchmarks (model-reaction vs zustand)
+
+### 8.1 Methodology
+
+- Script: [`benchmarks/model-vs-zustand.ts`](benchmarks/model-vs-zustand.ts)
+- Run: `npx tsx benchmarks/model-vs-zustand.ts`
+- Each scenario implements the same semantics twice (zustand vanilla
+  store vs `model-reaction`), runs 10–30 iterations and reports the
+  **median (ms)**. Lower is better.
+- Environment: macOS 26.5 / arm64 / Node v24.13.0 / zustand 4.5.7.
+  Numbers vary across machines and should only be read as **order of
+  magnitude**.
+
+### 8.2 Measured Numbers
+
+| Scenario | zustand | model-reaction | Ratio |
+| --- | --- | --- | --- |
+| Create 1000 instances | 0.04 ms | 4.45 ms | ~118× |
+| 1000 writes (no validation, serial `await`) | 0.04 ms | 0.41 ms | ~10× |
+| 1000 writes (with required validator) | 0.05 ms | 0.67 ms | ~13× |
+| Single-field subscribe + 1000 writes | 0.05 ms | 0.40 ms | ~8× |
+| Field isolation (1000 subscribers / 1000 writes to other field) | 7.34 ms | 7.45 ms | ~1.0× |
+| Derived value (reaction triggered 1000 times) | 0.05 ms | 1.15 ms | ~22× |
+
+### 8.3 How to Read These Numbers
+
+- **Absolute cost is tiny.** A single `setField` is about
+  **0.4–0.7 microseconds**. For human-driven interaction (tens of events
+  per second) the difference is unobservable; the gap only shows in
+  tight 1000-iteration loops.
+- **zustand is the lower bound.** It's a pub/sub + shallow merge with no
+  extra work. The extra time in `model-reaction` buys you: `setField`
+  unified as a Promise (covering sync + async validators), built-in
+  `transform / validator / dirtyData / reactionSystem`, classified
+  errors, and field-level subscriptions.
+- **Creation is 118× slower.** Every model constructs an
+  `EventEmitter`, an `ErrorHandler`, a `ReactionSystem`, and the
+  dependency graph. This is a **one-time cost** — a typical SPA creates
+  one model per form, not 1000 in a loop.
+- **Field isolation matches zustand (~1×).** With 1000 subscribers, the
+  notification cost is essentially the same. This is the hot path for
+  forms ("N field subscribers, a couple of fields written rapidly"),
+  and `model-reaction`'s field-level routing keeps up.
+- **Derived values (22×).** In micro-benchmarks reactions are about an
+  order of magnitude slower than selectors, but **the absolute number is
+  still ~1.15ms for 1000 updates**, plenty for real forms. In return
+  you get centralized dependency declarations, cycle detection, and
+  debouncing.
+- **Validation gap (13×) is expected.** With zustand you'd hand-roll the
+  same logic, so this comparison is really "built-in validation + error
+  state + dirty data" vs "a single inline `if`" — informational only.
+
+### 8.4 When the gap matters
+
+- ❌ **Regular forms** (dozens of fields, human-typing rate): negligible.
+- ❌ **Business domain models** (update rate < 100 Hz): negligible.
+- ⚠️ **High-frequency streaming updates** (charts, chat, collaborative
+  editing, per-frame mass updates): keep raw state in zustand and use
+  `model-reaction` only on the subset that actually needs validation
+  or reactions.
+- ⚠️ **Millions of model instances alive simultaneously**: the creation
+  cost will dominate — but at that scale you usually want a specialized
+  approach (ECS-like) rather than a general state container.
+
+### 8.5 TL;DR
+
+**`model-reaction`'s extra overhead is the steady unit price of having
+domain semantics built in.** Single operations stay sub-millisecond,
+the gap with zustand grows linearly (not catastrophically), and once
+you actually need schema + validation + reactions + field
+subscriptions, hand-building the equivalent on top of zustand quickly
+costs more in lines of code and mental load than the runtime delta.
+
+---
+
+## 9. TL;DR
 
 - **Want discipline and ecosystem?** → Redux
 - **Want lightweight and fast?** → zustand
