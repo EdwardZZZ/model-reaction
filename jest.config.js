@@ -4,5 +4,8 @@ module.exports = {
   testEnvironment: 'node',
   clearMocks: true,
   restoreMocks: true,
-  testMatch: ['<rootDir>/src/**/__tests__/**/*.test.ts'],
+  testMatch: ['<rootDir>/src/**/__tests__/**/*.test.{ts,tsx}'],
+  transform: {
+    '^.+\\.tsx?$': ['ts-jest', { tsconfig: { jsx: 'react-jsx' } }],
+  },
 };

@@ -9,6 +9,7 @@
  * | ------- | ---- |
  * | 7.1 — Pick the right hook                   | see `examples/react-bindings.tsx` (covers `useModelField`, `useModelFields`, `useModelSelector`, `useModelFieldState`) |
  * | 7.2 — Stable selector references            | `7-2-stable-selector.tsx`     |
+ * | 7.2bis — `useModelComputed` (ref-locked)    | `7-2bis-model-computed.tsx`   |
  * | 7.3 — Avoid prop drilling with `<ModelProvider>` | `7-3-model-provider.tsx`  |
  * | 7.4 — `<Field>` for declarative inputs      | `7-4-field-render-prop.tsx`   |
  * | 7.5 — Touched semantics                     | `7-5-touched.tsx`             |
@@ -19,6 +20,7 @@
  * | 7.10.5 — Code-style cheat sheet             | `7-10-5-cheat-sheet.ts`       |
  */
 export * from './7-2-stable-selector';
+export * from './7-2bis-model-computed';
 export * from './7-3-model-provider';
 export * from './7-4-field-render-prop';
 export * from './7-5-touched';

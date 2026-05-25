@@ -117,6 +117,76 @@ export function useModelSelector<T extends Record<string, any>, R>(
 }
 
 /**
+ * Same shape as {@link useModelSelector}, but with **ref-locked** selector
+ * semantics: the `selector` and `isEqual` references are stored in refs
+ * that are refreshed on every render, so changing them does **not** tear
+ * down and recreate the underlying subscription.
+ *
+ * Use this variant when:
+ *   - The selector is an inline arrow function and you don't want to pay
+ *     for `useCallback` ceremony.
+ *   - The selector closes over per-render variables (e.g. `id`, `index`)
+ *     and you want those updates to be reflected without resubscribing.
+ *
+ * Trade-offs vs. {@link useModelSelector}:
+ *   - The selector is re-run on every render (via `getSnapshot`), so keep
+ *     it cheap — heavy selectors should still memoise inputs.
+ *   - Notifications fire on any field change; the equality check happens
+ *     in `getSnapshot` instead of inside the model subscription, so the
+ *     model layer can't dedupe before reaching React.
+ *   - Ref writes happen during render. This is the same pattern used by
+ *     zustand and is concurrent-safe, but keep selectors pure.
+ *
+ * ```tsx
+ * function Row({ id }: { id: string }) {
+ *     // No useCallback needed; closure variable `id` always reflects the
+ *     // latest render.
+ *     const item = useModelComputed(cart, (d) => d.items[id]);
+ *     return <span>{item?.name}</span>;
+ * }
+ * ```
+ */
+export function useModelComputed<T extends Record<string, any>, R>(
+    model: ModelReturn<T>,
+    selector: (data: T) => R,
+    isEqual: (a: R, b: R) => boolean = Object.is
+): R {
+    // Refresh refs every render so closure-captured variables stay current
+    // without forcing a resubscribe.
+    const selectorRef = useRef(selector);
+    const isEqualRef = useRef(isEqual);
+    selectorRef.current = selector;
+    isEqualRef.current = isEqual;
+
+    // Cache the last returned reference so `useSyncExternalStore` sees a
+    // stable value when the equality check passes. Using a one-slot box
+    // lets us distinguish "uninitialized" from `undefined as R`.
+    const cacheRef = useRef<{ value: R } | null>(null);
+
+    const getSnapshot = useCallback((): R => {
+        const next = selectorRef.current(model.data);
+        const cached = cacheRef.current;
+        if (cached === null || !isEqualRef.current(cached.value, next)) {
+            cacheRef.current = { value: next };
+            return next;
+        }
+        return cached.value;
+    }, [model]);
+
+    const subscribe = useCallback(
+        (notify: () => void) => {
+            model.on(ModelEvents.FIELD_CHANGE, notify);
+            return () => {
+                model.off(ModelEvents.FIELD_CHANGE, notify);
+            };
+        },
+        [model]
+    );
+
+    return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+}
+
+/**
  * Subscribe a component to a set of fields and receive them as an object.
  * Re-renders only when any of the listed fields shallowly changes.
  *

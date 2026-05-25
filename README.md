@@ -404,7 +404,8 @@ only when its watched slice actually changes:
 | Export | Kind | Purpose |
 | --- | --- | --- |
 | `useModelField(model, field)` | hook | Subscribe to a single field. |
-| `useModelSelector(model, selector, isEqual?)` | hook | Subscribe to a derived value. |
+| `useModelSelector(model, selector, isEqual?)` | hook | Subscribe to a derived value (selector reference is **part of the subscription** — wrap it in `useCallback`). |
+| `useModelComputed(model, selector, isEqual?)` | hook | Same shape as `useModelSelector`, but selector / `isEqual` are stored in refs and refreshed every render — inline arrows and per-render closure variables (`id`, `index`, …) work without `useCallback`. |
 | `useModelFields(model, fields)` | hook | Subscribe to several fields at once (shallow-compared). |
 | `useModelFieldState(model, field)` | hook | `[value, setValue, meta, helpers]` form-style binding with `error / dirty / touched / validating`. |
 | `shallow` | function | Shallow equality helper for object/array selectors. |
@@ -509,6 +510,52 @@ function Snapshot() {
 ```
 
 A complete sample lives at `examples/react-bindings.tsx`.
+
+#### `useModelSelector` vs `useModelComputed`
+
+Both hooks return a derived value with custom equality, but they treat
+the `selector` reference very differently:
+
+| Aspect | `useModelSelector` | `useModelComputed` |
+| --- | --- | --- |
+| Selector identity | Captured in the `subscribe` deps. A new reference triggers **unsubscribe + resubscribe + extra render**. | Stored in a ref refreshed every render. Reference changes are **free**. |
+| Recommended pattern | Wrap the selector in `useCallback` (or hoist it to module scope). | Inline arrow functions are fine. |
+| Per-render closure variables | Need to be added to `useCallback` deps (otherwise stale). | Always reflect the latest render automatically. |
+| Equality check site | Inside the model subscription — model can dedupe before reaching React. | Inside `getSnapshot` — model fans out every change, hook caches/dedupes per render. |
+| Selector cost | Runs once per **commit**. | Runs once per **render** (because `getSnapshot` is called on every render). |
+| Best for | Stable, hot-path derived values where the selector body is fixed. | Selectors that depend on per-render variables (`id`, `index`, paging cursor, …) or short-lived components where ceremony matters more than per-render selector cost. |
+
+```tsx
+// useModelSelector — selector must be stable.
+const selectTotal = useCallback((d: Cart) => d.qty * d.price, []);
+const total = useModelSelector(cart, selectTotal);
+
+// useModelComputed — inline arrow is fine, and `id` stays fresh.
+function Row({ id }: { id: string }) {
+    const item = useModelComputed(cart, (d) => d.items[id]);
+    return <span>{item?.name}</span>;
+}
+```
+
+Rule of thumb: prefer `useModelSelector` for "global" derivations, switch
+to `useModelComputed` whenever the selector closes over a value that
+changes between renders.
+
+##### Decision tree
+
+```
+Does the selector close over a value that changes between renders?
+├── Yes  →  useModelComputed
+└── No   →  Is the selector body expensive to run?
+            ├── Yes  →  useModelSelector + stable reference
+            └── No   →  Are you willing to write useCallback?
+                        ├── Yes  →  useModelSelector
+                        └── No   →  useModelComputed
+```
+
+> One-liner: when the selector body "stays put" reach for
+> `useModelSelector`; when it "follows props/state" reach for
+> `useModelComputed`.
 
 ### Schema Type Inference
 

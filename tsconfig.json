@@ -10,6 +10,7 @@
     "module": "esnext",
     "moduleResolution": "bundler",
     "target": "esnext",
+    "jsx": "react-jsx",
     "types": ["jest"],
     // For nodejs:
     // "lib": ["esnext"],
@@ -42,5 +43,5 @@
     "skipLibCheck": true,
   },
   "include": ["src/**/*"],
-  "exclude": ["node_modules", "**/*.spec.ts", "**/*.test.ts"],
+  "exclude": ["node_modules", "**/*.spec.ts", "**/*.test.ts", "**/*.test.tsx"],
 }

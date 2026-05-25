@@ -403,7 +403,8 @@ console.log(model.getField('target')); // 'HELLO'
 | 导出 | 类型 | 用途 |
 | --- | --- | --- |
 | `useModelField(model, field)` | hook | 订阅单个字段 |
-| `useModelSelector(model, selector, isEqual?)` | hook | 订阅派生值 |
+| `useModelSelector(model, selector, isEqual?)` | hook | 订阅派生值（selector 引用是订阅的一部分，请用 `useCallback` 锁定） |
+| `useModelComputed(model, selector, isEqual?)` | hook | 与 `useModelSelector` 形参相同，但 selector / `isEqual` 通过 ref 每次渲染刷新——内联箭头函数与渲染期闭包变量（`id`、`index` 等）无需 `useCallback` |
 | `useModelFields(model, fields)` | hook | 一次订阅多个字段（浅比较） |
 | `useModelFieldState(model, field)` | hook | `[value, setValue, meta, helpers]` 一体化表单绑定，含 `error / dirty / touched / validating` |
 | `shallow` | 函数 | 用于对象/数组选择器的浅比较工具 |
@@ -508,6 +509,49 @@ function Snapshot() {
 ```
 
 完整示例见 `examples/react-bindings.tsx`。
+
+#### `useModelSelector` vs `useModelComputed`
+
+两者都返回派生值并支持自定义 `isEqual`，差异完全在 `selector` 引用的处理方式：
+
+| 维度 | `useModelSelector` | `useModelComputed` |
+| --- | --- | --- |
+| selector 引用 | 进入 `subscribe` 依赖；引用一旦改变即触发**取消订阅 + 重新订阅 + 多渲染一帧** | 写入 ref，每次渲染刷新；引用变化**完全免费** |
+| 推荐写法 | 用 `useCallback` 锁定（或提到模块作用域） | 直接写内联箭头函数 |
+| 渲染期闭包变量 | 必须加进 `useCallback` 依赖（否则读到旧值） | 始终是最新一次渲染的闭包 |
+| 等值比较位置 | 在模型订阅里——模型层可在到达 React 前去重 | 在 `getSnapshot` 里——模型层全量推送，hook 自己缓存/去重 |
+| selector 调用频次 | 每次 **commit** 跑一次 | 每次 **render** 跑一次（`getSnapshot` 在每次渲染都会调用） |
+| 适用场景 | 派生体固定、稳定路径上的派生值 | selector 依赖渲染期变量（`id`、`index`、分页游标…），或追求少写 `useCallback` 的短生命周期组件 |
+
+```tsx
+// useModelSelector —— selector 引用必须稳定。
+const selectTotal = useCallback((d: Cart) => d.qty * d.price, []);
+const total = useModelSelector(cart, selectTotal);
+
+// useModelComputed —— 内联箭头即可，且 `id` 始终最新。
+function Row({ id }: { id: string }) {
+    const item = useModelComputed(cart, (d) => d.items[id]);
+    return <span>{item?.name}</span>;
+}
+```
+
+经验法则：默认用 `useModelSelector`；只要 selector 闭包了渲染期会变的
+变量，就改用 `useModelComputed`。
+
+##### 选择决策树
+
+```
+selector 闭包了渲染期会变的变量吗？
+├── 是  →  useModelComputed
+└── 否  →  selector 计算开销重吗？
+            ├── 是  →  useModelSelector + 稳定引用
+            └── 否  →  你愿意写 useCallback 吗？
+                        ├── 愿意  →  useModelSelector
+                        └── 不愿  →  useModelComputed
+```
+
+> 一句话总结：派生体「站着不动」就用 `useModelSelector`；派生体
+> 「跟着 props/state 跑」就用 `useModelComputed`。
 
 ### Schema 类型推导
 
