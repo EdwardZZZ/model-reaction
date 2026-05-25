@@ -397,17 +397,36 @@ console.log(model.getField('target')); // 'HELLO'
 
 ### React Bindings
 
-The package ships a React adapter at `model-reaction/react`. It exposes
-`useModelField` and `useModelSelector`, which subscribe a component to a
-single field or a derived value. Components re-render only when the watched
-slice actually changes.
+The package ships a React adapter at `model-reaction/react`. It exposes a
+small set of hooks and components designed so each subscriber re-renders
+only when its watched slice actually changes:
+
+| Export | Kind | Purpose |
+| --- | --- | --- |
+| `useModelField(model, field)` | hook | Subscribe to a single field. |
+| `useModelSelector(model, selector, isEqual?)` | hook | Subscribe to a derived value. |
+| `useModelFields(model, fields)` | hook | Subscribe to several fields at once (shallow-compared). |
+| `useModelFieldState(model, field)` | hook | `[value, setValue, meta, helpers]` form-style binding with `error / dirty / touched / validating`. |
+| `shallow` | function | Shallow equality helper for object/array selectors. |
+| `<ModelProvider model>` | component | Provide a model via context. |
+| `useModel<T>()` | hook | Read the model from the nearest provider. |
+| `<Field name>` | component | Render-prop binding to a single field; consumes `<ModelProvider>` automatically. |
 
 `react` is declared as an optional peer dependency (`>=18.0.0`); install it
 in your app if you use this entry point.
 
 ```tsx
 import { createModel, ValidationRules } from 'model-reaction';
-import { useModelField, useModelSelector } from 'model-reaction/react';
+import {
+    Field,
+    ModelProvider,
+    shallow,
+    useModel,
+    useModelField,
+    useModelFields,
+    useModelFieldState,
+    useModelSelector,
+} from 'model-reaction/react';
 
 interface Cart {
     qty: number;
@@ -423,17 +442,69 @@ const cart = createModel<Cart>({
     name:   { type: 'string', default: '', validator: [ValidationRules.required] },
 });
 
+// 1. Single-field hook.
 function NameInput() {
-    // Re-renders only when `name` changes.
     const name = useModelField(cart, 'name');
     return <input value={name} onChange={(e) => cart.setField('name', e.target.value)} />;
 }
 
+// 2. Selector hook.
 function Total() {
-    // Re-renders only when (qty * price) changes.
-    // Mutating `coupon` or `name` does not trigger a re-render here.
     const total = useModelSelector(cart, (d) => d.qty * d.price);
     return <span>Total: {total}</span>;
+}
+
+// 3. Multi-field hook (shallow-compared).
+function PriceLine() {
+    const { qty, price } = useModelFields(cart, ['qty', 'price']);
+    return <span>{qty} x {price}</span>;
+}
+
+// 4. All-in-one form binding.
+function CouponInput() {
+    const [coupon, setCoupon, meta, helpers] = useModelFieldState(cart, 'coupon');
+    return (
+        <label>
+            <input
+                value={coupon}
+                onChange={(e) => setCoupon(e.target.value)}
+                onBlur={() => helpers.setTouched()}
+                disabled={meta.validating}
+            />
+            {meta.touched && meta.error && <span style={{ color: 'red' }}>{meta.error}</span>}
+        </label>
+    );
+}
+
+// 5. Provider + render-prop Field — no prop drilling.
+function CartApp() {
+    return (
+        <ModelProvider model={cart}>
+            <Field<Cart, 'name'> name="name">
+                {({ value, setValue, meta }) => (
+                    <input
+                        value={value}
+                        onChange={(e) => setValue(e.target.value)}
+                        aria-invalid={!!meta.error}
+                    />
+                )}
+            </Field>
+            <Total />
+            <PriceLine />
+            <CouponInput />
+        </ModelProvider>
+    );
+}
+
+// 6. Custom selectors that build fresh containers — pair with `shallow`.
+function Snapshot() {
+    const m = useModel<Cart>();
+    const slice = useModelSelector(
+        m,
+        (d) => ({ qty: d.qty, price: d.price }),
+        shallow
+    );
+    return <span>{slice.qty * slice.price}</span>;
 }
 ```
 

@@ -19,7 +19,16 @@ import * as React from 'react';
 // `React` is required for the JSX runtime even if not directly referenced.
 void React;
 import { createModel, ValidationRules } from '../src/index';
-import { useModelField, useModelSelector } from '../src/react';
+import {
+    Field,
+    ModelProvider,
+    shallow,
+    useModel,
+    useModelField,
+    useModelFields,
+    useModelFieldState,
+    useModelSelector,
+} from '../src/react';
 
 // 1. Define the model. Use an explicit interface for the cleanest types.
 interface Cart {
@@ -91,16 +100,77 @@ function ValidationSummary() {
 }
 
 // 7. Top-level app — demonstrates that each child re-renders independently.
+//    Wrapped in `<ModelProvider>` so `<Field>` / `useModel()` work without
+//    prop-drilling.
 export function CartApp() {
     return (
-        <div>
-            <NameInput />
-            <QtyInput />
-            <Total />
-            <CouponBadge />
-            <ValidationSummary />
-        </div>
+        <ModelProvider model={cart}>
+            <div>
+                <NameInput />
+                <QtyInput />
+                <Total />
+                <CouponBadge />
+                <ValidationSummary />
+                <Summary />
+                <NameField />
+            </div>
+        </ModelProvider>
     );
+}
+
+// 7a. Provider-aware component using `useModel()`.
+function Summary() {
+    const m = useModel<Cart>();
+    // `useModelFields` re-renders only when one of these listed fields changes.
+    const { qty, price } = useModelFields(m, ['qty', 'price']);
+    return <div>Snapshot: qty={qty} price={price}</div>;
+}
+
+// 7b. `<Field>` render-prop variant (consumes the provider context).
+function NameField() {
+    return (
+        <Field<Cart, 'name'> name="name">
+            {({ value, setValue, meta, helpers }) => (
+                <label>
+                    <input
+                        value={value}
+                        onChange={(e) => setValue(e.target.value)}
+                        onBlur={() => helpers.setTouched()}
+                    />
+                    {meta.touched && meta.error ? (
+                        <span style={{ color: 'red' }}>{meta.error}</span>
+                    ) : null}
+                </label>
+            )}
+        </Field>
+    );
+}
+
+// 7c. `useModelFieldState` example: form-style binding in a single hook.
+//     Demonstrates `validating`, `dirty`, `touched`, `error` metadata.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+function CouponInput() {
+    const [coupon, setCoupon, meta] = useModelFieldState(cart, 'coupon');
+    return (
+        <input
+            data-validating={meta.validating}
+            data-dirty={meta.dirty}
+            value={coupon}
+            onChange={(e) => setCoupon(e.target.value)}
+        />
+    );
+}
+
+// 7d. `shallow` is exported for selectors that build fresh containers.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+function ShallowSelectorDemo() {
+    const m = useModel<Cart>();
+    const slice = useModelSelector(
+        m,
+        (d) => ({ qty: d.qty, price: d.price }),
+        shallow
+    );
+    return <span>Slice: {slice.qty * slice.price}</span>;
 }
 
 // 8. Schema-inferred types (no explicit interface).

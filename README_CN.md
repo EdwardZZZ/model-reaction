@@ -397,16 +397,35 @@ console.log(model.getField('target')); // 'HELLO'
 
 ### React 绑定
 
-包内置了 React 适配层，入口为 `model-reaction/react`，导出了 `useModelField`
-和 `useModelSelector`：将组件订阅到单个字段或派生值，组件仅在被订阅的切片
-真正发生变化时重渲染。
+包内置了 React 适配层，入口为 `model-reaction/react`，提供一组 hook 与
+组件，每个订阅者只在自己关心的切片真正变化时重渲染：
+
+| 导出 | 类型 | 用途 |
+| --- | --- | --- |
+| `useModelField(model, field)` | hook | 订阅单个字段 |
+| `useModelSelector(model, selector, isEqual?)` | hook | 订阅派生值 |
+| `useModelFields(model, fields)` | hook | 一次订阅多个字段（浅比较） |
+| `useModelFieldState(model, field)` | hook | `[value, setValue, meta, helpers]` 一体化表单绑定，含 `error / dirty / touched / validating` |
+| `shallow` | 函数 | 用于对象/数组选择器的浅比较工具 |
+| `<ModelProvider model>` | 组件 | 通过 Context 注入 model |
+| `useModel<T>()` | hook | 读取最近 Provider 中的 model |
+| `<Field name>` | 组件 | 单字段 render-prop 绑定，自动消费 `<ModelProvider>` |
 
 `react` 声明为可选 peer 依赖（`>=18.0.0`），仅当你使用此入口时需要在应用
 里安装。
 
 ```tsx
 import { createModel, ValidationRules } from 'model-reaction';
-import { useModelField, useModelSelector } from 'model-reaction/react';
+import {
+    Field,
+    ModelProvider,
+    shallow,
+    useModel,
+    useModelField,
+    useModelFields,
+    useModelFieldState,
+    useModelSelector,
+} from 'model-reaction/react';
 
 interface Cart {
     qty: number;
@@ -422,17 +441,69 @@ const cart = createModel<Cart>({
     name:   { type: 'string', default: '', validator: [ValidationRules.required] },
 });
 
+// 1. 单字段 hook
 function NameInput() {
-    // 仅在 name 变化时重渲染
     const name = useModelField(cart, 'name');
     return <input value={name} onChange={(e) => cart.setField('name', e.target.value)} />;
 }
 
+// 2. 派生值 hook
 function Total() {
-    // 仅在 qty * price 变化时重渲染
-    // coupon 或 name 改变不会触发此组件重渲染
     const total = useModelSelector(cart, (d) => d.qty * d.price);
     return <span>Total: {total}</span>;
+}
+
+// 3. 多字段 hook（浅比较）
+function PriceLine() {
+    const { qty, price } = useModelFields(cart, ['qty', 'price']);
+    return <span>{qty} x {price}</span>;
+}
+
+// 4. 一体化表单绑定
+function CouponInput() {
+    const [coupon, setCoupon, meta, helpers] = useModelFieldState(cart, 'coupon');
+    return (
+        <label>
+            <input
+                value={coupon}
+                onChange={(e) => setCoupon(e.target.value)}
+                onBlur={() => helpers.setTouched()}
+                disabled={meta.validating}
+            />
+            {meta.touched && meta.error && <span style={{ color: 'red' }}>{meta.error}</span>}
+        </label>
+    );
+}
+
+// 5. Provider + render-prop Field —— 免 prop 透传
+function CartApp() {
+    return (
+        <ModelProvider model={cart}>
+            <Field<Cart, 'name'> name="name">
+                {({ value, setValue, meta }) => (
+                    <input
+                        value={value}
+                        onChange={(e) => setValue(e.target.value)}
+                        aria-invalid={!!meta.error}
+                    />
+                )}
+            </Field>
+            <Total />
+            <PriceLine />
+            <CouponInput />
+        </ModelProvider>
+    );
+}
+
+// 6. 自定义选择器返回新对象时，请配合 `shallow`
+function Snapshot() {
+    const m = useModel<Cart>();
+    const slice = useModelSelector(
+        m,
+        (d) => ({ qty: d.qty, price: d.price }),
+        shallow
+    );
+    return <span>{slice.qty * slice.price}</span>;
 }
 ```
 
