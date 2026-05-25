@@ -221,3 +221,112 @@ The hooks rely on `useSyncExternalStore`, so they are concurrent-safe.
 For SSR, treat the model as request-scoped: create it inside the request
 handler, render with `renderToString`, then `dispose()`. Do not share a
 single model instance across requests.
+
+### 7.10 Choosing between model-reaction, zustand and Redux
+
+`model-reaction` is a **model layer**, while zustand and Redux are
+**state containers**. They live at different abstraction levels and are
+not mutually exclusive — see [COMPARISON.md](COMPARISON.md) for the full
+matrix. Quick guidance for React projects:
+
+| Need | Recommended |
+| --- | --- |
+| Form / domain entity with validation, reactions, dirty-data | **model-reaction** |
+| App-wide UI state, routing flags, theme, draft id | **zustand** (or Redux) |
+| Strict auditing, time-travel, complex global state machine | **Redux Toolkit** |
+| Form-heavy app | **model-reaction** alone with `<ModelProvider>` |
+
+#### 7.10.1 Don't reach for `useState` for form fields
+
+If a form has more than two coupled fields (e.g. validation, derived
+totals, async checks), prefer `model-reaction` over `useState` chains —
+you'll otherwise re-implement validation, dirty-data and effects by hand.
+
+#### 7.10.2 Combine with zustand for global state
+
+```tsx
+// Global UI store — zustand
+const useUI = create<{ drawerOpen: boolean; toggle: () => void }>((set) => ({
+    drawerOpen: false,
+    toggle: () => set((s) => ({ drawerOpen: !s.drawerOpen })),
+}));
+
+// Domain form — model-reaction
+const userModel = createModel<User>({
+    name: { type: 'string', default: '', validator: [ValidationRules.required] },
+    email: { type: 'string', default: '', validator: [ValidationRules.email] },
+});
+
+function UserDrawer() {
+    const open = useUI((s) => s.drawerOpen);
+    if (!open) return null;
+    return (
+        <ModelProvider model={userModel}>
+            <UserForm />
+        </ModelProvider>
+    );
+}
+```
+
+Rule of thumb: zustand owns *application* state (open / closed, current
+user id, theme); `model-reaction` owns *entity* state (the user record
+being edited, including its rules).
+
+#### 7.10.3 Combine with Redux Toolkit
+
+In Redux apps, keep RTK as the application skeleton and drop a
+`model-reaction` model wherever you would otherwise spawn a slice purely
+for an editor / wizard / form:
+
+```tsx
+function EditUserPage() {
+    const userId = useSelector(selectCurrentUserId);
+    const dispatch = useDispatch();
+    const model = useMemo(() => createModel<User>(userSchema), []);
+
+    useEffect(() => () => model.dispose(), [model]);
+
+    async function onSave() {
+        if (!(await model.validateAll())) return;
+        await model.settled();
+        dispatch(saveUser(model.data));
+    }
+
+    return (
+        <ModelProvider model={model}>
+            <UserForm onSubmit={onSave} />
+        </ModelProvider>
+    );
+}
+```
+
+This avoids the "action / reducer per field" problem while keeping the
+rest of the app on Redux.
+
+#### 7.10.4 Things to migrate **off** of `model-reaction`
+
+`model-reaction` deliberately stays at the model layer. Don't try to use
+it for:
+
+- Global UI flags (modals, theme, locale) → use zustand / Redux.
+- Cross-route caches / query results → use TanStack Query / RTK Query.
+- Multi-store orchestration (saga-like flows) → use Redux middleware.
+
+#### 7.10.5 Code-style cheat sheet
+
+The same `name: required` requirement, three styles:
+
+```ts
+// Redux Toolkit
+createSlice({ /* setName reducer + manual errors */ });
+// zustand
+create((set) => ({ name: '', errors: {}, setName: (v) => /* manual */ }));
+// model-reaction
+createModel<{ name: string }>({
+    name: { type: 'string', default: '', validator: [ValidationRules.required] },
+});
+```
+
+With `model-reaction`, validators, error state, dirty tracking and field
+subscriptions are built-in; with the other two, you'd implement each
+piece by hand.

@@ -214,3 +214,108 @@ useEffect(() => {
 所有 hook 基于 `useSyncExternalStore`，并发渲染下安全。SSR 场景下把
 model 当作请求作用域：在请求处理函数里 `createModel`，`renderToString`
 完成后 `dispose()`，**不要**跨请求复用同一个 model 实例。
+
+### 7.10 与 zustand、Redux 的取舍
+
+`model-reaction` 是**模型层（model layer）**，而 zustand 与 Redux 是
+**状态容器（state container）**，它们处于不同抽象层级，**并不互斥**。
+完整对比表见 [COMPARISON_CN.md](COMPARISON_CN.md)。React 项目中的速查
+建议：
+
+| 需求 | 推荐 |
+| --- | --- |
+| 含校验、反应、脏数据的表单 / 领域实体 | **model-reaction** |
+| 全局 UI 状态、路由旗标、主题、草稿 id | **zustand**（或 Redux） |
+| 强审计、时间旅行、复杂全局状态机 | **Redux Toolkit** |
+| 表单密集型应用 | **model-reaction** 单独配 `<ModelProvider>` |
+
+#### 7.10.1 不要为了表单字段而堆 `useState`
+
+如果一个表单存在两个以上互相联动的字段（校验、派生总计、异步唯一性
+检查等），直接用 `model-reaction` 比一连串 `useState` 更合适，否则你会
+手写一遍校验、脏数据与副作用。
+
+#### 7.10.2 与 zustand 组合管全局状态
+
+```tsx
+// 全局 UI store —— zustand
+const useUI = create<{ drawerOpen: boolean; toggle: () => void }>((set) => ({
+    drawerOpen: false,
+    toggle: () => set((s) => ({ drawerOpen: !s.drawerOpen })),
+}));
+
+// 业务表单 —— model-reaction
+const userModel = createModel<User>({
+    name: { type: 'string', default: '', validator: [ValidationRules.required] },
+    email: { type: 'string', default: '', validator: [ValidationRules.email] },
+});
+
+function UserDrawer() {
+    const open = useUI((s) => s.drawerOpen);
+    if (!open) return null;
+    return (
+        <ModelProvider model={userModel}>
+            <UserForm />
+        </ModelProvider>
+    );
+}
+```
+
+经验法则：zustand 管**应用状态**（开/关、当前用户 id、主题）；
+`model-reaction` 管**实体状态**（正在编辑的用户记录及其规则）。
+
+#### 7.10.3 与 Redux Toolkit 组合
+
+在 Redux 项目里，把 RTK 当应用骨架，凡是为了一个编辑器 / 向导 / 表单
+单独写一个 slice 的场景，都换成 `model-reaction`：
+
+```tsx
+function EditUserPage() {
+    const userId = useSelector(selectCurrentUserId);
+    const dispatch = useDispatch();
+    const model = useMemo(() => createModel<User>(userSchema), []);
+
+    useEffect(() => () => model.dispose(), [model]);
+
+    async function onSave() {
+        if (!(await model.validateAll())) return;
+        await model.settled();
+        dispatch(saveUser(model.data));
+    }
+
+    return (
+        <ModelProvider model={model}>
+            <UserForm onSubmit={onSave} />
+        </ModelProvider>
+    );
+}
+```
+
+这样既能避免「每个字段一个 action / reducer」的繁琐，又保留了 Redux
+对应用其余部分的统一治理。
+
+#### 7.10.4 哪些场景**不要**用 `model-reaction`
+
+`model-reaction` 刻意保持在模型层，下列场景请别硬塞：
+
+- 全局 UI 旗标（模态框、主题、语言）→ 用 zustand / Redux。
+- 跨路由缓存 / 查询结果 → 用 TanStack Query / RTK Query。
+- 多 store 编排（saga 式流程）→ 用 Redux 中间件。
+
+#### 7.10.5 同一需求的代码风格速览
+
+同样一句话需求：`name` 字段必填。
+
+```ts
+// Redux Toolkit
+createSlice({ /* setName reducer + 手写 errors */ });
+// zustand
+create((set) => ({ name: '', errors: {}, setName: (v) => /* 手写 */ }));
+// model-reaction
+createModel<{ name: string }>({
+    name: { type: 'string', default: '', validator: [ValidationRules.required] },
+});
+```
+
+`model-reaction` 把校验、错误状态、脏数据、字段订阅都做成内置；其他两者
+则需要逐项手写。
