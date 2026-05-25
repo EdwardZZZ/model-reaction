@@ -541,17 +541,52 @@ function Row({ id }: { id: string }) {
 ##### 选择决策树
 
 ```
-selector 闭包了渲染期会变的变量吗？
-├── 是  →  useModelComputed
-└── 否  →  selector 计算开销重吗？
-            ├── 是  →  useModelSelector + 稳定引用
-            └── 否  →  你愿意写 useCallback 吗？
-                        ├── 愿意  →  useModelSelector
-                        └── 不愿  →  useModelComputed
+1. selector 是否闭包了渲染期会变的变量
+   （如 `id`、`index`、分页游标、搜索关键字）？
+   ├── 是 → useModelComputed
+   │        （正确性：无需 useCallback 即可避免闭包陈旧）
+   └── 否 → 继续 ↓
+
+2. selector 体计算是否昂贵
+   （深 map / 聚合 / 序列化 / 逐行 diff）？
+   ├── 是 → useModelSelector + 稳定引用
+   │        （selector 每次 commit 跑一次，而非每次 render）
+   └── 否 → 继续 ↓
+
+3. 是否处于高频更新路径
+   （高频字段、订阅扇出大、父组件经常因无关原因重渲染）？
+   ├── 是 → useModelSelector + 稳定引用
+   │        （模型层 isEqual 直接挡住变更，不进 React 调度）
+   └── 否 → 继续 ↓
+
+4. selector 是否需要跨组件复用，或希望被中间件 / devtools 观测？
+   ├── 是 → useModelSelector
+   │        （selector 身份位于模型层，可被插桩；
+   │         useModelComputed 的 selector 只活在 React 渲染中，
+   │         无法被库捕获）
+   └── 否 → 继续 ↓
+
+5. 你愿意为 selector 写 useCallback 吗？
+   ├── 愿意 → useModelSelector
+   └── 不愿 → useModelComputed
+              （便利：ref 锁死语义，零 useCallback 心智负担）
 ```
 
-> 一句话总结：派生体「站着不动」就用 `useModelSelector`；派生体
-> 「跟着 props/state 跑」就用 `useModelComputed`。
+###### 性能高发场景对照表
+
+| 场景 | 关键差异 | 选择 |
+| --- | --- | --- |
+| 100+ 行列表，每行各自订阅派生值 | `useModelComputed` 的 selector 会在**父组件每次渲染**时对每行各跑一次 | `useModelSelector` |
+| selector 体计算昂贵（深 map / 克隆 / 聚合） | `getSnapshot` 每次渲染都会调用，并发/StrictMode 下还会再多一次 | `useModelSelector` |
+| 高频字段（动画、鼠标、防抖）扇出到不相关订阅者 | 模型层 `isEqual` 能直接挡掉无关变更，不进 React 调度 | `useModelSelector` |
+| selector 闭包了 `id` / `index` 等渲染期变量 | `useModelSelector` 要么读到旧值，要么每次 render 都重订阅 | `useModelComputed` |
+| 一次性原型 / 短生命周期组件，selector 很轻 | `useCallback` 的纪律成本超过每次 render 跑一次 selector 的开销 | `useModelComputed` |
+| selector 需要被中间件 / devtools 观测 | 身份必须存在于模型层 | `useModelSelector` |
+| selector 包含副作用或非纯逻辑（`console.log`、计数、调试日志） | `useSyncExternalStore` 要求 `getSnapshot` 必须纯 | `useModelSelector` |
+
+> 一句话总结：`useModelSelector` 是 **性能上限**（模型层去重，**每次
+> commit** 跑一次）；`useModelComputed` 是 **便利下限**（组件层去重，
+> **每次 render** 跑一次）。二者**不可互相替代**，请同时保留并按场景选用。
 
 ### Schema 类型推导
 

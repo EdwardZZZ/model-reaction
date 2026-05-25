@@ -544,18 +544,56 @@ changes between renders.
 ##### Decision tree
 
 ```
-Does the selector close over a value that changes between renders?
-├── Yes  →  useModelComputed
-└── No   →  Is the selector body expensive to run?
-            ├── Yes  →  useModelSelector + stable reference
-            └── No   →  Are you willing to write useCallback?
-                        ├── Yes  →  useModelSelector
-                        └── No   →  useModelComputed
+1. Does the selector close over a value that changes between renders
+   (e.g. `id`, `index`, paging cursor, search keyword)?
+   ├── Yes → useModelComputed
+   │         (correctness: avoids stale closures without useCallback)
+   └── No  → continue ↓
+
+2. Is the selector body expensive
+   (deep map / aggregate / serialise / per-row diff)?
+   ├── Yes → useModelSelector + stable reference
+   │         (selector runs once per commit, not once per render)
+   └── No  → continue ↓
+
+3. Are you on a hot update path
+   (high-frequency field, large fan-out: many subscribers,
+    parent re-renders unrelated to this model)?
+   ├── Yes → useModelSelector + stable reference
+   │         (model-level isEqual prevents the change from entering
+   │          React scheduling at all)
+   └── No  → continue ↓
+
+4. Will the selector be reused across components, or do you want it
+   observable by middleware / devtools?
+   ├── Yes → useModelSelector
+   │         (selector identity lives at the model layer and can be
+   │          instrumented; useModelComputed selectors only exist
+   │          inside React render and cannot be observed)
+   └── No  → continue ↓
+
+5. Are you willing to wrap the selector in useCallback?
+   ├── Yes → useModelSelector
+   └── No  → useModelComputed
+             (convenience: ref-locked semantics, no useCallback needed)
 ```
 
-> One-liner: when the selector body "stays put" reach for
-> `useModelSelector`; when it "follows props/state" reach for
-> `useModelComputed`.
+###### Performance hot-spots — explicit guidance
+
+| Scenario | Why it matters | Pick |
+| --- | --- | --- |
+| 100+ list rows each subscribing to a derived value | `useModelComputed`'s selector runs **on every parent render** for every row | `useModelSelector` |
+| Expensive selector body (deep map / clone / aggregate) | `getSnapshot` is invoked every render and twice under concurrent / strict mode | `useModelSelector` |
+| High-frequency field (animation, mouse, debounce) feeding unrelated subscribers | Model-level `isEqual` keeps unrelated changes out of React scheduling | `useModelSelector` |
+| Selector closes over `id` / `index` / per-render variables | `useModelSelector` would either go stale or resubscribe every render | `useModelComputed` |
+| One-off prototype / short-lived component, light selector | The ceremony of `useCallback` outweighs the per-render `getSnapshot` cost | `useModelComputed` |
+| Selector must stay observable by middleware / devtools | Identity must live at the model layer | `useModelSelector` |
+| Selector with side effects or impurity (`console.log`, counters, dev-only logs) | `useSyncExternalStore` requires `getSnapshot` to be pure | `useModelSelector` |
+
+> One-liner: `useModelSelector` is the performance ceiling
+> (model-layer dedup, runs per **commit**); `useModelComputed` is the
+> convenience floor (render-layer dedup, runs per **render**). They are
+> **not** interchangeable — keep both.
 
 ### Schema Type Inference
 
