@@ -17,13 +17,56 @@
 
 ## 安装
 
+`model-reaction` 以 **单包多入口（subpath exports）** 形式发布，按需取用：
+
+| 入口 | 内容 | 需要 React 吗？ |
+|---|---|---|
+| `model-reaction` | 框架无关核心：`createModel`、`Rule`、`ValidationRules`、各类类型 | ❌ 不需要 |
+| `model-reaction/react` | React Hooks：`useModelField`、`useModelSelector`、`useModelComputed` 等 | ✅ 需要（peer dependency） |
+
+### 仅使用核心（不绑定任何 UI 框架）
+
+如果只需要数据模型 / 验证 / 反应（reaction）能力，只装本包即可，**完全不需要安装 React**。
+
 ```bash
-# 使用 npm
+# npm
 npm install model-reaction
 
-# 使用 yarn
+# yarn
 yarn add model-reaction
+
+# pnpm
+pnpm add model-reaction
 ```
+
+```typescript
+import { createModel, ValidationRules } from 'model-reaction';
+```
+
+### 配合 React 使用
+
+如果要在 React 组件树中使用细粒度、selector 级订阅，请同时安装 React。React 在本库中是**可选的 peer 依赖**（`react >= 18`），所以默认入口仍然保持轻量。
+
+```bash
+# npm
+npm install model-reaction react
+npm install --save-dev @types/react
+
+# yarn
+yarn add model-reaction react
+yarn add --dev @types/react
+
+# pnpm
+pnpm add model-reaction react
+pnpm add -D @types/react
+```
+
+```typescript
+import { createModel } from 'model-reaction';
+import { useModelField, useModelSelector } from 'model-reaction/react';
+```
+
+> ℹ️ 只有 `model-reaction/react` 子路径才会引入 React；默认入口（`model-reaction`）零 React 依赖，打包工具不会把 React 拉进只使用核心 API 的项目。
 
 ## 基本使用
 

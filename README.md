@@ -17,13 +17,57 @@ A powerful, type-safe data model management library supporting synchronous and a
 
 ## Installation
 
+`model-reaction` is shipped as a **single package with two entry points**:
+
+| Entry point | What you get | Requires React? |
+|---|---|---|
+| `model-reaction` | Framework-agnostic core: `createModel`, `Rule`, `ValidationRules`, types | ❌ No |
+| `model-reaction/react` | React hooks: `useModelField`, `useModelSelector`, `useModelComputed`, … | ✅ Yes (peer dependency) |
+
+### Core only (no UI framework)
+
+If you just need the data-model / validation / reaction engine, install the package by itself. **No React installation is needed.**
+
 ```bash
-# Using npm
+# npm
 npm install model-reaction
 
-# Using yarn
+# yarn
 yarn add model-reaction
+
+# pnpm
+pnpm add model-reaction
 ```
+
+```typescript
+import { createModel, ValidationRules } from 'model-reaction';
+```
+
+### With React bindings
+
+If you want to wire models into React components with fine-grained, selector-level subscriptions, install React alongside it.
+React is declared as an **optional peer dependency** (`react >= 18`), so the core entry point stays lightweight.
+
+```bash
+# npm
+npm install model-reaction react
+npm install --save-dev @types/react
+
+# yarn
+yarn add model-reaction react
+yarn add --dev @types/react
+
+# pnpm
+pnpm add model-reaction react
+pnpm add -D @types/react
+```
+
+```typescript
+import { createModel } from 'model-reaction';
+import { useModelField, useModelSelector } from 'model-reaction/react';
+```
+
+> ℹ️ Only the `model-reaction/react` subpath imports React. The default entry point (`model-reaction`) has zero dependency on React, so bundlers will not pull React into projects that only use the core API.
 
 ## Basic Usage
 
