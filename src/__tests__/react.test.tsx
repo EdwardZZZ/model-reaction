@@ -1,12 +1,22 @@
 /**
  * @jest-environment jsdom
+ *
+ * Tests for the React adapter (`src/react.ts`):
+ * - `useModelSelector`: selector + custom `isEqual` re-render suppression
+ * - `useModelComputed`: ref-locked variant that does not resubscribe on
+ *   selector identity changes
  */
 import * as React from 'react';
-import { useCallback, useState } from 'react';
-import { act, render } from '@testing-library/react';
+import { useCallback, useRef, useState } from 'react';
+import { act, render, renderHook } from '@testing-library/react';
 
-import { createModel } from '../index';
+import { createModel, ValidationRules } from '../index';
 import { useModelComputed, useModelSelector } from '../react';
+import type { ModelReturn } from '../types';
+
+// ---------------------------------------------------------------------------
+// Fixtures
+// ---------------------------------------------------------------------------
 
 interface Cart {
     qty: number;
@@ -27,8 +37,42 @@ function makeCart() {
     });
 }
 
+interface OrderState {
+    items: Array<{ id: string; qty: number }>;
+    coupon: string;
+    note: string;
+}
+
+function makeOrderModel() {
+    return createModel<OrderState>({
+        items: {
+            type: 'array',
+            default: [
+                { id: 'a', qty: 1 },
+                { id: 'b', qty: 2 },
+            ],
+        },
+        coupon: { type: 'string', default: '' },
+        note: { type: 'string', default: '', validator: [ValidationRules.string] },
+    });
+}
+
+/**
+ * Hook harness: counts renders without polluting the hook under test.
+ */
+function useTracked<T extends Record<string, any>, R>(
+    model: ModelReturn<T>,
+    selector: (d: T) => R,
+    isEqual?: (a: R, b: R) => boolean
+) {
+    const renders = useRef(0);
+    renders.current += 1;
+    const value = useModelSelector(model, selector, isEqual);
+    return { value, renders: renders.current };
+}
+
 // ---------------------------------------------------------------------------
-// useModelSelector
+// useModelSelector — basic behaviour
 // ---------------------------------------------------------------------------
 
 describe('useModelSelector', () => {
@@ -100,6 +144,166 @@ describe('useModelSelector', () => {
         expect(subscribeCalls).toBeGreaterThan(before);
 
         cart.dispose();
+    });
+});
+
+// ---------------------------------------------------------------------------
+// useModelSelector — isEqual suppression for complex derived values
+// ---------------------------------------------------------------------------
+
+describe('useModelSelector — isEqual suppression for complex derived values', () => {
+    test('default Object.is fires every time selector returns a new object reference', async () => {
+        const model = makeOrderModel();
+
+        const { result } = renderHook(() =>
+            // No isEqual → falls back to Object.is. Each call to the selector
+            // produces a brand-new array, so every commit is treated as a change.
+            useTracked(model, (d) => d.items.map((i) => i.qty))
+        );
+
+        const initialRenders = result.current.renders;
+        expect(result.current.value).toEqual([1, 2]);
+
+        // Mutating an unrelated field still re-runs the selector and the
+        // resulting `[1, 2]` array is a new reference → re-render happens.
+        await act(async () => {
+            await model.setField('coupon', 'SAVE10');
+        });
+
+        expect(result.current.renders).toBeGreaterThan(initialRenders);
+
+        model.dispose();
+    });
+
+    test('structural isEqual suppresses re-render when derived array is unchanged', async () => {
+        const model = makeOrderModel();
+
+        const arrayEq = <U,>(a: U[], b: U[]) =>
+            a.length === b.length && a.every((v, i) => v === b[i]);
+
+        const { result } = renderHook(() =>
+            useTracked(
+                model,
+                (d) => d.items.map((i) => i.qty),
+                arrayEq
+            )
+        );
+
+        const initialRenders = result.current.renders;
+        expect(result.current.value).toEqual([1, 2]);
+
+        // Unrelated field changes; derived array is structurally equal to the
+        // previous one. With our custom equality, hook MUST NOT re-render.
+        await act(async () => {
+            await model.setField('coupon', 'SAVE10');
+        });
+        expect(result.current.renders).toBe(initialRenders);
+
+        await act(async () => {
+            await model.setField('note', 'gift wrap');
+        });
+        expect(result.current.renders).toBe(initialRenders);
+
+        // Now actually change the derived value: items[1].qty 2 → 5.
+        await act(async () => {
+            await model.setField('items', [
+                { id: 'a', qty: 1 },
+                { id: 'b', qty: 5 },
+            ]);
+        });
+
+        expect(result.current.renders).toBe(initialRenders + 1);
+        expect(result.current.value).toEqual([1, 5]);
+
+        model.dispose();
+    });
+
+    test('structural isEqual on derived object: same shape skips, real change re-renders', async () => {
+        const model = makeOrderModel();
+
+        // Derived: { totalQty, hasCoupon } — both pieces of info recomputed
+        // from primitive fields, packed into a fresh object every call.
+        const selector = (d: OrderState) => ({
+            totalQty: d.items.reduce((s, x) => s + x.qty, 0),
+            hasCoupon: d.coupon.length > 0,
+        });
+        const objEq = (
+            a: { totalQty: number; hasCoupon: boolean },
+            b: { totalQty: number; hasCoupon: boolean }
+        ) => a.totalQty === b.totalQty && a.hasCoupon === b.hasCoupon;
+
+        const { result } = renderHook(() => useTracked(model, selector, objEq));
+        const r0 = result.current.renders;
+        expect(result.current.value).toEqual({ totalQty: 3, hasCoupon: false });
+
+        // Change `note` (not in selector) → no re-render.
+        await act(async () => {
+            await model.setField('note', 'urgent');
+        });
+        expect(result.current.renders).toBe(r0);
+
+        // Replace items but keep total qty unchanged → object is structurally
+        // equal → MUST NOT re-render.
+        await act(async () => {
+            await model.setField('items', [
+                { id: 'a', qty: 2 },
+                { id: 'b', qty: 1 },
+            ]);
+        });
+        expect(result.current.renders).toBe(r0);
+        expect(result.current.value).toEqual({ totalQty: 3, hasCoupon: false });
+
+        // Add a coupon → hasCoupon flips → MUST re-render.
+        await act(async () => {
+            await model.setField('coupon', 'SAVE10');
+        });
+        expect(result.current.renders).toBe(r0 + 1);
+        expect(result.current.value).toEqual({ totalQty: 3, hasCoupon: true });
+
+        // Change items so total qty changes → MUST re-render again.
+        await act(async () => {
+            await model.setField('items', [
+                { id: 'a', qty: 4 },
+                { id: 'b', qty: 1 },
+            ]);
+        });
+        expect(result.current.renders).toBe(r0 + 2);
+        expect(result.current.value).toEqual({ totalQty: 5, hasCoupon: true });
+
+        model.dispose();
+    });
+
+    test('isEqual is consulted on every model mutation (not just relevant ones)', async () => {
+        const model = makeOrderModel();
+        const isEqual = jest.fn((a: number, b: number) => a === b);
+
+        const { result } = renderHook(() =>
+            useTracked(model, (d) => d.items.length, isEqual)
+        );
+        const r0 = result.current.renders;
+
+        // Two unrelated mutations — selector still resolves to 2 each time;
+        // isEqual is invoked, returns true, no re-render is scheduled.
+        await act(async () => {
+            await model.setField('coupon', 'A');
+        });
+        await act(async () => {
+            await model.setField('note', 'B');
+        });
+
+        expect(isEqual).toHaveBeenCalled();
+        expect(isEqual.mock.calls.every(([a, b]) => a === b)).toBe(true);
+        expect(result.current.renders).toBe(r0);
+
+        // A mutation that changes the derived value — isEqual returns false,
+        // hook re-renders.
+        await act(async () => {
+            await model.setField('items', [{ id: 'c', qty: 9 }]);
+        });
+        expect(result.current.renders).toBe(r0 + 1);
+        expect(result.current.value).toBe(1);
+
+        model.dispose();
     });
 });
 
