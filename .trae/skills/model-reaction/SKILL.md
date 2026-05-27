@@ -16,7 +16,7 @@ This skill assists in using the `model-reaction` library for TypeScript/JavaScri
 ## Core Concepts
 
 ### 1. Creating a Model
-Use `createModel` to define the schema. Each field can have `type`, `validator`, `reaction`, and `default`.
+Use `createModel` to define the schema. Each field can have `type`, `validator`, `reaction`, and `default`. The data shape is automatically inferred from the schema literal — no explicit generic needed.
 
 ```typescript
 import { createModel, ValidationRules } from 'model-reaction';
@@ -35,6 +35,7 @@ const userModel = createModel({
 }, {
   debounceReactions: 100 // Optimization
 });
+// userModel.data is inferred as { username: string; age: number }
 ```
 
 ### 2. Validation Rules
@@ -74,12 +75,33 @@ fullName: {
 ```
 
 ### 4. Event Handling
-Subscribe to changes and errors.
+Subscribe to changes and errors. Prefer the `ModelEvents` enum over raw event strings.
 
 ```typescript
-model.on('validation:error', (err) => console.error(err));
-model.on('field:change', (data) => console.log('Changed:', data));
+import { ModelEvents } from 'model-reaction';
+
+model.on(ModelEvents.VALIDATION_ERROR, (err) => console.error(err));
+model.on(ModelEvents.FIELD_CHANGE, (data) => console.log('Changed:', data));
+
+// Fine-grained subscriptions (framework-agnostic):
+model.subscribeField('username', (value) => console.log(value));
+model.subscribe((d) => d.age >= 18, (isAdult) => console.log(isAdult));
 ```
+
+### 5. React Bindings
+React helpers ship from a separate entry point so non-React consumers don't pay for them.
+
+```typescript
+import {
+  ModelProvider,
+  Field,
+  useModel,
+  useModelField,
+  useModelFieldState,
+} from 'model-reaction/react';
+```
+
+`useModelFieldState(model, 'name')` returns `[value, setValue, meta, helpers]` and is the easiest way to wire controlled inputs. Wrap the tree in `<ModelProvider model={...}>` to use `<Field name="...">` / `useModel()` without prop-drilling.
 
 ## Best Practices
 
