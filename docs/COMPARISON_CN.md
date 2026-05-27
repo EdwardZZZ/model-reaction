@@ -202,7 +202,7 @@ const [name, setName, meta] = useModelFieldState(userModel, 'name');
 
 ### 8.1 测试方法
 
-- 脚本：[`benchmarks/model-vs-zustand.ts`](benchmarks/model-vs-zustand.ts)
+- 脚本：[`benchmarks/model-vs-zustand.ts`](../benchmarks/model-vs-zustand.ts)
 - 运行：`npx tsx benchmarks/model-vs-zustand.ts`
 - 每个场景实现两遍（zustand vanilla store / model-reaction），跑 10–30 次
   取**中位数（ms）**；越低越好。

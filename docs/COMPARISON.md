@@ -224,7 +224,7 @@ Real projects often combine them:
 
 ### 8.1 Methodology
 
-- Script: [`benchmarks/model-vs-zustand.ts`](benchmarks/model-vs-zustand.ts)
+- Script: [`benchmarks/model-vs-zustand.ts`](../benchmarks/model-vs-zustand.ts)
 - Run: `npx tsx benchmarks/model-vs-zustand.ts`
 - Each scenario implements the same semantics twice (zustand vanilla
   store vs `model-reaction`), runs 10–30 iterations and reports the
