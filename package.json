@@ -1,6 +1,6 @@
 {
   "name": "model-reaction",
-  "version": "0.1.2",
+  "version": "1.0.0",
   "main": "dist/index.cjs.js",
   "module": "dist/index.esm.js",
   "types": "dist/types/index.d.ts",
@@ -52,13 +52,13 @@
   "author": "Zephyr <zzh627@126.com>",
   "license": "ISC",
   "description": "A TypeScript model library with validation, reaction system, and batch operations",
-  "homepage": "https://github.com/Umajs/model-reaction",
+  "homepage": "https://github.com/EdwardZZZ/model-reaction",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Umajs/model-reaction"
+    "url": "https://github.com/EdwardZZZ/model-reaction"
   },
   "bugs": {
-    "url": "https://github.com/Umajs/model-reaction/issues"
+    "url": "https://github.com/EdwardZZZ/model-reaction/issues"
   },
   "peerDependencies": {
     "react": ">=18.0.0"
