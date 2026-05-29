@@ -4,6 +4,15 @@ node_modules
 .DS_Store
 dist
 coverage
-# Ignore .trae contents but allow skills
+
+# Local AI / IDE tooling
 .trae/*
 !.trae/skills/
+.claude/
+.ttadk/
+.mcp.json
+ai-plugin.json
+ai-plugin-lock.json
+
+# Generated docs
+specs/doc_export/
