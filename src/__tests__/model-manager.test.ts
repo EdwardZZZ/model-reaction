@@ -6,6 +6,7 @@ import {
     ValidationRules,
     ErrorType,
     ErrorHandler,
+    ModelEvents,
 } from '../index';
 
 describe('ModelManager - Basic Operations', () => {
@@ -314,6 +315,71 @@ describe('ModelManager - Dirty Data Management', () => {
 
         await model.setField('email', 'valid@example.com');
         expect(model.getDirtyData()).not.toHaveProperty('email');
+    });
+});
+
+describe('ModelManager - commitValid: dirty cleanup with deepEqual early-return', () => {
+    test('setField with same valid value clears stale dirty', async () => {
+        const m = createModel<{ age: number }>({
+            age: {
+                type: 'number',
+                default: 25,
+                validator: [ValidationRules.number],
+            },
+        });
+
+        // @ts-expect-error - runtime type check
+        await m.setField('age', 'abc');
+        expect(m.getDirtyData()).toEqual({ age: 'abc' });
+
+        // Re-typing the original valid value must drop the stale dirty entry,
+        // even though `data.age` itself does not change (deepEqual early-return).
+        await m.setField('age', 25);
+        expect(m.getDirtyData()).toEqual({});
+        expect(m.getField('age')).toBe(25);
+
+        m.dispose();
+    });
+
+    test('clearing stale dirty alone does NOT emit field:change', async () => {
+        const m = createModel<{ age: number }>({
+            age: {
+                type: 'number',
+                default: 25,
+                validator: [ValidationRules.number],
+            },
+        });
+        const handler = jest.fn();
+        m.on(ModelEvents.FIELD_CHANGE, handler);
+
+        // Failed write: dirtyData written, no field:change.
+        // @ts-expect-error - runtime type check
+        await m.setField('age', 'abc');
+        // Recovery write equal to current data: dirty cleared, no field:change.
+        await m.setField('age', 25);
+
+        expect(handler).not.toHaveBeenCalled();
+        expect(m.getDirtyData()).toEqual({});
+
+        m.dispose();
+    });
+
+    test('full no-op when value unchanged and no dirty', async () => {
+        const m = createModel<{ age: number }>({
+            age: {
+                type: 'number',
+                default: 25,
+                validator: [ValidationRules.number],
+            },
+        });
+        const handler = jest.fn();
+        m.on(ModelEvents.FIELD_CHANGE, handler);
+
+        await m.setField('age', 25);
+        expect(m.getDirtyData()).toEqual({});
+        expect(handler).not.toHaveBeenCalled();
+
+        m.dispose();
     });
 });
 

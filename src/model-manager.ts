@@ -416,18 +416,40 @@ export class ModelManager<
         });
     }
 
+    /**
+     * Commit a validated value:
+     *   - if the value differs from `data`, write it, drop any dirty entry,
+     *     emit `field:change`, and fire reactions.
+     *   - if the value equals `data` but a stale `dirtyData[field]` lingers
+     *     (e.g. user re-typed the original valid value to undo a bad input),
+     *     drop the dirty entry silently — `data` did not change, so neither
+     *     subscribers nor reactions should be disturbed.
+     *   - otherwise, no-op.
+     */
     private commitValid(
         field: string,
         value: any,
         reactionStack: string[] = [],
         suppressReactions = false
     ): void {
-        if (deepEqual(this.data[field as keyof T], value)) return;
-        this.data[field as keyof T] = value;
-        if (field in this.dirtyData) delete this.dirtyData[field];
-        this.emit(ModelEvents.FIELD_CHANGE, { field, value });
-        if (!suppressReactions) {
-            this.reactionSystem.triggerReactions(field, reactionStack);
+        const fieldKey = field as keyof T;
+        const dataChanged = !deepEqual(this.data[fieldKey], value);
+        const hadDirty = field in this.dirtyData;
+
+        if (!dataChanged && !hadDirty) return;
+
+        if (dataChanged) {
+            this.data[fieldKey] = value;
+        }
+        if (hadDirty) {
+            delete this.dirtyData[field];
+        }
+
+        if (dataChanged) {
+            this.emit(ModelEvents.FIELD_CHANGE, { field, value });
+            if (!suppressReactions) {
+                this.reactionSystem.triggerReactions(field, reactionStack);
+            }
         }
     }
 
