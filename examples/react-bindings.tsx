@@ -16,13 +16,13 @@
  *   - Either explicit `createModel<T>(schema)` or schema-inferred types.
  */
 import * as React from 'react';
+import { useCallback } from 'react';
 // `React` is required for the JSX runtime even if not directly referenced.
 void React;
 import { createModel, ValidationRules } from '../src/index';
 import {
     Field,
     ModelProvider,
-    shallow,
     useModel,
     useModelField,
     useModelFields,
@@ -75,27 +75,36 @@ function QtyInput() {
 // 4. Component that re-renders only when total = qty * price changes.
 //    Mutating `coupon` or `name` will NOT cause this to re-render.
 function Total() {
-    const total = useModelSelector(cart, (d) => d.qty * d.price);
+    // `useModelSelector` captures the selector at subscribe time, so wrap
+    // inline arrows in `useCallback` to avoid resubscribing every render.
+    const selectTotal = useCallback((d: Cart) => d.qty * d.price, []);
+    const total = useModelSelector(cart, selectTotal);
     return <span>Total: {total}</span>;
 }
 
 // 5. Component subscribed to a structural selector with custom equality.
 function CouponBadge() {
-    const summary = useModelSelector(
-        cart,
-        (d) => ({ coupon: d.coupon, hasCoupon: d.coupon.length > 0 }),
-        (a, b) => a.coupon === b.coupon && a.hasCoupon === b.hasCoupon
+    const selectSummary = useCallback(
+        (d: Cart) => ({ coupon: d.coupon, hasCoupon: d.coupon.length > 0 }),
+        []
     );
+    const isEqualSummary = useCallback(
+        (a: { coupon: string; hasCoupon: boolean }, b: { coupon: string; hasCoupon: boolean }) =>
+            a.coupon === b.coupon && a.hasCoupon === b.hasCoupon,
+        []
+    );
+    const summary = useModelSelector(cart, selectSummary, isEqualSummary);
     return summary.hasCoupon ? <span>Coupon: {summary.coupon}</span> : null;
 }
 
 // 6. Validation surfacing through a plain selector.
 function ValidationSummary() {
     // Re-renders only when the validation error count for `name` changes.
-    const errorCount = useModelSelector(
-        cart,
-        () => cart.validationErrors.name?.length ?? 0
+    const selectErrorCount = useCallback(
+        () => cart.validationErrors.name?.length ?? 0,
+        []
     );
+    const errorCount = useModelSelector(cart, selectErrorCount);
     return errorCount > 0 ? <span style={{ color: 'red' }}>Invalid name</span> : null;
 }
 
@@ -113,6 +122,7 @@ export function CartApp() {
                 <ValidationSummary />
                 <Summary />
                 <NameField />
+                <CouponInput />
             </div>
         </ModelProvider>
     );
@@ -148,7 +158,6 @@ function NameField() {
 
 // 7c. `useModelFieldState` example: form-style binding in a single hook.
 //     Demonstrates `validating`, `dirty`, `touched`, `error` metadata.
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function CouponInput() {
     const [coupon, setCoupon, meta] = useModelFieldState(cart, 'coupon');
     return (
@@ -161,18 +170,6 @@ function CouponInput() {
     );
 }
 
-// 7d. `shallow` is exported for selectors that build fresh containers.
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-function ShallowSelectorDemo() {
-    const m = useModel<Cart>();
-    const slice = useModelSelector(
-        m,
-        (d) => ({ qty: d.qty, price: d.price }),
-        shallow
-    );
-    return <span>Slice: {slice.qty * slice.price}</span>;
-}
-
 // 8. Schema-inferred types (no explicit interface).
 //    `inferred.data` is typed automatically as `{ tax: number; rate: number }`.
 interface Tax { tax: number; rate: number }
@@ -180,23 +177,21 @@ const inferred = createModel<Tax>({
     tax:  { type: 'number', default: 0 },
     rate: { type: 'number', default: 0.1 },
 });
+/* eslint-disable no-console */
 inferred.subscribe(
     (d) => d.tax * d.rate,
     (v) => {
-        // eslint-disable-next-line no-console
         console.log('[inferred] tax * rate →', v);
     }
 );
 
 // 9. Usage outside React: same model, same subscriptions.
 cart.subscribeField('name', (v) => {
-    // eslint-disable-next-line no-console
     console.log('[non-React subscriber] name changed →', v);
 });
 cart.subscribe(
     (d) => d.qty * d.price,
     (total, prev) => {
-        // eslint-disable-next-line no-console
         console.log(`[non-React subscriber] total: ${prev} → ${total}`);
     }
 );
@@ -234,7 +229,7 @@ async function runExample(): Promise<void> {
 }
 
 runExample().catch((err) => {
-    // eslint-disable-next-line no-console
     console.error(err);
     process.exit(1);
 });
+/* eslint-enable no-console */

@@ -35,6 +35,7 @@
 ## 基本示例
 
 ```tsx
+import { useCallback } from 'react';
 import { createModel, ValidationRules } from 'model-reaction';
 import {
     Field,
@@ -67,9 +68,10 @@ function NameInput() {
     return <input value={name} onChange={(e) => cart.setField('name', e.target.value)} />;
 }
 
-// 2. 派生值 hook
+// 2. 派生值 hook —— selector 引用是订阅的一部分，请用 useCallback 锁定
 function Total() {
-    const total = useModelSelector(cart, (d) => d.qty * d.price);
+    const selectTotal = useCallback((d: Cart) => d.qty * d.price, []);
+    const total = useModelSelector(cart, selectTotal);
     return <span>Total: {total}</span>;
 }
 
@@ -118,11 +120,8 @@ function CartApp() {
 // 6. 自定义选择器返回新对象时，请配合 `shallow`
 function Snapshot() {
     const m = useModel<Cart>();
-    const slice = useModelSelector(
-        m,
-        (d) => ({ qty: d.qty, price: d.price }),
-        shallow
-    );
+    const selectSlice = useCallback((d: Cart) => ({ qty: d.qty, price: d.price }), []);
+    const slice = useModelSelector(m, selectSlice, shallow);
     return <span>{slice.qty * slice.price}</span>;
 }
 ```

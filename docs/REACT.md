@@ -38,6 +38,7 @@ it in your app if you use this entry point.
 ## Basic Example
 
 ```tsx
+import { useCallback } from 'react';
 import { createModel, ValidationRules } from 'model-reaction';
 import {
     Field,
@@ -70,9 +71,11 @@ function NameInput() {
     return <input value={name} onChange={(e) => cart.setField('name', e.target.value)} />;
 }
 
-// 2. Selector hook.
+// 2. Selector hook — selector identity is part of the subscription, so
+// stabilize it with `useCallback` (or hoist to module scope).
 function Total() {
-    const total = useModelSelector(cart, (d) => d.qty * d.price);
+    const selectTotal = useCallback((d: Cart) => d.qty * d.price, []);
+    const total = useModelSelector(cart, selectTotal);
     return <span>Total: {total}</span>;
 }
 
@@ -121,11 +124,8 @@ function CartApp() {
 // 6. Custom selectors that build fresh containers — pair with `shallow`.
 function Snapshot() {
     const m = useModel<Cart>();
-    const slice = useModelSelector(
-        m,
-        (d) => ({ qty: d.qty, price: d.price }),
-        shallow
-    );
+    const selectSlice = useCallback((d: Cart) => ({ qty: d.qty, price: d.price }), []);
+    const slice = useModelSelector(m, selectSlice, shallow);
     return <span>{slice.qty * slice.price}</span>;
 }
 ```

@@ -35,12 +35,13 @@ export function TotalGood() {
     return <span>Total: {total}</span>;
 }
 
-// ✅ Selector returning a fresh container — use `shallow`.
+// ✅ Selector returning a fresh container — use `shallow`. The selector
+// itself still needs a stable reference, so wrap it in `useCallback`.
 export function CartSlice() {
-    const slice = useModelSelector(
-        cart,
-        (d) => ({ qty: d.qty, price: d.price }),
-        shallow,
+    const selectSlice = useCallback(
+        (d: Cart) => ({ qty: d.qty, price: d.price }),
+        [],
     );
+    const slice = useModelSelector(cart, selectSlice, shallow);
     return <span>Slice: {slice.qty} × {slice.price}</span>;
 }

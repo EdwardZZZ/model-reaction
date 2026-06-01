@@ -108,14 +108,14 @@ const selectTotal = useCallback((d: Cart) => d.qty * d.price, []);
 const total = useModelSelector(cart, selectTotal);
 ```
 
-selector 返回新容器时，请配合 `shallow`：
+selector 返回新容器时，请配合 `shallow`——selector 仍需保持引用稳定：
 
 ```tsx
-const slice = useModelSelector(
-    cart,
-    (d) => ({ qty: d.qty, price: d.price }),
-    shallow,
+const selectSlice = useCallback(
+    (d: Cart) => ({ qty: d.qty, price: d.price }),
+    [],
 );
+const slice = useModelSelector(cart, selectSlice, shallow);
 ```
 
 ### 7.3 用 `<ModelProvider>` 避免 prop 透传

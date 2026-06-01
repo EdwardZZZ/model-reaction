@@ -111,14 +111,15 @@ const selectTotal = useCallback((d: Cart) => d.qty * d.price, []);
 const total = useModelSelector(cart, selectTotal);
 ```
 
-If the selector returns a fresh container, pair it with `shallow`:
+If the selector returns a fresh container, pair it with `shallow` —
+the selector still needs a stable reference:
 
 ```tsx
-const slice = useModelSelector(
-    cart,
-    (d) => ({ qty: d.qty, price: d.price }),
-    shallow,
+const selectSlice = useCallback(
+    (d: Cart) => ({ qty: d.qty, price: d.price }),
+    [],
 );
+const slice = useModelSelector(cart, selectSlice, shallow);
 ```
 
 ### 7.3 Avoid prop drilling with `<ModelProvider>`
