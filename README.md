@@ -121,6 +121,53 @@ function AgeInput() {
 
 For the full hook list, the `useModelSelector` vs `useModelComputed` decision tree, and performance guidance, see [docs/REACT.md](docs/REACT.md).
 
+### Form Field Bindings — `useModelFieldState`
+
+`useModelFieldState` is the highest-level hook in the React adapter: a single call returns everything you need to wire a controlled input to a model field — value, async setter, and validation / dirty / validating metadata.
+
+```ts
+const [value, setValue, meta] = useModelFieldState(model, field);
+```
+
+**`FieldSetter<V> = (value: V) => Promise<boolean>`**
+
+The setter wraps `model.setField` and additionally toggles `meta.validating` for the lifetime of the call. The returned `Promise<boolean>` resolves with the validation result (`true` = committed, `false` = rejected and stored as dirty data).
+
+**`FieldMeta`**
+
+| Property | Type | Description |
+| --- | --- | --- |
+| `errors` | `ValidationError[]` | All validation errors for this field. Empty array if none. |
+| `error` | `string \| null` | Convenience: first error message, or `null`. |
+| `validating` | `boolean` | `true` while an async `setValue` is in flight from this hook instance. |
+| `dirty` | `boolean` | `true` if the field currently has an entry in `model.getDirtyData()` (i.e. its last write failed validation). |
+
+**Recipe — touched / blur / error display:**
+
+`touched` is intentionally not part of `meta` — it is a pure UI concern. Keep it as component-local state and gate the error display on it:
+
+```tsx
+function NameField() {
+  const [name, setName, meta] = useModelFieldState(user, 'name');
+  const [touched, setTouched] = React.useState(false);
+  const showError = touched && meta.error;
+  return (
+    <label>
+      <input
+        value={name}
+        disabled={meta.validating}
+        onChange={(e) => setName(e.target.value)}
+        onBlur={() => setTouched(true)}
+        aria-invalid={showError ? 'true' : 'false'}
+      />
+      {showError && <span role="alert">{meta.error}</span>}
+    </label>
+  );
+}
+```
+
+> `validating` is component-local (per hook instance); it tracks only setters issued from this hook, not arbitrary `model.setField` calls elsewhere.
+
 ## Documentation
 
 | Topic | Link |

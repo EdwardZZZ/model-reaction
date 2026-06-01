@@ -3,8 +3,12 @@
  *
  * Use the `<Field>` render-prop form to bind a leaf input + its error
  * without referencing the model directly.
+ *
+ * `touched` is a UI-local concern — keep it in component state via
+ * `useState`, not on the model.
  */
 import * as React from 'react';
+import { useState } from 'react';
 void React;
 
 import { createModel, ValidationRules } from '../../src/index';
@@ -19,18 +23,19 @@ const userModel = createModel<User>({
 });
 
 export function NameFieldDemo() {
+    const [touched, setTouched] = useState(false);
     return (
         <ModelProvider model={userModel}>
             <Field<User, 'name'> name="name">
-                {({ value, setValue, meta, helpers }) => (
+                {({ value, setValue, meta }) => (
                     <label>
                         <input
                             value={value}
                             onChange={(e) => setValue(e.target.value)}
-                            onBlur={() => helpers.setTouched()}
+                            onBlur={() => setTouched(true)}
                             aria-invalid={!!meta.error}
                         />
-                        {meta.touched && meta.error && <span>{meta.error}</span>}
+                        {touched && meta.error && <span>{meta.error}</span>}
                     </label>
                 )}
             </Field>

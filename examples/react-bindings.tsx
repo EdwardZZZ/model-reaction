@@ -16,7 +16,7 @@
  *   - Either explicit `createModel<T>(schema)` or schema-inferred types.
  */
 import * as React from 'react';
-import { useCallback } from 'react';
+import { useCallback, useState } from 'react';
 // `React` is required for the JSX runtime even if not directly referenced.
 void React;
 import { createModel, ValidationRules } from '../src/index';
@@ -123,6 +123,7 @@ export function CartApp() {
                 <Summary />
                 <NameField />
                 <CouponInput />
+                <NameFieldWithBlur />
             </div>
         </ModelProvider>
     );
@@ -137,17 +138,19 @@ function Summary() {
 }
 
 // 7b. `<Field>` render-prop variant (consumes the provider context).
+//     `touched` is a pure UI concern — keep it as local component state.
 function NameField() {
+    const [touched, setTouched] = useState(false);
     return (
         <Field<Cart, 'name'> name="name">
-            {({ value, setValue, meta, helpers }) => (
+            {({ value, setValue, meta }) => (
                 <label>
                     <input
                         value={value}
                         onChange={(e) => setValue(e.target.value)}
-                        onBlur={() => helpers.setTouched()}
+                        onBlur={() => setTouched(true)}
                     />
-                    {meta.touched && meta.error ? (
+                    {touched && meta.error ? (
                         <span style={{ color: 'red' }}>{meta.error}</span>
                     ) : null}
                 </label>
@@ -157,7 +160,7 @@ function NameField() {
 }
 
 // 7c. `useModelFieldState` example: form-style binding in a single hook.
-//     Demonstrates `validating`, `dirty`, `touched`, `error` metadata.
+//     Demonstrates `validating`, `dirty`, `error` metadata.
 function CouponInput() {
     const [coupon, setCoupon, meta] = useModelFieldState(cart, 'coupon');
     return (
@@ -167,6 +170,42 @@ function CouponInput() {
             value={coupon}
             onChange={(e) => setCoupon(e.target.value)}
         />
+    );
+}
+
+// 7d. Real-world controlled input with touched / blur / error display.
+//     `touched` is intentionally NOT in `meta` — it is component-local UI
+//     state, owned here via `useState`. The hook gives us:
+//       - `meta.error` for the message,
+//       - `meta.validating` to disable the input while the async setter is
+//         in flight (prevents duplicate submissions),
+//       - `meta.dirty` if you want to flag rejected writes.
+function NameFieldWithBlur() {
+    const [name, setName, meta] = useModelFieldState(cart, 'name');
+    const [touched, setTouched] = useState(false);
+    const showError = touched && meta.error;
+    return (
+        <label style={{ display: 'block' }}>
+            <span>Name</span>
+            <input
+                value={name}
+                disabled={meta.validating}
+                onChange={(e) => setName(e.target.value)}
+                onBlur={() => setTouched(true)}
+                aria-invalid={showError ? 'true' : 'false'}
+                style={{
+                    borderColor: showError ? 'red' : undefined,
+                }}
+            />
+            {showError ? (
+                <span role="alert" style={{ color: 'red' }}>
+                    {meta.error}
+                </span>
+            ) : null}
+            <button type="button" onClick={() => setTouched(false)}>
+                Reset
+            </button>
+        </label>
     );
 }
 

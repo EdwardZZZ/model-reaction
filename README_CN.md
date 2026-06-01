@@ -121,6 +121,53 @@ function AgeInput() {
 
 完整 hook 列表、`useModelSelector` vs `useModelComputed` 选择决策树与性能建议，见 [docs/REACT_CN.md](docs/REACT_CN.md)。
 
+### 表单字段绑定 —— `useModelFieldState`
+
+`useModelFieldState` 是 React 适配层中最上层的 hook：一次调用即可获取把受控输入框接到模型字段所需的一切 —— 当前值、异步 setter、validation / dirty / validating 元数据。
+
+```ts
+const [value, setValue, meta] = useModelFieldState(model, field);
+```
+
+**`FieldSetter<V> = (value: V) => Promise<boolean>`**
+
+setter 在 `model.setField` 之上额外维护 `meta.validating` 标志（在调用期间为 `true`）。返回的 `Promise<boolean>` 表示验证结果（`true` = 已提交，`false` = 验证失败并写入 dirtyData）。
+
+**`FieldMeta`**
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `errors` | `ValidationError[]` | 当前字段的全部验证错误；无错误时为空数组。 |
+| `error` | `string \| null` | 便捷字段：首条错误消息，或 `null`。 |
+| `validating` | `boolean` | 当本 hook 实例的异步 `setValue` 还在执行时为 `true`。 |
+| `dirty` | `boolean` | 当前字段在 `model.getDirtyData()` 中是否有记录（即上次写入是否被验证拒绝）。 |
+
+**实用范式 —— touched / blur / 错误回显：**
+
+`touched` 故意不放进 `meta` —— 它是纯 UI 关注点。在组件本地用 `useState` 维护，再用它来 gate 错误展示：
+
+```tsx
+function NameField() {
+  const [name, setName, meta] = useModelFieldState(user, 'name');
+  const [touched, setTouched] = React.useState(false);
+  const showError = touched && meta.error;
+  return (
+    <label>
+      <input
+        value={name}
+        disabled={meta.validating}
+        onChange={(e) => setName(e.target.value)}
+        onBlur={() => setTouched(true)}
+        aria-invalid={showError ? 'true' : 'false'}
+      />
+      {showError && <span role="alert">{meta.error}</span>}
+    </label>
+  );
+}
+```
+
+> `validating` 是组件本地状态（每个 hook 实例独立），仅追踪本 hook 发起的 setter，不会跟踪其他位置的 `model.setField` 调用。
+
 ## 文档
 
 | 主题 | 链接 |

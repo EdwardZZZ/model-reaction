@@ -148,31 +148,40 @@ the `<Field>` render-prop form. It hides the `model` reference and makes
 the binding obvious:
 
 ```tsx
-<Field<User, 'name'> name="name">
-    {({ value, setValue, meta, helpers }) => (
-        <label>
-            <input
-                value={value}
-                onChange={(e) => setValue(e.target.value)}
-                onBlur={() => helpers.setTouched()}
-                aria-invalid={!!meta.error}
-            />
-            {meta.touched && meta.error && <span>{meta.error}</span>}
-        </label>
-    )}
-</Field>
+function NameField() {
+    const [touched, setTouched] = useState(false);
+    return (
+        <Field<User, 'name'> name="name">
+            {({ value, setValue, meta }) => (
+                <label>
+                    <input
+                        value={value}
+                        onChange={(e) => setValue(e.target.value)}
+                        onBlur={() => setTouched(true)}
+                        aria-invalid={!!meta.error}
+                    />
+                    {touched && meta.error && <span>{meta.error}</span>}
+                </label>
+            )}
+        </Field>
+    );
+}
 ```
 
 ### 7.5 Touched semantics
 
-`useModelFieldState` does not auto-flip `touched`. Wire it on `onBlur` so
-errors only appear after the user leaves the field:
+`useModelFieldState` deliberately does not track `touched` — it is a pure
+UI concern with no place on the model. Keep it as component-local state
+and gate the error display on it so messages only appear after the user
+leaves the field:
 
 ```tsx
-<input onBlur={() => helpers.setTouched()} />
+const [touched, setTouched] = useState(false);
+<input onBlur={() => setTouched(true)} />
+{touched && meta.error && <span>{meta.error}</span>}
 ```
 
-Use `helpers.reset()` after a successful submit to clear local hook state.
+Reset it back to `false` after a successful submit if you re-use the form.
 
 ### 7.6 Submission flow
 

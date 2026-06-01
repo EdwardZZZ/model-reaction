@@ -143,31 +143,39 @@ const [name, setName, meta] = useModelFieldState(model, 'name');
 隐藏 model 引用，让绑定关系一目了然：
 
 ```tsx
-<Field<User, 'name'> name="name">
-    {({ value, setValue, meta, helpers }) => (
-        <label>
-            <input
-                value={value}
-                onChange={(e) => setValue(e.target.value)}
-                onBlur={() => helpers.setTouched()}
-                aria-invalid={!!meta.error}
-            />
-            {meta.touched && meta.error && <span>{meta.error}</span>}
-        </label>
-    )}
-</Field>
+function NameField() {
+    const [touched, setTouched] = useState(false);
+    return (
+        <Field<User, 'name'> name="name">
+            {({ value, setValue, meta }) => (
+                <label>
+                    <input
+                        value={value}
+                        onChange={(e) => setValue(e.target.value)}
+                        onBlur={() => setTouched(true)}
+                        aria-invalid={!!meta.error}
+                    />
+                    {touched && meta.error && <span>{meta.error}</span>}
+                </label>
+            )}
+        </Field>
+    );
+}
 ```
 
 ### 7.5 touched 语义
 
-`useModelFieldState` 不会自动翻转 `touched`，需要在 `onBlur` 上手动触发，
-这样错误信息只在用户离开字段后才出现：
+`useModelFieldState` 故意不追踪 `touched` —— 它是纯 UI 关注点，不属于
+模型。请在组件本地用 `useState` 管理，并用它来 gate 错误展示，让消息
+只在用户离开字段后才出现：
 
 ```tsx
-<input onBlur={() => helpers.setTouched()} />
+const [touched, setTouched] = useState(false);
+<input onBlur={() => setTouched(true)} />
+{touched && meta.error && <span>{meta.error}</span>}
 ```
 
-提交成功后调用 `helpers.reset()` 清理本地 hook 状态。
+如果表单会被复用，提交成功后把它重置回 `false` 即可。
 
 ### 7.6 提交流程
 

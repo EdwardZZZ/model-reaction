@@ -239,8 +239,6 @@ export interface FieldMeta {
     errors: ValidationError[];
     /** First error message, or null. Convenient for inline UI. */
     error: string | null;
-    /** Whether the user has interacted with the field (touched -> blurred). */
-    touched: boolean;
     /** True while an async setField is in flight from this hook. */
     validating: boolean;
     /** True if the field currently has unsaved/invalid data in dirtyData. */
@@ -250,27 +248,23 @@ export interface FieldMeta {
 /** Setter signature returned by `useModelFieldState`. */
 export type FieldSetter<V> = (value: V) => Promise<boolean>;
 
-/** Helper bag returned by `useModelFieldState` (3rd tuple slot). */
-export interface FieldHelpers {
-    /** Mark the field as touched (typically wired to `onBlur`). */
-    setTouched: (touched?: boolean) => void;
-    /** Reset touched state and clear any local validating flag. */
-    reset: () => void;
-}
-
 /**
  * Receive a field value plus a setter and metadata in one hook. Designed
  * to make wiring controlled inputs to a model trivial:
  *
  * ```tsx
- * const [name, setName, meta, helpers] = useModelFieldState(model, 'name');
+ * const [name, setName, meta] = useModelFieldState(model, 'name');
  * <input
  *   value={name}
  *   onChange={(e) => setName(e.target.value)}
- *   onBlur={() => helpers.setTouched()}
+ *   disabled={meta.validating}
  * />
- * {meta.touched && meta.error && <span>{meta.error}</span>}
+ * {meta.error && <span>{meta.error}</span>}
  * ```
+ *
+ * `touched` / blur-gated error display is intentionally not provided —
+ * it is a local UI concern, easily handled with a single `useState(false)`
+ * in the consumer component.
  */
 export function useModelFieldState<
     T extends Record<string, any>,
@@ -278,7 +272,7 @@ export function useModelFieldState<
 >(
     model: ModelReturn<T>,
     field: K
-): [T[K], FieldSetter<T[K]>, FieldMeta, FieldHelpers] {
+): [T[K], FieldSetter<T[K]>, FieldMeta] {
     const value = useModelField(model, field);
 
     // Errors: subscribed via the same field-change channel. We bump a counter
@@ -322,7 +316,6 @@ export function useModelFieldState<
         dirtySnapshot
     );
 
-    const [touched, setTouchedState] = useState(false);
     const [validating, setValidating] = useState(false);
 
     const setter = useCallback<FieldSetter<T[K]>>(
@@ -337,29 +330,17 @@ export function useModelFieldState<
         [model, field]
     );
 
-    const helpers = useMemo<FieldHelpers>(
-        () => ({
-            setTouched: (next: boolean = true) => setTouchedState(next),
-            reset: () => {
-                setTouchedState(false);
-                setValidating(false);
-            },
-        }),
-        []
-    );
-
     const meta = useMemo<FieldMeta>(
         () => ({
             errors,
             error: errors.length > 0 && errors[0] ? errors[0].message : null,
-            touched,
             validating,
             dirty,
         }),
-        [errors, touched, validating, dirty]
+        [errors, validating, dirty]
     );
 
-    return [value, setter, meta, helpers];
+    return [value, setter, meta];
 }
 
 const EMPTY_ERRORS: ValidationError[] = [];
@@ -415,7 +396,6 @@ export interface FieldRenderProps<V> {
     value: V;
     setValue: FieldSetter<V>;
     meta: FieldMeta;
-    helpers: FieldHelpers;
 }
 
 /** Props for `<Field>`. */
@@ -453,11 +433,11 @@ export function Field<
             '[model-reaction] <Field> requires either a `model` prop or a surrounding <ModelProvider>.'
         );
     }
-    const [value, setValue, meta, helpers] = useModelFieldState(
+    const [value, setValue, meta] = useModelFieldState(
         model,
         props.name
     );
     // Render the children render-prop directly. Returning ReactNode is fine
     // here — React accepts any node where ReactElement is expected.
-    return props.children({ value, setValue, meta, helpers }) as ReactElement;
+    return props.children({ value, setValue, meta }) as ReactElement;
 }

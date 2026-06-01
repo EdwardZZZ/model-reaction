@@ -40,7 +40,8 @@
     "example:async": "ts-node -O '{\"module\":\"commonjs\",\"moduleResolution\":\"node\"}' examples/async-validation.ts",
     "example:event": "ts-node -O '{\"module\":\"commonjs\",\"moduleResolution\":\"node\"}' examples/event-listening.ts",
     "example:complex": "ts-node -O '{\"module\":\"commonjs\",\"moduleResolution\":\"node\"}' examples/complex-form.ts",
-    "examples": "npm run example:basic && npm run example:reaction && npm run example:async && npm run example:event && npm run example:complex && npm run example:react"
+    "example:multi-record": "ts-node -O '{\"module\":\"commonjs\",\"moduleResolution\":\"node\"}' examples/multi-record-deep-deps.ts",
+    "examples": "npm run example:basic && npm run example:reaction && npm run example:async && npm run example:event && npm run example:complex && npm run example:multi-record && npm run example:react"
   },
   "keywords": [
     "model",

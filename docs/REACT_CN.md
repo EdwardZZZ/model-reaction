@@ -24,7 +24,7 @@
 | `useModelSelector(model, selector, isEqual?)` | hook | 订阅派生值（selector 引用是订阅的一部分，请用 `useCallback` 锁定） |
 | `useModelComputed(model, selector, isEqual?)` | hook | 与 `useModelSelector` 形参相同，但 selector / `isEqual` 通过 ref 每次渲染刷新——内联箭头函数与渲染期闭包变量（`id`、`index` 等）无需 `useCallback` |
 | `useModelFields(model, fields)` | hook | 一次订阅多个字段（浅比较） |
-| `useModelFieldState(model, field)` | hook | `[value, setValue, meta, helpers]` 一体化表单绑定，含 `error / dirty / touched / validating` |
+| `useModelFieldState(model, field)` | hook | `[value, setValue, meta]` 一体化表单绑定，含 `error / dirty / validating` |
 | `shallow` | 函数 | 用于对象/数组选择器的浅比较工具 |
 | `<ModelProvider model>` | 组件 | 通过 Context 注入 model |
 | `useModel<T>()` | hook | 读取最近 Provider 中的 model |
@@ -81,18 +81,19 @@ function PriceLine() {
     return <span>{qty} x {price}</span>;
 }
 
-// 4. 一体化表单绑定
+// 4. 一体化表单绑定 —— `touched` 是组件本地 UI 状态
 function CouponInput() {
-    const [coupon, setCoupon, meta, helpers] = useModelFieldState(cart, 'coupon');
+    const [coupon, setCoupon, meta] = useModelFieldState(cart, 'coupon');
+    const [touched, setTouched] = React.useState(false);
     return (
         <label>
             <input
                 value={coupon}
                 onChange={(e) => setCoupon(e.target.value)}
-                onBlur={() => helpers.setTouched()}
+                onBlur={() => setTouched(true)}
                 disabled={meta.validating}
             />
-            {meta.touched && meta.error && <span style={{ color: 'red' }}>{meta.error}</span>}
+            {touched && meta.error && <span style={{ color: 'red' }}>{meta.error}</span>}
         </label>
     );
 }

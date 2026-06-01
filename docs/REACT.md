@@ -26,7 +26,7 @@ only when its watched slice actually changes.
 | `useModelSelector(model, selector, isEqual?)` | hook | Subscribe to a derived value (selector reference is **part of the subscription** — wrap it in `useCallback`). |
 | `useModelComputed(model, selector, isEqual?)` | hook | Same shape as `useModelSelector`, but selector / `isEqual` are stored in refs and refreshed every render — inline arrows and per-render closure variables (`id`, `index`, …) work without `useCallback`. |
 | `useModelFields(model, fields)` | hook | Subscribe to several fields at once (shallow-compared). |
-| `useModelFieldState(model, field)` | hook | `[value, setValue, meta, helpers]` form-style binding with `error / dirty / touched / validating`. |
+| `useModelFieldState(model, field)` | hook | `[value, setValue, meta]` form-style binding with `error / dirty / validating`. |
 | `shallow` | function | Shallow equality helper for object/array selectors. |
 | `<ModelProvider model>` | component | Provide a model via context. |
 | `useModel<T>()` | hook | Read the model from the nearest provider. |
@@ -85,18 +85,19 @@ function PriceLine() {
     return <span>{qty} x {price}</span>;
 }
 
-// 4. All-in-one form binding.
+// 4. All-in-one form binding. `touched` is component-local UI state.
 function CouponInput() {
-    const [coupon, setCoupon, meta, helpers] = useModelFieldState(cart, 'coupon');
+    const [coupon, setCoupon, meta] = useModelFieldState(cart, 'coupon');
+    const [touched, setTouched] = React.useState(false);
     return (
         <label>
             <input
                 value={coupon}
                 onChange={(e) => setCoupon(e.target.value)}
-                onBlur={() => helpers.setTouched()}
+                onBlur={() => setTouched(true)}
                 disabled={meta.validating}
             />
-            {meta.touched && meta.error && <span style={{ color: 'red' }}>{meta.error}</span>}
+            {touched && meta.error && <span style={{ color: 'red' }}>{meta.error}</span>}
         </label>
     );
 }
