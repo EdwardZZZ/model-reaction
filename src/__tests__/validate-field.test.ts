@@ -367,9 +367,9 @@ describe('validateField (unit)', () => {
 
             const errors = model.validationErrors['field'];
             expect(errors).toHaveLength(3);
-            expect(errors[0].message).toBe('Required error');
-            expect(errors[1].message).toBe('Length error');
-            expect(errors[2].message).toBe('Format error');
+            expect(errors![0]!.message).toBe('Required error');
+            expect(errors![1]!.message).toBe('Length error');
+            expect(errors![2]!.message).toBe('Format error');
             model.dispose();
         });
 
@@ -394,7 +394,7 @@ describe('validateField (unit)', () => {
 
             const errors = model.validationErrors['field'];
             expect(errors).toHaveLength(1);
-            expect(errors[0].message).toBe('Required error');
+            expect(errors![0]!.message).toBe('Required error');
             model.dispose();
         });
 
@@ -419,7 +419,7 @@ describe('validateField (unit)', () => {
 
             const errors = model.validationErrors['field'];
             expect(errors).toHaveLength(1);
-            expect(errors[0].message).toBe('Length error');
+            expect(errors![0]!.message).toBe('Length error');
             model.dispose();
         });
 
@@ -449,7 +449,7 @@ describe('validateField (unit)', () => {
             await model.setField('field', '');
             expect(asyncSpy).not.toHaveBeenCalled();
             expect(model.validationErrors['field']).toHaveLength(1);
-            expect(model.validationErrors['field'][0].message).toBe(
+            expect(model.validationErrors['field']![0]!.message).toBe(
                 'Required error'
             );
 
@@ -457,7 +457,7 @@ describe('validateField (unit)', () => {
             await model.setField('field', 'value');
             expect(asyncSpy).toHaveBeenCalled();
             expect(model.validationErrors['field']).toHaveLength(1);
-            expect(model.validationErrors['field'][0].message).toBe('Async error');
+            expect(model.validationErrors['field']![0]!.message).toBe('Async error');
             model.dispose();
         });
     });

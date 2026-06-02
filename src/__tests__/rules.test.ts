@@ -1,5 +1,6 @@
 import { Rule, ValidationRules } from '../rules';
 import { createModel, Model } from '../index';
+import type { ModelReturn } from '../types';
 
 describe('Rule class', () => {
     test('constructor stores type, message, validate', async () => {
@@ -241,7 +242,7 @@ describe('Custom validation messages (withMessage end-to-end)', () => {
         },
     };
 
-    let model: ReturnType<typeof createModel<User>>;
+    let model: ModelReturn<User>;
 
     beforeEach(() => {
         model = createModel<User>(testSchema);

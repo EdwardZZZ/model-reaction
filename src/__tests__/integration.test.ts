@@ -1,4 +1,27 @@
+/**
+ * integration.test.ts — 文档场景级集成测试
+ *
+ * 与本目录其他 `*.test.ts` 不同，本文件不对应任何单一 src 模块；它通过
+ * 公共 API（`createModel` / `Rule` / `ValidationRules` / `ErrorHandler` /
+ * `ErrorType`）端到端验证 README、BEST_PRACTICES、REACT 等文档中
+ * 列出的全部使用示例，确保文档中的用法与运行时行为保持一致。
+ *
+ * 覆盖范围：
+ *   1.  README 全部代码片段（同步 / 异步校验、自定义规则、ErrorHandler、
+ *       transform、settled、setFields、failFast、errorFormatter）
+ *   2.  Reaction 系统的 action 回调、多 reaction、循环依赖
+ *   3.  事件系统、dirty 数据生命周期、dispose 资源回收
+ *   4.  端到端注册表单流程（Best Practices §4）
+ *   5.  各类边界场景：异步超时、校验器抛错、reaction 计算抛错、
+ *       依赖字段缺失、相同值短路、空 schema、并发 setField 竞态、
+ *       debounce 合并、validateAll 升级 dirtyData 等共 20+ edge case
+ *
+ * 加这一层是为了在重构内部模块时，让"文档承诺"成为不可妥协的回归基线。
+ * 各模块的细粒度行为单测仍由 `model-manager.test.ts` /
+ * `reaction-system.test.ts` / `rules.test.ts` 等承担。
+ */
 import { createModel, ValidationRules, Rule, ErrorHandler, ErrorType } from '../index';
+import type { ModelReturn } from '../types';
 
 describe('Integration Tests — Full Documentation Scenarios', () => {
     beforeEach(() => {
@@ -20,7 +43,7 @@ describe('Integration Tests — Full Documentation Scenarios', () => {
             info: string;
         }
 
-        let userModel: ReturnType<typeof createModel<User>>;
+        let userModel: ModelReturn<User>;
 
         beforeEach(() => {
             userModel = createModel<User>({
@@ -86,8 +109,10 @@ describe('Integration Tests — Full Documentation Scenarios', () => {
             const notFoundCb = jest.fn();
             userModel.on('field:not-found', notFoundCb);
 
-            // @ts-expect-error — testing runtime behaviour
-            await userModel.setField('nonexistentField', 'value');
+            await userModel.setField(
+                'nonexistentField' as unknown as keyof User,
+                'value' as never
+            );
 
             expect(notFoundCb).toHaveBeenCalled();
             expect(notFoundCb.mock.calls[0][0].type).toBe(ErrorType.FIELD_NOT_FOUND);
@@ -136,7 +161,7 @@ describe('Integration Tests — Full Documentation Scenarios', () => {
             username: string;
         }
 
-        let asyncUserModel: ReturnType<typeof createModel<AsyncUser>>;
+        let asyncUserModel: ModelReturn<AsyncUser>;
 
         beforeEach(() => {
             const asyncUniqueRule = new Rule(
@@ -184,7 +209,7 @@ describe('Integration Tests — Full Documentation Scenarios', () => {
             const result = await asyncUserModel.setField('username', 'admin');
             expect(result).toBe(false);
             expect(asyncUserModel.validationErrors.username).toBeDefined();
-            expect(asyncUserModel.validationErrors.username[0].message).toBe('Username already exists');
+            expect(asyncUserModel.validationErrors.username![0]!.message).toBe('Username already exists');
         });
 
         test('should store invalid username in dirty data', async () => {
@@ -194,7 +219,7 @@ describe('Integration Tests — Full Documentation Scenarios', () => {
 
         test('should use withMessage to customise error text', async () => {
             await asyncUserModel.setField('name', '');
-            expect(asyncUserModel.validationErrors.name[0].message).toBe('Username cannot be empty');
+            expect(asyncUserModel.validationErrors.name![0]!.message).toBe('Username cannot be empty');
         });
     });
 
@@ -221,7 +246,7 @@ describe('Integration Tests — Full Documentation Scenarios', () => {
 
             const resultBad = await model.setField('field', 'wrong');
             expect(resultBad).toBe(false);
-            expect(model.validationErrors.field[0].message).toBe('Field value must be "custom"');
+            expect(model.validationErrors.field![0]!.message).toBe('Field value must be "custom"');
 
             const resultOk = await model.setField('field', 'custom');
             expect(resultOk).toBe(true);
@@ -308,7 +333,7 @@ describe('Integration Tests — Full Documentation Scenarios', () => {
 
             const resultBad = await asyncModel.setField('field', 'hi');
             expect(resultBad).toBe(false);
-            expect(asyncModel.validationErrors.field[0].message).toBe('Field length must be greater than 3 characters');
+            expect(asyncModel.validationErrors.field![0]!.message).toBe('Field length must be greater than 3 characters');
 
             asyncModel.dispose();
         });
@@ -463,7 +488,7 @@ describe('Integration Tests — Full Documentation Scenarios', () => {
 
             await model.setField('field', '');
             expect(model.validationErrors.field).toHaveLength(1);
-            expect(model.validationErrors.field[0].message).toBe('Required');
+            expect(model.validationErrors.field![0]!.message).toBe('Required');
 
             model.dispose();
         });
@@ -787,7 +812,7 @@ describe('Integration Tests — Full Documentation Scenarios', () => {
 
             await model.setField('email', 'taken@test.com');
             expect(model.getDirtyData()).toHaveProperty('email', 'taken@test.com');
-            expect(model.validationErrors.email[0].message).toBe('Email is taken');
+            expect(model.validationErrors.email![0]!.message).toBe('Email is taken');
 
             model.dispose();
         });
@@ -916,8 +941,8 @@ describe('Integration Tests — Full Documentation Scenarios', () => {
 
             const result = await model.setField('field', 'value');
             expect(result).toBe(false);
-            expect(model.validationErrors.field.length).toBeGreaterThan(0);
-            expect(model.validationErrors.field[0].message).toContain('Validation failed');
+            expect(model.validationErrors.field!.length).toBeGreaterThan(0);
+            expect(model.validationErrors.field![0]!.message).toContain('Validation failed');
 
             model.dispose();
         });
@@ -944,7 +969,7 @@ describe('Integration Tests — Full Documentation Scenarios', () => {
 
             const result = await model.setField('field', 'any');
             expect(result).toBe(false);
-            expect(model.validationErrors.field[0].message).toContain('Unexpected crash');
+            expect(model.validationErrors.field![0]!.message).toContain('Unexpected crash');
 
             model.dispose();
         });
@@ -971,7 +996,7 @@ describe('Integration Tests — Full Documentation Scenarios', () => {
 
             const result = await model.setField('field', 'any');
             expect(result).toBe(false);
-            expect(model.validationErrors.field[0].message).toContain('Async boom');
+            expect(model.validationErrors.field![0]!.message).toContain('Async boom');
 
             model.dispose();
         });
@@ -1128,8 +1153,8 @@ describe('Integration Tests — Full Documentation Scenarios', () => {
 
             expect(result).toBe(false);
             expect(completeCb).toHaveBeenCalledWith({ isValid: false });
-            expect(model.validationErrors.a.length).toBeGreaterThan(0);
-            expect(model.validationErrors.b.length).toBeGreaterThan(0);
+            expect(model.validationErrors.a!.length).toBeGreaterThan(0);
+            expect(model.validationErrors.b!.length).toBeGreaterThan(0);
 
             model.dispose();
         });
@@ -1275,8 +1300,8 @@ describe('Integration Tests — Full Documentation Scenarios', () => {
             const p1 = model.setField('field', 'first');
             const p2 = model.setField('field', 'second');
 
-            resolvers[1](true);
-            resolvers[0](true);
+            resolvers[1]!(true);
+            resolvers[0]!(true);
 
             const r1 = await p1;
             const r2 = await p2;
@@ -1414,7 +1439,7 @@ describe('Integration Tests — Full Documentation Scenarios', () => {
 
             await model.setField('field', 'test');
             expect(model.validationErrors.field).toHaveLength(1);
-            expect(model.validationErrors.field[0].message).toBe('First fails');
+            expect(model.validationErrors.field![0]!.message).toBe('First fails');
             expect(secondValidatorCalled).not.toHaveBeenCalled();
 
             model.dispose();
@@ -1486,13 +1511,13 @@ describe('Integration Tests — Full Documentation Scenarios', () => {
             await model.setField('field', '');
             expect(model.getDirtyData()).toHaveProperty('field', '');
             expect(model.getField('field')).toBe('valid');
-            expect(model.validationErrors.field.length).toBeGreaterThan(0);
+            expect(model.validationErrors.field!.length).toBeGreaterThan(0);
 
             model.clearDirtyData();
 
             expect(model.getDirtyData()).toEqual({});
             expect(model.getField('field')).toBe('valid');
-            expect(model.validationErrors.field.length).toBeGreaterThan(0);
+            expect(model.validationErrors.field!.length).toBeGreaterThan(0);
 
             model.dispose();
         });

@@ -808,12 +808,12 @@ describe('ModelManager - dispose / settled lifecycle', () => {
         await model.setField('field', '');
         expect(model.getDirtyData()).toHaveProperty('field', '');
         expect(model.getField('field')).toBe('valid');
-        expect(model.validationErrors.field.length).toBeGreaterThan(0);
+        expect(model.validationErrors.field!.length).toBeGreaterThan(0);
 
         model.clearDirtyData();
         expect(model.getDirtyData()).toEqual({});
         expect(model.getField('field')).toBe('valid');
-        expect(model.validationErrors.field.length).toBeGreaterThan(0);
+        expect(model.validationErrors.field!.length).toBeGreaterThan(0);
         model.dispose();
     });
 

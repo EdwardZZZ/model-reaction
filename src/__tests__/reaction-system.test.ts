@@ -481,7 +481,7 @@ describe('ReactionSystem - direct unit tests', () => {
 
     test('clears pending reaction timeouts on dispose', () => {
         jest.useFakeTimers();
-        const clearSpy = jest.spyOn(global, 'clearTimeout');
+        const clearSpy = jest.spyOn(globalThis, 'clearTimeout');
         const handler = new ErrorHandler();
 
         const system = new ReactionSystem(
@@ -516,7 +516,7 @@ describe('ReactionSystem - direct unit tests', () => {
 
     test('clears previous timeout when re-scheduling debounced reactions', () => {
         jest.useFakeTimers();
-        const clearSpy = jest.spyOn(global, 'clearTimeout');
+        const clearSpy = jest.spyOn(globalThis, 'clearTimeout');
         const handler = new ErrorHandler();
 
         const system = new ReactionSystem(

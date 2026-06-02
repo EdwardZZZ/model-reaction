@@ -1,0 +1,14 @@
+{
+  // 仅用于对测试代码做严格类型检查（生产 tsconfig.json 把 *.test.ts 全部 exclude，
+  // ts-jest 默认 transpile-only 也不查类型，因此需要这一份独立配置在 CI 中
+  // 通过 `tsc --noEmit -p tsconfig.test.json` 兜底）。
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    // 测试代码不需要产物 / declaration 文件
+    "declaration": false,
+    "sourceMap": false
+  },
+  "include": ["src/**/*.test.ts", "src/**/*.test.tsx"],
+  "exclude": ["node_modules", "dist"]
+}
