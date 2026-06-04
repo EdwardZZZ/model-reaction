@@ -31,6 +31,8 @@
     "build": "rimraf dist && rollup -c",
     "test": "jest",
     "typecheck:test": "tsc --noEmit -p tsconfig.test.json",
+    "test:lite": "jest --config packages/model-reaction-lite/jest.config.js",
+    "typecheck:lite": "tsc --noEmit -p packages/model-reaction-lite/tsconfig.test.json",
     "format": "prettier --write src/**/*.ts",
     "lint": "eslint \"src/**/*.{ts,js}\"",
     "lint:fix": "eslint \"src/**/*.{ts,js}\" --fix",
