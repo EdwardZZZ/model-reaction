@@ -89,7 +89,7 @@ get the most out of them.
 | --- | --- |
 | One field, controlled input | `useModelField` or `useModelFieldState` |
 | Derived value (sum, formatting, etc.) | `useModelSelector` |
-| Several fields together | `useModelFields(['a', 'b'])` |
+| Several fields together | `useModelFields(model, ['a', 'b'])` |
 | Form-style binding with error / dirty / validating | `useModelFieldState` |
 
 Prefer the most specific hook. `useModelField` is cheaper than

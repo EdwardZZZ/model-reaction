@@ -27,6 +27,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     in-flight async validation.
 
 ### Changed
+- Reworked the ad-creation technical solution document to align with the current
+  `model-reaction` API guidance, and moved it from the repository root to
+  `docs/TECHNICAL_SOLUTION.md`.
 - `settled()` now waits for both pending reaction timeouts AND in-flight async
   reactions/validations, instead of resolving on a fixed timer.
 - `validateAll()` suppresses per-field reactions and triggers a single batched

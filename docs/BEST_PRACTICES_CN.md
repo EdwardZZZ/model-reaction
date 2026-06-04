@@ -88,7 +88,7 @@ errorHandler.onError(ErrorType.UNKNOWN, (error) => {
 | --- | --- |
 | 单个字段的受控输入 | `useModelField` 或 `useModelFieldState` |
 | 派生值（求和、格式化等） | `useModelSelector` |
-| 一次订阅多个字段 | `useModelFields(['a', 'b'])` |
+| 一次订阅多个字段 | `useModelFields(model, ['a', 'b'])` |
 | 含 error / dirty / validating 的表单绑定 | `useModelFieldState` |
 
 优先选择最具体的 hook：`useModelField` 比 `useModelSelector` 更轻量，

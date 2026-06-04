@@ -1,6 +1,6 @@
 # API Reference
 
-Complete API documentation for `model-reaction`.
+Reference for the public `model-reaction` API surface.
 
 [← Back to README](../README.md)
 
@@ -23,7 +23,11 @@ Complete API documentation for `model-reaction`.
 The factory function that creates a model instance.
 
 ```typescript
-createModel<T>(schema: Model<T>, options?: ModelOptions): ModelManager<T>;
+createModel<T>(schema: Model<T>, options?: ModelOptions): ModelReturn<T>;
+createModel<S extends Record<string, FieldSchema>>(
+  schema: S,
+  options?: ModelOptions
+): ModelReturn<InferModelData<S>>;
 ```
 
 ## Model Methods
@@ -78,6 +82,7 @@ Subscribe via `model.on(eventName, handler)`.
 | `validation:complete` | A validation pass finishes. |
 | `validation:error` | A validation rule fails. |
 | `reaction:error` | A reaction throws or rejects. |
+| `dependency:error` | A reaction dependency is misconfigured. |
 | `field:not-found` | A non-existent field is accessed. |
 
 ## ModelOptions
@@ -126,5 +131,9 @@ Unified error management.
 | `UNKNOWN` | Unclassified error. |
 
 ## Type Definitions
+
+Publicly exported types include `Model`, `ModelOptions`, `ModelReturn`,
+`Validator`, `Reaction`, `FieldSchema`, `ValidationError`, `AppError`,
+`ValidateFieldOptions`, `InferFieldType`, `InferModelData`, and `ModelEvents`.
 
 For full type definitions, see [`src/types.ts`](../src/types.ts).

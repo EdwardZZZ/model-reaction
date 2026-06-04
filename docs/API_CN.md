@@ -1,6 +1,6 @@
 # API 参考
 
-`model-reaction` 完整 API 文档。
+`model-reaction` 对外公开 API 的参考文档。
 
 [← 返回 README](../README_CN.md)
 
@@ -23,7 +23,11 @@
 创建模型实例的工厂函数。
 
 ```typescript
-createModel<T>(schema: Model<T>, options?: ModelOptions): ModelManager<T>;
+createModel<T>(schema: Model<T>, options?: ModelOptions): ModelReturn<T>;
+createModel<S extends Record<string, FieldSchema>>(
+  schema: S,
+  options?: ModelOptions
+): ModelReturn<InferModelData<S>>;
 ```
 
 ## Model 方法
@@ -78,6 +82,7 @@ createModel<T>(schema: Model<T>, options?: ModelOptions): ModelManager<T>;
 | `validation:complete` | 一轮验证完成时 |
 | `validation:error` | 某条验证规则失败时 |
 | `reaction:error` | 反应执行抛出错误或 Promise 拒绝时 |
+| `dependency:error` | reaction 依赖配置错误时 |
 | `field:not-found` | 访问未声明的字段时 |
 
 ## ModelOptions
@@ -126,5 +131,9 @@ interface ModelOptions {
 | `UNKNOWN` | 未分类错误 |
 
 ## 类型定义
+
+当前公开导出的类型包括 `Model`、`ModelOptions`、`ModelReturn`、
+`Validator`、`Reaction`、`FieldSchema`、`ValidationError`、`AppError`、
+`ValidateFieldOptions`、`InferFieldType`、`InferModelData` 和 `ModelEvents`。
 
 完整类型定义请见 [`src/types.ts`](../src/types.ts)。

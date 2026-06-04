@@ -24,6 +24,11 @@
 ### React 绑定示例 (react-bindings.tsx)
 展示如何使用 `model-reaction/react` 适配层（`useModelField`、`useModelSelector`）实现字段级与 selector 级的组件订阅，以及 Schema 类型推导。可直接拷贝到 React 18+ 项目中使用（不能通过 CLI 直接运行）。
 
+### React 最佳实践片段 (react-best-practices/)
+补充了一组面向 React 的片段示例，覆盖稳定 selector、`ModelProvider`、
+`Field`、touched 状态处理、提交流程、生命周期清理，以及与 zustand /
+Redux 的对比。这些文件更适合作为参考模板，而不是通过 CLI 直接运行。
+
 ## 运行示例
 
 使用以下命令运行示例：
@@ -38,3 +43,6 @@ npm run example:complex
 
 > React 示例（`examples/react-bindings.tsx`）是独立片段，请在真实的 React
 > 应用中 import，不要用 `ts-node` 直接执行。
+>
+> `examples/react-best-practices/` 目录下的文件也属于参考片段，建议按需拷贝到
+> 实际 React 项目中使用。

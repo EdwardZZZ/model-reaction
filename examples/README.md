@@ -24,6 +24,12 @@ Demonstrates field correlation, dependency validation, and error handling mechan
 ### React Bindings Example (react-bindings.tsx)
 Shows how to use the `model-reaction/react` adapter (`useModelField`, `useModelSelector`) for field-level and selector-level component subscriptions, plus schema type inference. Copy-paste-ready into any React 18+ project (not runnable from the CLI).
 
+### React Best Practices Snippets (react-best-practices/)
+Additional React-focused snippets covering stable selectors, `ModelProvider`,
+`Field`, touched-state handling, submission flow, lifecycle cleanup, and
+comparisons with zustand / Redux. These files are intended as reference
+patterns rather than CLI-runnable examples.
+
 ## Running Examples
 
 Use the following commands to run the examples:
@@ -38,3 +44,6 @@ npm run example:complex
 
 > The React example (`examples/react-bindings.tsx`) is a standalone snippet —
 > import it from a real React app rather than running it via `ts-node`.
+>
+> Files under `examples/react-best-practices/` are also reference snippets and
+> should be copied into a real React project as needed.

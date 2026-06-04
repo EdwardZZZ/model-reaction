@@ -237,6 +237,52 @@ export function createAdDraftModel() {
 - 提交前使用 `await model.validateAll()` 重新校验完整广告草稿。
 - 测试或复杂异步场景中，使用 `await model.settled()` 等待验证和反应完成。
 
+### 3.4 业务约束矩阵
+
+广告创编不应只停留在字段级必填与长度校验，还需要显式描述跨字段和业务阶段约束。推荐将这些规则分为三类：前端即时校验、提交前聚合校验、服务端最终校验。
+
+| 约束 | 规则说明 | 触发时机 | 实现层 |
+| --- | --- | --- | --- |
+| 投放时间范围 | `targeting.endDate` 必须晚于 `targeting.startDate` | 用户修改日期、提交前 | 前端 + 服务端 |
+| 预算约束 | `targeting.dailyBudget` 不得大于 `targeting.budget` | 用户修改预算、提交前 | 前端 + 服务端 |
+| 平台最少选择 | `targeting.platforms` 至少选择一个平台 | 用户修改平台、提交前 | 前端 + 服务端 |
+| 平台素材规格 | 不同平台对标题长度、图片比例、落地页协议可能不同 | 用户切换平台、提交前 | 前端 + 服务端 |
+| 落地页安全 | 落地页必须为合法 URL，必要时通过安全检测或白名单校验 | 输入 URL、提交前 | 前端基础校验 + 服务端最终校验 |
+| 状态迁移 | 仅 `draft` 可提交为 `pending`，审核中不可再次编辑部分字段 | 保存、提审、回填 | 模块层 + 服务端 |
+| 审核阻断原因 | 当必要信息缺失时，需给出明确不可提审原因 | 字段变更、提交前 | 前端 reaction |
+
+### 3.5 跨字段规则实现建议
+
+对于广告业务，建议优先把同步、可本地判断的约束写进 schema，避免组件中重复写判断逻辑。
+
+```ts
+import { Rule } from 'model-reaction';
+
+const afterStartDate = new Rule(
+  'afterStartDate',
+  '结束时间必须晚于开始时间',
+  (value, data) =>
+    value instanceof Date &&
+    data?.['targeting.startDate'] instanceof Date &&
+    value.getTime() > data['targeting.startDate'].getTime(),
+);
+
+const dailyWithinBudget = new Rule(
+  'dailyWithinBudget',
+  '日预算不能大于总预算',
+  (value, data) =>
+    typeof value === 'number' &&
+    typeof data?.['targeting.budget'] === 'number' &&
+    value <= data['targeting.budget'],
+);
+```
+
+推荐策略：
+
+- 能在本地确定的规则优先放在 schema validator 中。
+- 会依赖平台配置中心、风控服务、素材审核服务的规则放到提交前接口中兜底。
+- 需要展示"当前为什么不能提交"时，优先用 reaction 生成面向 UI 的派生字段，如 `audit.blockReason`。
+
 ## 4. 模块层设计
 
 模块层封装广告创编动作，避免组件直接拼装大量字段名。
@@ -415,6 +461,46 @@ async function handleSubmit() {
 }
 ```
 
+### 5.3 页面装配与状态流转
+
+推荐页面装配关系：
+
+```text
+AdCreationPage
+  -> AdDraftOwner
+    -> AdCreationShell
+      -> BasicInfoStep
+      -> CreativeStep
+      -> TargetingStep
+      -> SubmitBar
+```
+
+各层职责建议如下：
+
+| 组件 / 容器 | 职责 |
+| --- | --- |
+| `AdCreationPage` | 路由参数解析、页面级权限判断、初始化接口调用 |
+| `AdDraftOwner` | 创建 model / module，负责 `dispose()` |
+| `AdCreationShell` | 步骤切换、整体布局、跨步骤消息提示 |
+| `BasicInfoStep` / `CreativeStep` / `TargetingStep` | 只关注字段输入和局部 UI 状态 |
+| `SubmitBar` | 统一触发保存草稿、提交审核、展示提交中状态 |
+
+推荐状态流：
+
+```text
+进入页面
+  -> 创建 model
+  -> 拉取草稿并 setFields 回填
+  -> 用户逐步编辑字段
+  -> schema validator 即时校验
+  -> reaction 产出 audit.ready / audit.blockReason
+  -> 点击保存草稿
+  -> 点击提交审核
+  -> validateAll
+  -> 服务端最终校验
+  -> 成功则状态迁移到 pending，失败则回填错误
+```
+
 ## 6. 校验与派生策略
 
 ### 6.1 校验策略
@@ -432,7 +518,123 @@ async function handleSubmit() {
 - 对频繁输入字段触发的派生计算配置 `debounceReactions`。
 - 需要监听派生结果时，使用 `subscribeField` 或 React selector，不在组件中重复计算。
 
-## 7. 生命周期与资源管理
+### 6.3 服务端校验与前端校验分工
+
+建议将校验边界明确分层：
+
+| 校验类型 | 示例 | 放置位置 |
+| --- | --- | --- |
+| 本地同步校验 | 必填、长度、数字范围、日期先后 | schema validator |
+| 本地派生阻断 | 是否允许提交、缺失原因提示 | reaction |
+| 远端异步校验 | 广告名查重、落地页安全扫描、素材合规性 | 服务端接口或异步 validator |
+| 最终事实校验 | 权限、账户余额、平台准入、审核状态冲突 | 服务端 |
+
+落地原则：
+
+- 前端负责提升填写体验和提前发现错误，但不替代服务端最终裁决。
+- 服务端拒绝时，前端应保留用户已填写内容，不重置 model。
+- 本地 validator 的错误文案偏向填写指导，服务端错误文案偏向业务规则说明。
+
+## 7. 接口契约与异常流
+
+### 7.1 接口划分
+
+建议至少提供以下接口：
+
+| 接口 | 方法 | 说明 |
+| --- | --- | --- |
+| `/api/ad-drafts/:id` | `GET` | 获取广告草稿详情，用于页面初始化与恢复编辑 |
+| `/api/ad-drafts` | `POST` | 新建草稿 |
+| `/api/ad-drafts/:id` | `PUT` | 保存草稿 |
+| `/api/ad-drafts/:id/submit` | `POST` | 提交审核 |
+| `/api/platform-specs` | `GET` | 获取平台素材规则与能力开关 |
+
+### 7.2 DTO 设计建议
+
+提交审核时，建议将 model 数据转换为后端稳定契约，而不是直接把内部字段名原样透传。
+
+```ts
+interface SubmitAdRequest {
+  id: string;
+  name: string;
+  status: 'draft' | 'pending' | 'approved' | 'rejected' | 'active' | 'paused';
+  creative: {
+    title: string;
+    description: string;
+    imageUrl: string;
+    landingPageUrl: string;
+  };
+  targeting: {
+    budget: number;
+    dailyBudget: number;
+    startDate: string;
+    endDate: string;
+    platforms: string[];
+  };
+}
+
+interface FieldIssue {
+  field: string;
+  code: string;
+  message: string;
+}
+
+interface SubmitAdResponse {
+  success: boolean;
+  adId?: string;
+  issues?: FieldIssue[];
+}
+```
+
+建议转换约束：
+
+- `Date` 在出站时统一序列化为 ISO 字符串。
+- 内部字段名如 `basic.name` 仅用于前端模型；对外 DTO 使用稳定业务语义字段。
+- 枚举值与平台 ID 应由平台配置中心或常量表统一维护，避免前后端漂移。
+
+### 7.3 服务端错误回填
+
+`model-reaction` 的 `validationErrors` 来自本地校验，不建议直接改写内部状态去“伪造”服务端错误。推荐单独维护 `serverFieldErrors`，并在 UI 层与 `meta.error` 合并展示。
+
+```ts
+type ServerFieldErrors = Record<string, string[]>;
+
+function toServerFieldErrors(issues: FieldIssue[] = []): ServerFieldErrors {
+  return issues.reduce<ServerFieldErrors>((acc, issue) => {
+    const key = issue.field;
+    acc[key] ??= [];
+    acc[key].push(issue.message);
+    return acc;
+  }, {});
+}
+```
+
+推荐错误处理流：
+
+1. `validateAll()` 通过后再请求服务端提交接口。
+2. 服务端返回 `issues` 时，将其映射为 `serverFieldErrors`。
+3. 表单字段展示时优先显示本地 `meta.error`，若本地无错误则显示服务端错误。
+4. 用户再次编辑字段后，清除该字段对应的 `serverFieldErrors`，避免过期错误残留。
+
+### 7.4 草稿保存与恢复
+
+建议把“保存草稿”和“提交审核”分离：
+
+- 保存草稿允许部分字段未完成，只要求通过最小可保存约束。
+- 提交审核要求完整业务校验通过。
+- 页面初始化时先拉取草稿 DTO，再执行一次 `setFields` 回填。
+- 若回填数据来自旧版本 schema，模块层应提供兼容转换逻辑。
+
+### 7.5 幂等与重试
+
+对于保存与提交接口，建议增加如下保障：
+
+- 保存草稿使用草稿 ID 做幂等更新。
+- 提交审核使用请求 ID 或版本号避免重复提交。
+- 网络重试仅针对幂等接口自动执行。
+- 若服务端检测到版本冲突，应返回显式错误码并提示用户刷新或合并草稿。
+
+## 8. 生命周期与资源管理
 
 广告创编页、弹窗、抽屉等 UI 容器应拥有自己的 model 实例。
 
@@ -457,7 +659,37 @@ function AdEditorRoute() {
 - 测试中应在 `afterEach` 或测试结束路径调用 `dispose()`。
 - 若需要重置表单，优先销毁旧 model 并创建新 model，避免 dirty 状态残留。
 
-## 8. 测试方案
+## 9. 非功能要求
+
+### 9.1 性能
+
+- 首屏进入编辑页时，应优先完成草稿加载与基础字段渲染，重量级预览区可以延迟加载。
+- 对频繁联动字段开启适度 `debounceReactions`，避免输入过程重复计算。
+- 大型素材列表、平台能力列表建议分页或虚拟滚动，不把全部状态塞入单个字段。
+- 避免在 selector 中返回新的大对象；必要时使用 `useModelFields` 或配合 `shallow`。
+
+### 9.2 可观测性
+
+- 记录草稿保存成功率、提审成功率、字段级服务端拒绝率。
+- 对提审失败原因做错误码聚合，便于分析阻塞点。
+- 监控草稿加载耗时、保存耗时、提审接口耗时。
+- 对 `reaction:error`、`validation:error` 的异常峰值建立告警。
+
+### 9.3 安全与合规
+
+- 落地页、图片地址、文案内容需要经过平台安全规则与内容审核服务。
+- 文档、图片、链接等用户输入在展示层必须做安全转义或受控渲染。
+- 关键操作如提审、撤回、审核回填需要记录审计日志。
+- 若涉及多租户或代理商账户，接口层必须做租户隔离与权限校验。
+
+### 9.4 可恢复性
+
+- 草稿保存失败时不得丢失当前编辑内容。
+- 页面刷新后应支持从最近一次成功保存的草稿恢复。
+- 对网络闪断场景，允许用户保留本地未提交内容并再次重试。
+- 审核失败回填时应保留历史阻断原因，帮助用户定向修改。
+
+## 10. 测试方案
 
 | 测试类型 | 覆盖重点 |
 | --- | --- |
@@ -480,7 +712,15 @@ expect(model.getDirtyData()['basic.name']).toBe('ab');
 model.dispose();
 ```
 
-## 9. 交付建议
+建议额外补充的测试样例：
+
+- `targeting.endDate <= targeting.startDate` 时返回明确错误文案。
+- `targeting.dailyBudget > targeting.budget` 时提交被阻断。
+- 服务端返回字段错误后，重新编辑该字段会清除对应服务端错误。
+- 草稿回填后 `audit.ready`、`audit.blockReason` 能正确重算。
+- 多平台选择时，平台特有规则能正确启用或禁用。
+
+## 11. 交付建议
 
 推荐目录结构：
 
@@ -507,6 +747,6 @@ src/
 - 第三阶段：接入后端保存接口、草稿恢复、审核失败回填。
 - 第四阶段：基于 `subscribe` 或 selector 增加实时预览、预算估算等派生能力。
 
-## 10. 总结
+## 12. 总结
 
-基于 `model-reaction` 的广告创编系统应以 schema 作为数据契约，以模块方法作为业务入口，以 React 字段级订阅作为 UI 集成方式。该方案能保证失败输入与可信数据隔离、派生状态自动更新、模块逻辑集中维护，并通过显式生命周期管理降低大型表单系统的状态复杂度。
+基于 `model-reaction` 的广告创编系统应以 schema 作为数据契约，以模块方法作为业务入口，以 React 字段级订阅作为 UI 集成方式。在此基础上，完整方案还应覆盖跨字段业务约束、接口契约、服务端错误回填、草稿恢复、非功能要求与页面装配关系。这样才能让文档不仅解释“如何使用库”，也能真正指导广告创编系统的实施与交付。

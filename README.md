@@ -204,9 +204,10 @@ function NameField() {
 | React bindings & selector hooks | [docs/REACT.md](docs/REACT.md) |
 | Best practices | [docs/BEST_PRACTICES.md](docs/BEST_PRACTICES.md) |
 | Comparison with Redux & zustand | [docs/COMPARISON.md](docs/COMPARISON.md) |
+| Scenario-based technical solution | [docs/TECHNICAL_SOLUTION.md](docs/TECHNICAL_SOLUTION.md) |
 | Runnable examples | [`examples/`](examples/) |
 | For coding agents / LLMs (high-density quickstart) | [AGENTS.md](AGENTS.md) |
 
 ## License
 
-[MIT](LICENSE)
+[ISC](LICENSE)

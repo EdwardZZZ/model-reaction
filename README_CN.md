@@ -202,9 +202,10 @@ function NameField() {
 | React 绑定与选择器 hooks | [docs/REACT_CN.md](docs/REACT_CN.md) |
 | 最佳实践 | [docs/BEST_PRACTICES_CN.md](docs/BEST_PRACTICES_CN.md) |
 | 与 Redux、zustand 对比 | [docs/COMPARISON_CN.md](docs/COMPARISON_CN.md) |
+| 场景化技术方案 | [docs/TECHNICAL_SOLUTION.md](docs/TECHNICAL_SOLUTION.md) |
 | 可运行示例 | [`examples/`](examples/) |
 | 给编码代理 / LLM 的高密度入门指南 | [AGENTS.md](AGENTS.md) |
 
 ## 许可证
 
-[MIT](LICENSE)
+[ISC](LICENSE)
