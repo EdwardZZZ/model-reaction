@@ -15,6 +15,13 @@
 - **类型安全** —— Schema 完整驱动 `model.data` 类型。
 - **可选 React 适配** —— 细粒度、selector 级订阅；核心入口零 React 依赖。
 
+### 面向 AI 友好设计
+
+`model-reaction` 刻意保持较小的 API 面：schema 字面量定义模型，
+`setField` / `setFields` 是主要写入路径，验证失败的值进入 `dirtyData`，
+React 生命周期显式处理（`await setField(...)`，cleanup 中调用 `dispose()`）。
+Coding agent 可以先阅读 [AGENTS.md](AGENTS.md) 获取精简规则。
+
 ## 安装
 
 ```bash
@@ -59,6 +66,9 @@ const ok = await user.validateAll();
 console.log(ok, user.data); // true { name: 'John', age: 30 }
 ```
 
+始终 `await setField(...)`，确保验证完成后再读取 `data`；
+当 model 的 owner 卸载时，始终在 cleanup 路径里调用 `dispose()`。
+
 ## 核心概念
 
 ### 反应（Reactions）
@@ -101,14 +111,18 @@ user.on('field:change',     (e) => console.log(e.field, '=', e.value));
 ## React 绑定
 
 ```tsx
-import { useModelField, useModelFieldState } from 'model-reaction/react';
+import { useEffect, useState } from 'react';
+import { createModel, ValidationRules } from 'model-reaction';
+import { ModelProvider, useModel, useModelField, useModelFieldState } from 'model-reaction/react';
 
 function NameInput() {
+  const user = useModel<User>();
   const name = useModelField(user, 'name');
-  return <input value={name} onChange={(e) => user.setField('name', e.target.value)} />;
+  return <input value={name} onChange={async (e) => { await user.setField('name', e.target.value); }} />;
 }
 
 function AgeInput() {
+  const user = useModel<User>();
   const [age, setAge, meta] = useModelFieldState(user, 'age');
   return (
     <>
@@ -117,9 +131,20 @@ function AgeInput() {
     </>
   );
 }
+
+function UserModelOwner() {
+  const [user] = useState(() => createModel<User>({
+    name: { type: 'string', default: '', validator: [ValidationRules.required] },
+    age:  { type: 'number', default: 18, validator: [ValidationRules.min(18)] },
+  }));
+  useEffect(() => () => user.dispose(), [user]);
+  return <ModelProvider model={user}><NameInput /><AgeInput /></ModelProvider>;
+}
 ```
 
-完整 hook 列表、`useModelSelector` vs `useModelComputed` 选择决策树与性能建议，见 [docs/REACT_CN.md](docs/REACT_CN.md)。
+React 生命周期推荐两种模式：**Provider owner**（共享状态限定在某个子树内）
+或 **per-route model**（每个路由 / 弹窗创建新实例）；避免模块级 singleton。
+完整 hook 列表、生命周期示例、`useModelSelector` vs `useModelComputed` 选择决策树与性能建议，见 [docs/REACT_CN.md](docs/REACT_CN.md)。
 
 ### 表单字段绑定 —— `useModelFieldState`
 

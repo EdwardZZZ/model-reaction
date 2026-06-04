@@ -5,6 +5,7 @@
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "noEmit": true,
+    "types": ["jest", "node"],
     // 测试代码不需要产物 / declaration 文件
     "declaration": false,
     "sourceMap": false

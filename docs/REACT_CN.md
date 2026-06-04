@@ -10,6 +10,7 @@
 
 - [Hooks 与组件](#hooks-与组件)
 - [基本示例](#基本示例)
+- [React 中的 Model 生命周期](#react-中的-model-生命周期)
 - [`useModelSelector` vs `useModelComputed`](#usemodelselector-vs-usemodelcomputed)
 - [选择决策树](#选择决策树)
 - [性能高发场景对照](#性能高发场景对照)
@@ -35,7 +36,7 @@
 ## 基本示例
 
 ```tsx
-import { useCallback } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { createModel, ValidationRules } from 'model-reaction';
 import {
     Field,
@@ -55,21 +56,32 @@ interface Cart {
     name: string;
 }
 
-const cart = createModel<Cart>({
-    qty:    { type: 'number', default: 1 },
-    price:  { type: 'number', default: 100 },
-    coupon: { type: 'string', default: '' },
-    name:   { type: 'string', default: '', validator: [ValidationRules.required] },
-});
+function createCartModel() {
+    return createModel<Cart>({
+        qty:    { type: 'number', default: 1 },
+        price:  { type: 'number', default: 100 },
+        coupon: { type: 'string', default: '' },
+        name:   { type: 'string', default: '', validator: [ValidationRules.required] },
+    });
+}
 
 // 1. 单字段 hook
 function NameInput() {
+    const cart = useModel<Cart>();
     const name = useModelField(cart, 'name');
-    return <input value={name} onChange={(e) => cart.setField('name', e.target.value)} />;
+    return (
+        <input
+            value={name}
+            onChange={async (e) => {
+                await cart.setField('name', e.target.value);
+            }}
+        />
+    );
 }
 
 // 2. 派生值 hook —— selector 引用是订阅的一部分，请用 useCallback 锁定
 function Total() {
+    const cart = useModel<Cart>();
     const selectTotal = useCallback((d: Cart) => d.qty * d.price, []);
     const total = useModelSelector(cart, selectTotal);
     return <span>Total: {total}</span>;
@@ -77,19 +89,23 @@ function Total() {
 
 // 3. 多字段 hook（浅比较）
 function PriceLine() {
+    const cart = useModel<Cart>();
     const { qty, price } = useModelFields(cart, ['qty', 'price']);
     return <span>{qty} x {price}</span>;
 }
 
 // 4. 一体化表单绑定 —— `touched` 是组件本地 UI 状态
 function CouponInput() {
+    const cart = useModel<Cart>();
     const [coupon, setCoupon, meta] = useModelFieldState(cart, 'coupon');
-    const [touched, setTouched] = React.useState(false);
+    const [touched, setTouched] = useState(false);
     return (
         <label>
             <input
                 value={coupon}
-                onChange={(e) => setCoupon(e.target.value)}
+                onChange={async (e) => {
+                    await setCoupon(e.target.value);
+                }}
                 onBlur={() => setTouched(true)}
                 disabled={meta.validating}
             />
@@ -98,15 +114,24 @@ function CouponInput() {
     );
 }
 
-// 5. Provider + render-prop Field —— 免 prop 透传
+// 5. Provider owner —— 子组件共享同一个 model；cleanup 负责 dispose
+function CartModelOwner({ children }: { children: ReactNode }) {
+    const [cart] = useState(createCartModel);
+    useEffect(() => () => cart.dispose(), [cart]);
+    return <ModelProvider model={cart}>{children}</ModelProvider>;
+}
+
+// 6. Provider + render-prop Field —— 免 prop 透传
 function CartApp() {
     return (
-        <ModelProvider model={cart}>
+        <CartModelOwner>
             <Field<Cart, 'name'> name="name">
                 {({ value, setValue, meta }) => (
                     <input
                         value={value}
-                        onChange={(e) => setValue(e.target.value)}
+                        onChange={async (e) => {
+                            await setValue(e.target.value);
+                        }}
                         aria-invalid={!!meta.error}
                     />
                 )}
@@ -114,11 +139,11 @@ function CartApp() {
             <Total />
             <PriceLine />
             <CouponInput />
-        </ModelProvider>
+        </CartModelOwner>
     );
 }
 
-// 6. 自定义选择器返回新对象时，请配合 `shallow`
+// 7. 自定义选择器返回新对象时，请配合 `shallow`
 function Snapshot() {
     const m = useModel<Cart>();
     const selectSlice = useCallback((d: Cart) => ({ qty: d.qty, price: d.price }), []);
@@ -128,6 +153,103 @@ function Snapshot() {
 ```
 
 完整示例见 [`examples/react-bindings.tsx`](../examples/react-bindings.tsx)。
+
+## React 中的 Model 生命周期
+
+一个 `model` 实例会持有 reactions、内部事件监听器和未完成的验证定时器。
+这些资源不会因为 JavaScript GC 自动知道该清理什么；如果忘记调用
+`dispose()`，model 以及它闭包里引用的值都会继续存活。在 React 里，
+最常见的问题是：**把 model 写成模块级 singleton，并在多个路由 / 测试 /
+浏览器 tab 之间共享，却没有任何地方负责清理**。
+
+### 反例：模块级 singleton
+
+```tsx
+// model.ts
+import { createModel } from 'model-reaction';
+export const userModel = createModel({ /* ... */ });
+// dispose() 永远不会被调用；所有 import `userModel` 的路由都共享同一个实例，
+// 会在路由切换后泄漏 reactions，也会破坏测试隔离。
+```
+
+典型症状：
+- 测试之间互相污染状态（jest worker 读到旧的 `data`）。
+- 热更新后 reaction handler 被重复注册。
+- 多 tab 应用里看到已经关闭视图留下的幽灵更新。
+
+### 修复 A：Provider owner 管理 dispose
+
+在真正拥有生命周期的组件里创建 model，通过 `useEffect` cleanup 调用
+`dispose()`，再用 context 向下传递。
+
+```tsx
+import { useEffect, useState, type ReactNode } from 'react';
+import { ModelProvider } from 'model-reaction/react';
+import { createModel } from 'model-reaction';
+
+function UserModelOwner({ children }: { children: ReactNode }) {
+    const [model] = useState(() => createModel({ /* ... */ }));
+    useEffect(() => () => model.dispose(), [model]);
+    return <ModelProvider model={model}>{children}</ModelProvider>;
+}
+
+// 挂在需要共享 model 的子树顶部。
+function App() {
+    return (
+        <UserModelOwner>
+            <ProfilePage />
+            <SettingsPage />
+        </UserModelOwner>
+    );
+}
+```
+
+为什么有效：
+- `useState(() => createModel(...))` 在每次 owner 挂载期间只运行一次，
+  所以通过 `useModel()` 读取的子组件共享同一个实例。
+- `useEffect` cleanup 会在卸载时触发（热更新导致 owner 重挂载时也会触发），
+  保证每个生命周期只调用一次 `dispose()`。
+- 相关单测见 [`src/__tests__/react.test.tsx`](../src/__tests__/react.test.tsx)
+  中的 "Provider-owned model dispose lifecycle"。
+
+### 修复 B：per-route 实例
+
+如果 model 的数据只属于单个路由（编辑表单、向导、弹窗），就在路由组件内部创建。
+
+```tsx
+function EditUserRoute({ userId }: { userId: string }) {
+    const [model] = useState(() => createModel({ /* ... */ }));
+
+    useEffect(() => {
+        // 可选：挂载时从服务端回填数据。
+        model.setFields(loadUser(userId));
+        return () => model.dispose();
+    }, [model, userId]);
+
+    return (
+        <ModelProvider model={model}>
+            <EditForm />
+        </ModelProvider>
+    );
+}
+```
+
+每次进入 `/users/:id/edit` 都会创建新 model，离开路由时销毁；两个 tab
+编辑不同用户时也不会互相影响。
+
+### 模式对比
+
+| 维度 | 模块级 singleton（反例） | 修复 A：Provider + owner | 修复 B：per-route |
+| --- | --- | --- | --- |
+| 跨路由共享 | 是（意外共享） | 是（限定在子树内的有意共享） | 否 |
+| `dispose()` 触发点 | 永不触发 | owner 卸载 | 路由卸载 |
+| 测试隔离 | 破坏 | 正常（每个测试重新挂载） | 正常（每个测试重新挂载） |
+| 多 tab 安全性 | dev 下容易泄漏 | 每个 tab 拥有自己的树 | 每个 tab 拥有自己的树 |
+| 复杂度 | 最低 | 低 | 低 |
+| 推荐场景 | 不推荐 | 应用级 / 功能级共享状态 | 路由或弹窗内的局部状态 |
+
+经验法则：**谁调用 `createModel`，谁就负责调用 `dispose()`**。在 React 中，
+这个责任应放在带 `useEffect` cleanup 的组件里，而不是模块顶层。
 
 ## `useModelSelector` vs `useModelComputed`
 

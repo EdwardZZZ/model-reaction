@@ -15,6 +15,14 @@ A type-safe data model library for TypeScript: validation, dependency reactions,
 - **Type-safe** — the schema fully drives `model.data` typing.
 - **Optional React adapter** — fine-grained, selector-level subscriptions; no React in the core.
 
+### AI-Friendly by Design
+
+`model-reaction` keeps the surface area intentionally small: schema literals
+define the model, `setField` / `setFields` are the only write paths, failed
+values stay in `dirtyData`, and React lifecycles are explicit
+(`await setField(...)`, `dispose()` in cleanup). Coding agents can start from
+[AGENTS.md](AGENTS.md) for the short ruleset.
+
 ## Installation
 
 ```bash
@@ -59,6 +67,9 @@ const ok = await user.validateAll();
 console.log(ok, user.data); // true { name: 'John', age: 30 }
 ```
 
+Always `await setField(...)` so validation has settled before you read `data`;
+always call `dispose()` from your cleanup path when the model's owner unmounts.
+
 ## Core Concepts
 
 ### Reactions
@@ -101,14 +112,18 @@ See [docs/API.md](docs/API.md#events) for the full event list.
 ## React Bindings
 
 ```tsx
-import { useModelField, useModelFieldState } from 'model-reaction/react';
+import { useEffect, useState } from 'react';
+import { createModel, ValidationRules } from 'model-reaction';
+import { ModelProvider, useModel, useModelField, useModelFieldState } from 'model-reaction/react';
 
 function NameInput() {
+  const user = useModel<User>();
   const name = useModelField(user, 'name');
-  return <input value={name} onChange={(e) => user.setField('name', e.target.value)} />;
+  return <input value={name} onChange={async (e) => { await user.setField('name', e.target.value); }} />;
 }
 
 function AgeInput() {
+  const user = useModel<User>();
   const [age, setAge, meta] = useModelFieldState(user, 'age');
   return (
     <>
@@ -117,9 +132,21 @@ function AgeInput() {
     </>
   );
 }
+
+function UserModelOwner() {
+  const [user] = useState(() => createModel<User>({
+    name: { type: 'string', default: '', validator: [ValidationRules.required] },
+    age:  { type: 'number', default: 18, validator: [ValidationRules.min(18)] },
+  }));
+  useEffect(() => () => user.dispose(), [user]);
+  return <ModelProvider model={user}><NameInput /><AgeInput /></ModelProvider>;
+}
 ```
 
-For the full hook list, the `useModelSelector` vs `useModelComputed` decision tree, and performance guidance, see [docs/REACT.md](docs/REACT.md).
+For React lifecycles, prefer a **Provider owner** (shared state scoped to a subtree)
+or a **per-route model** (fresh instance per route / modal); avoid module-level
+singletons. For the full hook list, lifecycle examples, the `useModelSelector` vs
+`useModelComputed` decision tree, and performance guidance, see [docs/REACT.md](docs/REACT.md).
 
 ### Form Field Bindings — `useModelFieldState`
 

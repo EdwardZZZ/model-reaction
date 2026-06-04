@@ -39,7 +39,7 @@ it in your app if you use this entry point.
 ## Basic Example
 
 ```tsx
-import { useCallback } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { createModel, ValidationRules } from 'model-reaction';
 import {
     Field,
@@ -59,22 +59,33 @@ interface Cart {
     name: string;
 }
 
-const cart = createModel<Cart>({
-    qty:    { type: 'number', default: 1 },
-    price:  { type: 'number', default: 100 },
-    coupon: { type: 'string', default: '' },
-    name:   { type: 'string', default: '', validator: [ValidationRules.required] },
-});
+function createCartModel() {
+    return createModel<Cart>({
+        qty:    { type: 'number', default: 1 },
+        price:  { type: 'number', default: 100 },
+        coupon: { type: 'string', default: '' },
+        name:   { type: 'string', default: '', validator: [ValidationRules.required] },
+    });
+}
 
 // 1. Single-field hook.
 function NameInput() {
+    const cart = useModel<Cart>();
     const name = useModelField(cart, 'name');
-    return <input value={name} onChange={(e) => cart.setField('name', e.target.value)} />;
+    return (
+        <input
+            value={name}
+            onChange={async (e) => {
+                await cart.setField('name', e.target.value);
+            }}
+        />
+    );
 }
 
 // 2. Selector hook — selector identity is part of the subscription, so
 // stabilize it with `useCallback` (or hoist to module scope).
 function Total() {
+    const cart = useModel<Cart>();
     const selectTotal = useCallback((d: Cart) => d.qty * d.price, []);
     const total = useModelSelector(cart, selectTotal);
     return <span>Total: {total}</span>;
@@ -82,19 +93,23 @@ function Total() {
 
 // 3. Multi-field hook (shallow-compared).
 function PriceLine() {
+    const cart = useModel<Cart>();
     const { qty, price } = useModelFields(cart, ['qty', 'price']);
     return <span>{qty} x {price}</span>;
 }
 
 // 4. All-in-one form binding. `touched` is component-local UI state.
 function CouponInput() {
+    const cart = useModel<Cart>();
     const [coupon, setCoupon, meta] = useModelFieldState(cart, 'coupon');
-    const [touched, setTouched] = React.useState(false);
+    const [touched, setTouched] = useState(false);
     return (
         <label>
             <input
                 value={coupon}
-                onChange={(e) => setCoupon(e.target.value)}
+                onChange={async (e) => {
+                    await setCoupon(e.target.value);
+                }}
                 onBlur={() => setTouched(true)}
                 disabled={meta.validating}
             />
@@ -103,15 +118,24 @@ function CouponInput() {
     );
 }
 
-// 5. Provider + render-prop Field — no prop drilling.
+// 5. Provider owner — children share one model; cleanup disposes it.
+function CartModelOwner({ children }: { children: ReactNode }) {
+    const [cart] = useState(createCartModel);
+    useEffect(() => () => cart.dispose(), [cart]);
+    return <ModelProvider model={cart}>{children}</ModelProvider>;
+}
+
+// 6. Provider + render-prop Field — no prop drilling.
 function CartApp() {
     return (
-        <ModelProvider model={cart}>
+        <CartModelOwner>
             <Field<Cart, 'name'> name="name">
                 {({ value, setValue, meta }) => (
                     <input
                         value={value}
-                        onChange={(e) => setValue(e.target.value)}
+                        onChange={async (e) => {
+                            await setValue(e.target.value);
+                        }}
                         aria-invalid={!!meta.error}
                     />
                 )}
@@ -119,11 +143,11 @@ function CartApp() {
             <Total />
             <PriceLine />
             <CouponInput />
-        </ModelProvider>
+        </CartModelOwner>
     );
 }
 
-// 6. Custom selectors that build fresh containers — pair with `shallow`.
+// 7. Custom selectors that build fresh containers — pair with `shallow`.
 function Snapshot() {
     const m = useModel<Cart>();
     const selectSlice = useCallback((d: Cart) => ({ qty: d.qty, price: d.price }), []);
@@ -165,11 +189,11 @@ Hold the model in the component that *owns* its lifetime, dispose it
 from a `useEffect` cleanup, and pass it down through context.
 
 ```tsx
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { ModelProvider } from 'model-reaction/react';
 import { createModel } from 'model-reaction';
 
-function UserModelOwner({ children }: { children: React.ReactNode }) {
+function UserModelOwner({ children }: { children: ReactNode }) {
     const [model] = useState(() => createModel({ /* ... */ }));
     useEffect(() => () => model.dispose(), [model]);
     return <ModelProvider model={model}>{children}</ModelProvider>;

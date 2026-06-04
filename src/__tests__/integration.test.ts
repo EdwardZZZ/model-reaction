@@ -20,8 +20,15 @@
  * 各模块的细粒度行为单测仍由 `model-manager.test.ts` /
  * `reaction-system.test.ts` / `rules.test.ts` 等承担。
  */
+import * as fs from 'fs';
+import * as path from 'path';
 import { createModel, ValidationRules, Rule, ErrorHandler, ErrorType } from '../index';
 import type { ModelReturn } from '../types';
+
+const repoRoot = path.resolve(__dirname, '../..');
+const readProjectFile = (...segments: string[]) =>
+    fs.readFileSync(path.join(repoRoot, ...segments), 'utf8');
+const collapseWhitespace = (text: string) => text.replace(/\s+/g, ' ');
 
 describe('Integration Tests — Full Documentation Scenarios', () => {
     beforeEach(() => {
@@ -1520,6 +1527,93 @@ describe('Integration Tests — Full Documentation Scenarios', () => {
             expect(model.validationErrors.field!.length).toBeGreaterThan(0);
 
             model.dispose();
+        });
+    });
+
+    // =========================================================================
+    // 43. README / React docs — AI-friendly lifecycle guidance stays in sync
+    // =========================================================================
+    describe('Docs: AI-friendly lifecycle guidance', () => {
+        test('README and README_CN keep the AI-friendly design note near the top', () => {
+            const readme = readProjectFile('README.md');
+            const readmeCn = readProjectFile('README_CN.md');
+            const readmeText = collapseWhitespace(readme);
+            const readmeCnText = collapseWhitespace(readmeCn);
+
+            expect(readme).toContain('### AI-Friendly by Design');
+            expect(readmeText).toContain('schema literals');
+            expect(readmeText).toContain('`setField` / `setFields` are the only write paths');
+            expect(readmeText).toContain('failed values stay in `dirtyData`');
+            expect(readmeText).toContain('`await setField(...)`, `dispose()` in cleanup');
+            expect(readme).toContain('[AGENTS.md](AGENTS.md)');
+
+            expect(readmeCn).toContain('### 面向 AI 友好设计');
+            expect(readmeCnText).toContain('schema 字面量定义模型');
+            expect(readmeCnText).toContain('`setField` / `setFields` 是主要写入路径');
+            expect(readmeCnText).toContain('验证失败的值进入 `dirtyData`');
+            expect(readmeCnText).toContain('`await setField(...)`');
+            expect(readmeCnText).toContain('cleanup 中调用 `dispose()`');
+            expect(readmeCn).toContain('[AGENTS.md](AGENTS.md)');
+        });
+
+        test('quick-start docs explicitly require awaiting writes and disposing owners', () => {
+            const readme = readProjectFile('README.md');
+            const readmeCn = readProjectFile('README_CN.md');
+            const readmeText = collapseWhitespace(readme);
+            const readmeCnText = collapseWhitespace(readmeCn);
+
+            expect(readme).toContain('Always `await setField(...)`');
+            expect(readme).toContain('always call `dispose()` from your cleanup path');
+            expect(readmeText).toContain('prefer a **Provider owner**');
+            expect(readmeText).toContain('or a **per-route model**');
+            expect(readmeText).toContain('avoid module-level');
+
+            expect(readmeCn).toContain('始终 `await setField(...)`');
+            expect(readmeCn).toContain('始终在 cleanup 路径里调用 `dispose()`');
+            expect(readmeCnText).toContain('**Provider owner**');
+            expect(readmeCnText).toContain('**per-route model**');
+            expect(readmeCn).toContain('避免模块级 singleton');
+        });
+
+        test('React docs teach Provider-owner and per-route lifecycles in both languages', () => {
+            const reactDoc = readProjectFile('docs', 'REACT.md');
+            const reactDocCn = readProjectFile('docs', 'REACT_CN.md');
+
+            for (const doc of [reactDoc, reactDocCn]) {
+                expect(doc).toContain('function createCartModel()');
+                expect(doc).toContain('function CartModelOwner');
+                expect(doc).toContain('useEffect(() => () => cart.dispose(), [cart])');
+                expect(doc).toContain('await cart.setField');
+                expect(doc).not.toContain('const cart = createModel<Cart>({');
+            }
+
+            expect(reactDoc).toContain('## Model Lifecycle in React');
+            expect(reactDoc).toContain('### Bad: module-level singleton');
+            expect(reactDoc).toContain('### Fix A: Provider with owner-managed dispose');
+            expect(reactDoc).toContain('### Fix B: per-route instance');
+            expect(reactDoc).toContain('### Pattern comparison');
+            expect(reactDoc).toContain('whoever calls `createModel` is responsible for calling');
+
+            expect(reactDocCn).toContain('## React 中的 Model 生命周期');
+            expect(reactDocCn).toContain('### 反例：模块级 singleton');
+            expect(reactDocCn).toContain('### 修复 A：Provider owner 管理 dispose');
+            expect(reactDocCn).toContain('### 修复 B：per-route 实例');
+            expect(reactDocCn).toContain('### 模式对比');
+            expect(reactDocCn).toContain('谁调用 `createModel`，谁就负责调用 `dispose()`');
+        });
+
+        test('React example mirrors the documented owner/factory lifecycle', () => {
+            const example = readProjectFile('examples', 'react-bindings.tsx');
+
+            expect(example).toContain('Provider-owned model lifecycle');
+            expect(example).toContain('function createCartModel()');
+            expect(example).toContain('function CartModelOwner');
+            expect(example).toContain('const [cart] = useState(createCartModel)');
+            expect(example).toContain('useEffect(() => () => cart.dispose(), [cart])');
+            expect(example).toContain('await cart.setField');
+            expect(example).toContain('cart.dispose();');
+            expect(example).toContain('inferred.dispose();');
+            expect(example).not.toContain('const cart = createModel<Cart>({');
         });
     });
 });
