@@ -3,13 +3,10 @@
 > A high-density guide for **coding agents / LLMs** working on or with the
 > `model-reaction` library. Read this **before** README when you only have
 > a few KB of context budget.
->
-> 给 **AI 编码代理 / LLM** 的高密度上手指南。当你的上下文预算只够读一个
-> 文件时，先读这个，别读 README。
 
 ---
 
-## 1. Mental Model · 心智模型
+## 1. Mental Model
 
 ```
 schema  ─►  ModelManager  ─►  data            (validated, source of truth)
@@ -17,22 +14,16 @@ schema  ─►  ModelManager  ─►  data            (validated, source of trut
                           └─►  reactions      (auto-derived fields)
 ```
 
-**EN.** Three layers, nothing else:
+Three layers, nothing else:
 
 1. `data` — only fields that **passed** validation live here.
 2. `dirtyData` — last user input that **failed** validation, indexed by field.
 3. `reactions` — derived values recomputed when their declared `fields`
    change. They write back into `data`.
 
-**CN.** 三层结构，仅此而已：
-
-1. `data` —— 只有**通过校验**的值会落地这里。
-2. `dirtyData` —— 校验失败的用户输入暂存在这里。
-3. `reactions` —— 依赖 `fields` 变化时自动重算的派生字段，结果写回 `data`。
-
 ---
 
-## 2. The 5 APIs You Use 90% of the Time · 90% 场景只用 5 个 API
+## 2. The 5 APIs You Use 90% of the Time
 
 ```ts
 const m = createModel(schema, options?);     // factory
@@ -42,9 +33,9 @@ await m.validateAll();                        // re-validate every field
 m.dispose();                                  // ALWAYS call this in cleanup
 ```
 
-**Discriminating rules — 区分原则：**
+**Discriminating rules:**
 
-| Need / 需求 | API |
+| Need | API |
 | --- | --- |
 | Set one field with validation | `setField(name, value)` |
 | Set many fields atomically | `setFields({ a, b })` |
@@ -55,28 +46,23 @@ m.dispose();                                  // ALWAYS call this in cleanup
 
 ---
 
-## 3. The 5 Pitfalls You'll Hit · 5 个最常见的坑
+## 3. The 5 Pitfalls You'll Hit
 
 1. **Forgetting `await`** — `setField` returns `Promise<boolean>` (true = passed validation). If you don't await, validation may still be in-flight.
-   忘记 `await` —— `setField` 返回 `Promise<boolean>`，不等就读 `data` 容易误判。
 
 2. **Reading `data` after a failed `setField`** — failed values go to `dirtyData`, not `data`. Use `getDirtyData()` to retrieve them.
-   `setField` 失败后值在 `dirtyData`，不在 `data`。
 
 3. **Side effects inside `reaction.computed`** — `computed` MUST be pure. Put side effects in `reaction.action` instead.
-   `computed` 必须纯函数；副作用放 `action`。
 
 4. **Not calling `dispose()`** — leaks reactions, event listeners and pending validation timers. Always wire it to your cleanup path (React effect, test `afterEach`, server shutdown).
-   不调用 `dispose()` 会泄漏。
 
 5. **Sharing one model across React trees without dispose** — see [docs/REACT.md](docs/REACT.md). Use `useEffect` cleanup or instantiate per route.
-   跨树共享 model 不释放会泄漏；用 `useEffect` 清理或按路由实例化。
 
 ---
 
-## 4. Code Skeletons (copy-paste these) · 直接抄的代码骨架
+## 4. Code Skeletons (copy-paste these)
 
-### 4.1 Form model · 表单模型
+### 4.1 Form model
 
 ```ts
 import { createModel, ValidationRules } from 'model-reaction';
@@ -101,7 +87,7 @@ export const userModel = createModel({
 });
 ```
 
-### 4.2 Cross-field reaction · 跨字段反应
+### 4.2 Cross-field reaction
 
 ```ts
 fullName: {
@@ -115,7 +101,7 @@ fullName: {
 },
 ```
 
-### 4.3 React form field · React 表单字段
+### 4.3 React form field
 
 ```tsx
 import { useModelFieldState } from 'model-reaction/react';
@@ -141,7 +127,7 @@ function Input({ model, field, label }) {
 }
 ```
 
-### 4.4 Selector subscription · selector 订阅
+### 4.4 Selector subscription
 
 ```ts
 const unsub = model.subscribe(
@@ -151,7 +137,7 @@ const unsub = model.subscribe(
 // later: unsub()
 ```
 
-### 4.5 Iterate the schema literal · 直接遍历 schema 字面量
+### 4.5 Iterate the schema literal
 
 ```ts
 // schema is just a plain object — no helper API needed.
@@ -162,21 +148,22 @@ for (const [name, field] of Object.entries(schema)) {
 
 ---
 
-## 5. What's NOT in this Library · 库不做的事
+## 5. What's NOT in this Library
 
 These are **deliberate omissions**. Don't add them; don't fake them.
 
-| Missing / 缺失 | Why / 原因 |
+| Missing | Why |
 | --- | --- |
 | Per-field `touched` state in the model | Belongs to UI lifecycle, not to data model. Use component-local `useState` (see §4.3). |
 | `commitDirty(field)` / `resetDirty(field)` | Computed fields that depend on a dirty field could be poisoned. Reset by recreating the model. |
 | Arbitrary side-effect from validators | Validators are pure boolean tests. Use reactions for side-effects. |
 | Synchronous batching across `setField` calls | Each `setField` is its own validation cycle. Use `setFields({ ... })` for atomic batches. |
 | Plugin / middleware system | Compose at the schema level (factory functions returning `FieldSchema`). |
+| `model.describe()` schema introspection | The schema literal is already a plain object; iterate it directly (see §4.5). |
 
 ---
 
-## 6. When You're About to Modify the Library · 改库代码前
+## 6. When You're About to Modify the Library
 
 Run **all three** before submitting:
 
@@ -202,7 +189,7 @@ npm run example:react
 
 ---
 
-## 7. Glossary · 术语表
+## 7. Glossary
 
 | Term | Meaning |
 | --- | --- |
@@ -216,5 +203,4 @@ npm run example:react
 
 ---
 
-If anything in this file conflicts with [README.md](README.md), the README wins. Open an issue and we'll fix this file.
-若本文件与 [README_CN.md](README_CN.md) 冲突，以 README_CN 为准，请提 issue 让我们修这个文件。
+If anything in this file conflicts with [README.md](README.md) / [README_CN.md](README_CN.md), the READMEs win. Open an issue and we'll fix this file.
