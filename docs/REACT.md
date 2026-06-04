@@ -12,6 +12,7 @@ only when its watched slice actually changes.
 
 - [Hooks & Components](#hooks--components)
 - [Basic Example](#basic-example)
+- [Model Lifecycle in React](#model-lifecycle-in-react)
 - [`useModelSelector` vs `useModelComputed`](#usemodelselector-vs-usemodelcomputed)
 - [Decision Tree](#decision-tree)
 - [Performance Hot-spots](#performance-hot-spots)
@@ -132,6 +133,109 @@ function Snapshot() {
 ```
 
 A complete sample lives at [`examples/react-bindings.tsx`](../examples/react-bindings.tsx).
+
+## Model Lifecycle in React
+
+A `model` instance owns reactions, internal event listeners and pending
+validation timers. None of those are tracked by the JavaScript GC, so a
+forgotten `dispose()` keeps the model — and every value it holds in
+closures — alive forever. In React, the bug usually shows up as **a
+module-level model that is shared across routes / tests / browser tabs
+and never gets cleaned up**.
+
+### Bad: module-level singleton
+
+```tsx
+// model.ts
+import { createModel } from 'model-reaction';
+export const userModel = createModel({ /* ... */ });
+// dispose() is never called — every route that imports `userModel`
+// shares the same instance, leaking reactions across navigations and
+// breaking test isolation.
+```
+
+Symptoms:
+- Tests bleed state into each other (jest workers see stale `data`).
+- Hot-reload doubles up reaction handlers.
+- Multi-tab apps observe ghost updates from previously closed views.
+
+### Fix A: Provider with owner-managed dispose
+
+Hold the model in the component that *owns* its lifetime, dispose it
+from a `useEffect` cleanup, and pass it down through context.
+
+```tsx
+import { useEffect, useState } from 'react';
+import { ModelProvider } from 'model-reaction/react';
+import { createModel } from 'model-reaction';
+
+function UserModelOwner({ children }: { children: React.ReactNode }) {
+    const [model] = useState(() => createModel({ /* ... */ }));
+    useEffect(() => () => model.dispose(), [model]);
+    return <ModelProvider model={model}>{children}</ModelProvider>;
+}
+
+// Mount once near the top of the subtree that needs the model.
+function App() {
+    return (
+        <UserModelOwner>
+            <ProfilePage />
+            <SettingsPage />
+        </UserModelOwner>
+    );
+}
+```
+
+Why this works:
+- `useState(() => createModel(...))` runs the factory **exactly once**
+  per owner mount, so children that read via `useModel()` share the
+  same instance.
+- The `useEffect` cleanup fires on unmount (and on owner remount during
+  hot-reload), guaranteeing `dispose()` runs once per lifetime.
+- See [`src/__tests__/react.test.tsx`](../src/__tests__/react.test.tsx)
+  → "Provider-owned model dispose lifecycle" for the unit tests that
+  pin this behaviour.
+
+### Fix B: per-route instance
+
+When the model's data is scoped to a single route (edit form, wizard,
+modal), create it inside the route component itself.
+
+```tsx
+function EditUserRoute({ userId }: { userId: string }) {
+    const [model] = useState(() => createModel({ /* ... */ }));
+
+    useEffect(() => {
+        // Optional: hydrate from the server on mount.
+        model.setFields(loadUser(userId));
+        return () => model.dispose();
+    }, [model, userId]);
+
+    return (
+        <ModelProvider model={model}>
+            <EditForm />
+        </ModelProvider>
+    );
+}
+```
+
+Each navigation to `/users/:id/edit` builds a fresh model and tears it
+down on exit, so two tabs editing different users never collide.
+
+### Pattern comparison
+
+| Aspect | Module singleton (bad) | Fix A: Provider + owner | Fix B: per-route |
+| --- | --- | --- | --- |
+| Cross-route sharing | Yes (accidentally) | Yes (intentional, scoped to subtree) | No |
+| `dispose()` trigger | Never | Owner unmount | Route unmount |
+| Test isolation | Broken | OK (re-mount per test) | OK (re-mount per test) |
+| Multi-tab safety | Leaks across tabs in dev | Each tab owns its tree | Each tab owns its tree |
+| Complexity | Lowest | Low | Low |
+| Best for | — (avoid) | App-wide / feature-wide state | Route- or modal-scoped state |
+
+Rule of thumb: **whoever calls `createModel` is responsible for calling
+`dispose()`**. In React, that responsibility belongs to a component
+with a `useEffect` cleanup — never to a module's top-level scope.
 
 ## `useModelSelector` vs `useModelComputed`
 

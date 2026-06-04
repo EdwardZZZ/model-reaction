@@ -450,3 +450,184 @@ describe('useModelComputed', () => {
         cart.dispose();
     });
 });
+
+// ---------------------------------------------------------------------------
+// Provider-owned model lifecycle (AGENTS.md §3 pitfall #5)
+//
+// Verifies that wrapping `createModel(...)` in a Context Provider with a
+// `useEffect` cleanup actually triggers `dispose()` exactly once when the
+// owner unmounts — and that consumer hooks stop receiving updates afterwards.
+// ---------------------------------------------------------------------------
+
+describe('Provider-owned model dispose lifecycle', () => {
+    interface UserData {
+        name: string;
+        email: string;
+    }
+
+    function makeUserModel() {
+        return createModel<UserData>({
+            name: { type: 'string', default: '' },
+            email: { type: 'string', default: '' },
+        });
+    }
+
+    it('dispose() is called exactly once when the Provider unmounts', () => {
+        const model = makeUserModel();
+        const disposeSpy = jest.spyOn(model, 'dispose');
+
+        const Ctx = React.createContext<ModelReturn<UserData> | null>(null);
+
+        function UserModelProvider({
+            children,
+            value,
+        }: {
+            children: React.ReactNode;
+            value: ModelReturn<UserData>;
+        }) {
+            React.useEffect(() => {
+                return () => {
+                    value.dispose();
+                };
+            }, [value]);
+            return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
+        }
+
+        function Consumer() {
+            const m = React.useContext(Ctx)!;
+            const name = useModelSelector(m, (d) => d.name);
+            return <span data-testid="name">{name}</span>;
+        }
+
+        const { unmount } = render(
+            <UserModelProvider value={model}>
+                <Consumer />
+            </UserModelProvider>
+        );
+
+        // Owner is alive — dispose should NOT have been called yet.
+        expect(disposeSpy).not.toHaveBeenCalled();
+
+        // Tear the tree down.
+        act(() => {
+            unmount();
+        });
+
+        // Cleanup of the Provider's effect must have triggered dispose exactly once.
+        expect(disposeSpy).toHaveBeenCalledTimes(1);
+
+        disposeSpy.mockRestore();
+    });
+
+    it('shared consumers stay in sync while the Provider is mounted, and the model is disposed afterwards', async () => {
+        const model = makeUserModel();
+        const disposeSpy = jest.spyOn(model, 'dispose');
+
+        const Ctx = React.createContext<ModelReturn<UserData> | null>(null);
+
+        function UserModelProvider({
+            children,
+            value,
+        }: {
+            children: React.ReactNode;
+            value: ModelReturn<UserData>;
+        }) {
+            React.useEffect(() => () => value.dispose(), [value]);
+            return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
+        }
+
+        function Profile() {
+            const m = React.useContext(Ctx)!;
+            const name = useModelSelector(m, (d) => d.name);
+            return <span data-testid="profile-name">{name}</span>;
+        }
+
+        function Settings() {
+            const m = React.useContext(Ctx)!;
+            const email = useModelSelector(m, (d) => d.email);
+            return <span data-testid="settings-email">{email}</span>;
+        }
+
+        const { getByTestId, unmount } = render(
+            <UserModelProvider value={model}>
+                <Profile />
+                <Settings />
+            </UserModelProvider>
+        );
+
+        // Both consumers see the same model instance.
+        expect(getByTestId('profile-name').textContent).toBe('');
+        expect(getByTestId('settings-email').textContent).toBe('');
+
+        await act(async () => {
+            await model.setField('name', 'Ada');
+            await model.setField('email', 'ada@example.com');
+        });
+
+        expect(getByTestId('profile-name').textContent).toBe('Ada');
+        expect(getByTestId('settings-email').textContent).toBe(
+            'ada@example.com'
+        );
+        expect(disposeSpy).not.toHaveBeenCalled();
+
+        // Unmount the whole tree → Provider effect cleanup runs → dispose().
+        act(() => {
+            unmount();
+        });
+
+        expect(disposeSpy).toHaveBeenCalledTimes(1);
+
+        disposeSpy.mockRestore();
+    });
+
+    it('remounting the Provider with a fresh model does not re-dispose the old one', () => {
+        const modelA = makeUserModel();
+        const modelB = makeUserModel();
+        const spyA = jest.spyOn(modelA, 'dispose');
+        const spyB = jest.spyOn(modelB, 'dispose');
+
+        const Ctx = React.createContext<ModelReturn<UserData> | null>(null);
+
+        function UserModelProvider({
+            children,
+            value,
+        }: {
+            children: React.ReactNode;
+            value: ModelReturn<UserData>;
+        }) {
+            React.useEffect(() => () => value.dispose(), [value]);
+            return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
+        }
+
+        function Probe() {
+            const m = React.useContext(Ctx)!;
+            const name = useModelSelector(m, (d) => d.name);
+            return <span>{name}</span>;
+        }
+
+        const { rerender, unmount } = render(
+            <UserModelProvider value={modelA}>
+                <Probe />
+            </UserModelProvider>
+        );
+
+        // Swap in a different model — effect cleanup must fire for the old one.
+        rerender(
+            <UserModelProvider value={modelB}>
+                <Probe />
+            </UserModelProvider>
+        );
+
+        expect(spyA).toHaveBeenCalledTimes(1);
+        expect(spyB).not.toHaveBeenCalled();
+
+        unmount();
+
+        // Final unmount tears down the live model (B).
+        expect(spyA).toHaveBeenCalledTimes(1);
+        expect(spyB).toHaveBeenCalledTimes(1);
+
+        spyA.mockRestore();
+        spyB.mockRestore();
+    });
+});
