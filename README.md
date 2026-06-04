@@ -178,6 +178,7 @@ function NameField() {
 | Best practices | [docs/BEST_PRACTICES.md](docs/BEST_PRACTICES.md) |
 | Comparison with Redux & zustand | [docs/COMPARISON.md](docs/COMPARISON.md) |
 | Runnable examples | [`examples/`](examples/) |
+| For coding agents / LLMs (high-density quickstart) | [AGENTS.md](AGENTS.md) |
 
 ## License
 
