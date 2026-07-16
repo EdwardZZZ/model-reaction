@@ -232,7 +232,8 @@ export function createAdDraftModel() {
 ### 3.3 数据写入规则
 
 - 单字段写入使用 `await model.setField(field, value)`，返回 `true` 表示验证通过并提交到 `data`。
-- 多字段写入使用 `await model.setFields(partial)`，用于步骤保存、批量导入、状态迁移等原子场景。
+- 多字段写入使用 `await model.setFields(partial)`，用于步骤保存、批量导入、状态迁移等场景，可在一次流程中完成校验并只触发一次反应。
+  - 注意：`setFields` **不是原子事务**。每个字段独立提交——即使某个字段校验失败（返回值为 `false`），其余通过校验的字段仍会写入 `data`，失败字段进入 `dirtyData`。若业务需要"全部通过才提交"，应先 `validateAll()` 或在失败时重建 model。
 - 验证失败时不要读取 `model.data` 期望得到失败值，失败输入会进入 `model.getDirtyData()`。
 - 提交前使用 `await model.validateAll()` 重新校验完整广告草稿。
 - 测试或复杂异步场景中，使用 `await model.settled()` 等待验证和反应完成。

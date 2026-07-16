@@ -20,11 +20,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   test/example-friendly rule overrides.
 - Public type exports: `Validator`, `Reaction`, `FieldSchema`, `ValidationError`,
   `AppError`, `ValidateFieldOptions`, `ModelEvents`.
-- New tests:
-  - `h1-h8-fixes.test.ts` (13 cases) covering all eight high-severity fixes.
-  - `m-fixes.test.ts` (10 cases) covering strictMode, dispose-after-use guards,
-    shared `ErrorHandler` safety, EventEmitter robustness, and `settled()` with
-    in-flight async validation.
+- Expanded test coverage across the existing suites for the high-severity and
+  hardening fixes: `strictMode`, dispose-after-use guards, shared `ErrorHandler`
+  safety, `EventEmitter` robustness, and `settled()` with in-flight async
+  validation (see `model-manager.test.ts`, `event-emitter.test.ts`,
+  `reaction-system.test.ts`, and `integration.test.ts`).
 
 ### Changed
 - Reworked the ad-creation technical solution document to align with the current

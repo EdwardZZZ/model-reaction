@@ -125,7 +125,12 @@ export interface ModelReturn<T = Record<string, any>> {
     setFields: (fields: Partial<T>) => Promise<boolean>;
     validateAll: () => Promise<boolean>;
     getValidationSummary: () => string;
-    on: (event: string, callback: (...args: any[]) => void) => void;
+    /**
+     * Subscribe to a model event. Returns an unsubscribe function that removes
+     * exactly this listener (equivalent to calling `off(event, callback)`),
+     * matching the ergonomics of `subscribe` / `subscribeField`.
+     */
+    on: (event: string, callback: (...args: any[]) => void) => () => void;
     off: (event: string, callback?: (...args: any[]) => void) => void;
     getDirtyData: () => Partial<T>;
     clearDirtyData: () => void;

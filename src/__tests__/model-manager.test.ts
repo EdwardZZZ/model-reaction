@@ -655,6 +655,54 @@ describe('ModelManager - Event facade', () => {
         model.dispose();
     });
 
+    test('on() returns an unsubscribe function that removes the listener', async () => {
+        const cb = jest.fn();
+        const model = createModel({
+            name: { type: 'string', default: '' },
+        });
+        const unsubscribe = model.on('field:change', cb);
+        expect(typeof unsubscribe).toBe('function');
+
+        await model.setField('name', 'Alice');
+        expect(cb).toHaveBeenCalledTimes(1);
+
+        unsubscribe();
+        await model.setField('name', 'Bob');
+        expect(cb).toHaveBeenCalledTimes(1); // no further calls
+        model.dispose();
+    });
+
+    test('on() unsubscribe removes only its own listener', async () => {
+        const cb1 = jest.fn();
+        const cb2 = jest.fn();
+        const model = createModel({
+            name: { type: 'string', default: '' },
+        });
+        const unsub1 = model.on('field:change', cb1);
+        model.on('field:change', cb2);
+
+        unsub1();
+        await model.setField('name', 'Carol');
+
+        expect(cb1).not.toHaveBeenCalled();
+        expect(cb2).toHaveBeenCalledTimes(1);
+        model.dispose();
+    });
+
+    test('on() unsubscribe is idempotent and safe to call twice', async () => {
+        const cb = jest.fn();
+        const model = createModel({
+            name: { type: 'string', default: '' },
+        });
+        const unsubscribe = model.on('field:change', cb);
+        unsubscribe();
+        expect(() => unsubscribe()).not.toThrow();
+
+        await model.setField('name', 'Dave');
+        expect(cb).not.toHaveBeenCalled();
+        model.dispose();
+    });
+
     test('off() without callback removes all listeners for that event', async () => {
         const cb1 = jest.fn();
         const cb2 = jest.fn();
@@ -1054,6 +1102,57 @@ describe('createModel - schema type inference', () => {
 
         await m.setField('age', 42);
         expect(m.getField('age')).toBe(42);
+        m.dispose();
+    });
+});
+
+describe('createModel - mutable default isolation', () => {
+    test('array defaults are not shared across instances from the same schema', () => {
+        const schema = {
+            tags: { type: 'array' as const, default: [] as string[] },
+        };
+        const m1 = createModel(schema);
+        const m2 = createModel(schema);
+
+        // Mutating one instance's default array must not leak into another.
+        m1.getField('tags').push('x');
+
+        expect(m1.getField('tags')).toEqual(['x']);
+        expect(m2.getField('tags')).toEqual([]);
+        // Also decoupled from the schema literal itself.
+        expect(schema.tags.default).toEqual([]);
+
+        m1.dispose();
+        m2.dispose();
+    });
+
+    test('nested object defaults are deep-cloned per instance', () => {
+        const schema = {
+            config: {
+                type: 'object' as const,
+                default: { nested: { list: [] as number[] } },
+            },
+        };
+        const m1 = createModel(schema);
+        const m2 = createModel(schema);
+
+        m1.getField('config').nested.list.push(1);
+
+        expect(m1.getField('config').nested.list).toEqual([1]);
+        expect(m2.getField('config').nested.list).toEqual([]);
+        expect(schema.config.default.nested.list).toEqual([]);
+
+        m1.dispose();
+        m2.dispose();
+    });
+
+    test('Date defaults are shared by reference (treated as immutable leaf)', () => {
+        const shared = new Date(2020, 0, 1);
+        const schema = {
+            createdAt: { type: 'date' as const, default: shared },
+        };
+        const m = createModel(schema);
+        expect(m.getField('createdAt')).toBe(shared);
         m.dispose();
     });
 });

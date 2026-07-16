@@ -75,4 +75,35 @@ describe('deepEqual', () => {
         arr.foo = 'bar';
         expect(deepEqual(arr, { foo: 'bar' })).toBe(false);
     });
+
+    test('should compare DAGs (same reference in sibling branches) structurally', () => {
+        // Regression: the cycle-guard must not treat a value shared by sibling
+        // branches as a cycle. `{ x: shared, y: shared }` is a DAG, not a cycle,
+        // and should compare equal to an equivalent structure with distinct
+        // objects.
+        const shared = { v: 1 };
+        const a = { x: shared, y: shared };
+        const b = { x: { v: 1 }, y: { v: 1 } };
+        expect(deepEqual(a, b)).toBe(true);
+
+        const sharedArr = [1, 2];
+        const c = { list: [sharedArr, sharedArr] };
+        const d = { list: [[1, 2], [1, 2]] };
+        expect(deepEqual(c, d)).toBe(true);
+
+        // A shared reference used twice must still detect a real difference.
+        const e = { x: shared, y: shared };
+        const f = { x: { v: 1 }, y: { v: 2 } };
+        expect(deepEqual(e, f)).toBe(false);
+    });
+
+    test('should not report inequality for repeated equal deep values', () => {
+        const inner = { a: { b: { c: 1 } } };
+        const g = { first: inner, second: inner };
+        const h = {
+            first: { a: { b: { c: 1 } } },
+            second: { a: { b: { c: 1 } } },
+        };
+        expect(deepEqual(g, h)).toBe(true);
+    });
 });

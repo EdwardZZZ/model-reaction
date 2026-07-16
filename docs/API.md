@@ -30,6 +30,16 @@ createModel<S extends Record<string, FieldSchema>>(
 ): ModelReturn<InferModelData<S>>;
 ```
 
+> **Defaults bypass validation.** Each field's `default` is written directly
+> into `data` at construction — validators do **not** run against it. A model
+> can therefore start in an invalid state while `validationErrors` is empty.
+> Call `await validateAll()` before trusting initial `data`.
+>
+> **Reaction output is validated.** A field's `reaction.computed` result is
+> committed through the same validate-then-commit path as `setField`. If the
+> derived field declares a `validator` and the computed value fails it, `data`
+> keeps its previous value and the computed value is stored in `dirtyData`.
+
 ## Model Methods
 
 ### Read
@@ -45,7 +55,7 @@ createModel<S extends Record<string, FieldSchema>>(
 | Method | Description |
 | --- | --- |
 | `setField(field, value): Promise<boolean>` | Set a single field; returns its validation result. |
-| `setFields(fields): Promise<boolean>` | Batch set multiple fields; returns overall validation result. |
+| `setFields(fields): Promise<boolean>` | Batch set multiple fields in one validation + reaction pass; returns the AND of every field's result. **Not atomic** — valid fields commit to `data` even if a sibling field fails validation. |
 
 ### Validation
 
@@ -62,8 +72,32 @@ createModel<S extends Record<string, FieldSchema>>(
 | --- | --- |
 | `subscribeField(field, callback)` | Subscribe to a single field's value changes. Returns an unsubscribe function. |
 | `subscribe(selector, callback, isEqual?)` | Subscribe to a derived value. Default equality is `Object.is`. Returns an unsubscribe function. |
-| `on(event, callback)` | Subscribe to a model event (see [Events](#events)). |
+| `on(event, callback)` | Subscribe to a model event (see [Events](#events)). Returns an unsubscribe function, like `subscribe` / `subscribeField`. |
 | `off(event, callback?)` | Unsubscribe from an event. |
+
+#### Two layers: event bus vs. data subscription
+
+These four methods live at **two different abstraction levels** — they are
+complementary, not redundant:
+
+- **`on` / `off` — the event bus.** The low-level layer. `on` subscribes by
+  **event name** and receives the raw event payload. It is the *only* way to
+  observe non-value events such as `validation:error`, `validation:complete`,
+  `reaction:error`, `dependency:error`, and `field:not-found` (see
+  [Events](#events)). `off(event)` with no callback removes **all** listeners
+  for that event — something a single unsubscribe function cannot do.
+
+- **`subscribe` / `subscribeField` — data subscription.** A convenience layer
+  built on top of `on('field:change', …)`. Both observe **value changes** and
+  only fire when the observed value actually changes:
+  - `subscribeField(field, cb)` — filters to one field; callback gets `(value)`.
+  - `subscribe(selector, cb, isEqual?)` — observes a derived value; callback
+    gets `(next, prev)`, deduped via `isEqual` (default `Object.is`).
+
+**Which to use:** reach for `subscribeField` / `subscribe` for reactive value
+watching (the common case, and what the React adapter uses); drop down to
+`on` when you need error/validation events or full control over the raw event
+stream.
 
 ### Lifecycle
 
@@ -101,7 +135,7 @@ interface ModelOptions {
 | Option | Default | Description |
 | --- | --- | --- |
 | `debounceReactions` | `0` | Debounce window (ms) for reaction triggers. |
-| `asyncValidationTimeout` | none | Timeout (ms) for async validators. |
+| `asyncValidationTimeout` | `5000` | Timeout (ms) for async validators. |
 | `errorFormatter` | — | Customise validation error message formatting. |
 | `errorHandler` | new instance | Inject a shared `ErrorHandler`. |
 | `strictMode` | `false` | If `true`, setting a field absent from the schema throws. |

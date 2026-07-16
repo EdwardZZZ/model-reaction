@@ -103,7 +103,10 @@ user.clearDirtyData(); // 清空
 
 ```typescript
 user.on('validation:error', (e) => console.error(e.field, e.message));
-user.on('field:change',     (e) => console.log(e.field, '=', e.value));
+
+// `on` 返回取消订阅函数（与 `subscribe` / `subscribeField` 一致）：
+const off = user.on('field:change', (e) => console.log(e.field, '=', e.value));
+off(); // 停止监听
 ```
 
 完整事件列表见 [docs/API_CN.md](docs/API_CN.md#事件)。

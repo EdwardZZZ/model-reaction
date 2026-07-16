@@ -38,7 +38,7 @@ m.dispose();                                  // ALWAYS call this in cleanup
 | Need | API |
 | --- | --- |
 | Set one field with validation | `setField(name, value)` |
-| Set many fields atomically | `setFields({ a, b })` |
+| Set many fields in one validation+reaction pass | `setFields({ a, b })` |
 | Read current value | `getField(name)` or `m.data.name` |
 | Get failed input back | `getDirtyData()` |
 | React to change outside React | `subscribeField` / `subscribe` |
@@ -46,7 +46,7 @@ m.dispose();                                  // ALWAYS call this in cleanup
 
 ---
 
-## 3. The 5 Pitfalls You'll Hit
+## 3. The 7 Pitfalls You'll Hit
 
 1. **Forgetting `await`** — `setField` returns `Promise<boolean>` (true = passed validation). If you don't await, validation may still be in-flight.
 
@@ -57,6 +57,10 @@ m.dispose();                                  // ALWAYS call this in cleanup
 4. **Not calling `dispose()`** — leaks reactions, event listeners and pending validation timers. Always wire it to your cleanup path (React effect, test `afterEach`, server shutdown).
 
 5. **Sharing one model across React trees without dispose** — see [docs/REACT.md](docs/REACT.md). Use `useEffect` cleanup or instantiate per route.
+
+6. **Assuming `default` values are validated** — `default`s are written straight into `data` at construction and **bypass validation entirely**. A model can start in an invalid state with an empty `validationErrors`. If initial validity matters (e.g. before reading `data` to submit), call `await validateAll()` first.
+
+7. **Assuming a reaction's `computed` output skips validation** — a reaction writes its result back through the same validate-then-commit path. If the derived field has a `validator` and the computed value fails it, `data` keeps the old value and the computed value lands silently in `dirtyData`. Keep derived-field validators loose, or watch `dirtyData` / `reaction:error`.
 
 ---
 
@@ -157,7 +161,8 @@ These are **deliberate omissions**. Don't add them; don't fake them.
 | Per-field `touched` state in the model | Belongs to UI lifecycle, not to data model. Use component-local `useState` (see §4.3). |
 | `commitDirty(field)` / `resetDirty(field)` | Computed fields that depend on a dirty field could be poisoned. Reset by recreating the model. |
 | Arbitrary side-effect from validators | Validators are pure boolean tests. Use reactions for side-effects. |
-| Synchronous batching across `setField` calls | Each `setField` is its own validation cycle. Use `setFields({ ... })` for atomic batches. |
+| Synchronous batching across `setField` calls | Each `setField` is its own validation cycle. Use `setFields({ ... })` to batch validation + a single reaction pass. |
+| True all-or-nothing transactional writes | `setFields` is **not atomic**: each field commits independently; valid fields land in `data` even if a sibling fails (return value is the AND of all fields). Validate first, or reset by recreating the model, if you need all-or-nothing. |
 | Plugin / middleware system | Compose at the schema level (factory functions returning `FieldSchema`). |
 | `model.describe()` schema introspection | The schema literal is already a plain object; iterate it directly (see §4.5). |
 

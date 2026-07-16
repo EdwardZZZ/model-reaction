@@ -104,7 +104,10 @@ user.clearDirtyData(); // reset
 
 ```typescript
 user.on('validation:error', (e) => console.error(e.field, e.message));
-user.on('field:change',     (e) => console.log(e.field, '=', e.value));
+
+// `on` returns an unsubscribe function (like `subscribe` / `subscribeField`):
+const off = user.on('field:change', (e) => console.log(e.field, '=', e.value));
+off(); // stop listening
 ```
 
 See [docs/API.md](docs/API.md#events) for the full event list.
