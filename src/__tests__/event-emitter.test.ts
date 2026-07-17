@@ -26,17 +26,6 @@ describe('EventEmitter', () => {
         expect(callback).not.toHaveBeenCalled();
     });
 
-    test('should handle once events', () => {
-        const callback = jest.fn();
-
-        eventEmitter.once('test-event', callback);
-        eventEmitter.emit('test-event', { data: 'first call' });
-        eventEmitter.emit('test-event', { data: 'second call' });
-
-        expect(callback).toHaveBeenCalledTimes(1);
-        expect(callback).toHaveBeenCalledWith({ data: 'first call' });
-    });
-
     test('should handle multiple subscribers', () => {
         const callback1 = jest.fn();
         const callback2 = jest.fn();

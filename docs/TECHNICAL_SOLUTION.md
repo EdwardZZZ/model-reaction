@@ -452,7 +452,7 @@ async function handleSubmit() {
 
   if (!ok) {
     const dirtyData = module.model.getDirtyData();
-    const summary = module.model.getValidationSummary();
+    const summary = formatValidationErrors(module.model.validationErrors);
     console.warn('提交失败', { dirtyData, summary });
     return;
   }

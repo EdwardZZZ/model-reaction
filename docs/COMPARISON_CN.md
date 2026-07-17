@@ -88,11 +88,11 @@ model-reaction:  setField -> [transform] -> [validate] -> commit -> [reaction] -
 
 **优势**
 - **Schema-first**：字段类型 / 校验 / 默认值 / 反应 / 转换集中声明，一目了然。
-- **校验内置**：同步 / 异步 / 条件 / 跨字段，附 `dirtyData` + `validationErrors` + `getValidationSummary`。
+- **校验内置**：同步 / 异步 / 条件 / 跨字段，附 `dirtyData` + `validationErrors` + `formatValidationErrors`。
 - **Reaction 内置**：`fields → computed → action`，依赖图自动管理，循环依赖检测。
 - **字段级订阅**：`subscribeField` / `useModelField` 比 selector + memo 更精确。
 - **异步协调**：`settled()` 一行等齐所有 reaction + validation。
-- **错误分类**：`ErrorType` 枚举 + `ErrorHandler`，比 reducer 里 try-catch 整洁。
+- **错误分类**：类型化模型错误事件，比 reducer 里 try-catch 整洁。
 
 **劣势**
 - **不是通用 store**：不适合管 UI 状态 / 路由 / 全局共享。
@@ -229,7 +229,7 @@ const [name, setName, meta] = useModelFieldState(userModel, 'name');
   校验入口）、内置 transform / validator / dirtyData / reactionSystem /
   事件分类 / 字段级订阅。
 - **创建慢（118×）**：每个 model 都构造了 `EventEmitter`、
-  `ErrorHandler`、`ReactionSystem`、依赖图。**这是一次性成本**，
+  `ReactionSystem`、依赖图。**这是一次性成本**，
   正常 SPA 一个表单只会 `createModel` 一次，与 1000 次循环不可同日而语。
 - **字段隔离持平（1×）**：当订阅者数量同样为 1000 时，两者通知开销几乎
   相同。说明 model-reaction 的字段路由没有比 zustand 的全量 selector

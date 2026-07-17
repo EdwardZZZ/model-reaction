@@ -1,4 +1,9 @@
-import { createModel, ErrorHandler, ErrorType, Rule, ValidationRules } from '../src/index';
+import {
+  createModel,
+  formatValidationErrors,
+  Rule,
+  ValidationRules,
+} from '../src/index';
 
 interface UserInfo {
     name: string;
@@ -49,16 +54,6 @@ async function validateCreditCard(cardNumber: string): Promise<boolean> {
     }, 800);
   });
 }
-
-// 创建自定义错误处理器
-const errorHandler = new ErrorHandler();
-errorHandler.onError(ErrorType.VALIDATION, (error) => {
-  console.error(`验证错误 [${error.field}]: ${error.message}`);
-});
-
-errorHandler.onError(ErrorType.REACTION, (error) => {
-  console.error(`反应错误: ${error.message}`);
-});
 
 // 创建复杂表单模型
 const orderFormModel = createModel<OrderForm>({
@@ -194,8 +189,14 @@ const orderFormModel = createModel<OrderForm>({
   }
 }, {
   debounceReactions: 100,
-  asyncValidationTimeout: 5000,
-  errorHandler: errorHandler
+  asyncValidationTimeout: 5000
+});
+
+orderFormModel.on('validation:error', (error) => {
+  console.error(`验证错误 [${error.field}]: ${error.message}`);
+});
+orderFormModel.on('reaction:error', (error) => {
+  console.error(`反应错误: ${error.message}`);
 });
 
 // 运行示例
@@ -245,7 +246,7 @@ async function runExample() {
   if (isValid) {
     console.log('订单提交成功，总金额:', orderFormModel.getField('finalAmount'));
   } else {
-    console.log('验证错误摘要:', orderFormModel.getValidationSummary());
+    console.log('验证错误摘要:', formatValidationErrors(orderFormModel.validationErrors));
   }
 
   // 清理资源

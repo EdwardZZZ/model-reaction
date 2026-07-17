@@ -17,17 +17,18 @@
 
 ### 全局错误处理
 ```typescript
-const errorHandler = new ErrorHandler();
-errorHandler.onError(ErrorType.UNKNOWN, (error) => {
+const unsubscribe = model.on('reaction:error', (error) => {
   console.error('发生错误:', error);
   // 显示全局错误通知
 });
+// cleanup
+unsubscribe();
 ```
 
 ### 字段级错误处理
 - 使用 `validationErrors` 对象获取特定字段的错误
 - 结合 UI 显示每个字段的错误信息
-- 使用 `getValidationSummary()` 获取错误摘要
+- 使用 `formatValidationErrors(model.validationErrors)` 获取错误摘要
 
 ## 3. 复杂业务规则
 

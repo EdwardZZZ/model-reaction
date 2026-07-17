@@ -1,42 +1,16 @@
-import { ErrorHandler } from './error-handler';
+export const ModelEvents = {
+    VALIDATION_ERROR: 'validation:error',
+    REACTION_ERROR: 'reaction:error',
+    DEPENDENCY_ERROR: 'dependency:error',
+    FIELD_NOT_FOUND: 'field:not-found',
+    FIELD_CHANGE: 'field:change',
+    VALIDATION_COMPLETE: 'validation:complete',
+} as const;
 
-export enum ErrorType {
-  VALIDATION = 'validation',
-  REACTION = 'reaction',
-  FIELD_NOT_FOUND = 'field_not_found',
-  DEPENDENCY_ERROR = 'dependency_error',
-  CIRCULAR_DEPENDENCY = 'circular_dependency',
-  UNKNOWN = 'unknown',
-}
-
-export enum ModelEvents {
-  VALIDATION_ERROR = 'validation:error',
-  REACTION_ERROR = 'reaction:error',
-  DEPENDENCY_ERROR = 'dependency:error',
-  FIELD_NOT_FOUND = 'field:not-found',
-  FIELD_CHANGE = 'field:change',
-  VALIDATION_COMPLETE = 'validation:complete',
-}
-
-export interface ValidateFieldOptions {
-    schema: FieldSchema;
-    value: any;
-    errors: Record<string, ValidationError[]>;
-    field: string;
-    timeout?: number;
-    errorHandler: ErrorHandler;
-    failFast?: boolean;
-    data?: Record<string, any>;
-    // Race-condition guard: returns true if this validation request is still the latest
-    isCurrent?: () => boolean;
-}
-
-export interface AppError {
-  type: ErrorType;
-  field?: string;
-  message: string;
-  originalError?: Error;
-}
+export type ModelErrorEvent =
+    | typeof ModelEvents.REACTION_ERROR
+    | typeof ModelEvents.DEPENDENCY_ERROR
+    | typeof ModelEvents.FIELD_NOT_FOUND;
 
 // Enhanced validator interface
 export interface Validator {
@@ -53,6 +27,31 @@ export interface ValidationError {
     rule?: string;
     // Add error code to support internationalization
     code?: string;
+}
+
+export type ModelErrorCode =
+    | 'reaction_error'
+    | 'dependency_error'
+    | 'circular_dependency'
+    | 'field_not_found';
+
+export interface ModelError {
+    code: ModelErrorCode;
+    field?: string;
+    message: string;
+    originalError?: Error;
+}
+
+export interface ModelEventMap<T = Record<string, any>> {
+    [ModelEvents.VALIDATION_ERROR]: ValidationError;
+    [ModelEvents.REACTION_ERROR]: ModelError;
+    [ModelEvents.DEPENDENCY_ERROR]: ModelError;
+    [ModelEvents.FIELD_NOT_FOUND]: ModelError;
+    [ModelEvents.FIELD_CHANGE]: {
+        field: keyof T & string;
+        value: T[keyof T];
+    };
+    [ModelEvents.VALIDATION_COMPLETE]: { isValid: boolean };
 }
 
 export interface Reaction {
@@ -107,12 +106,8 @@ export interface ModelOptions {
     asyncValidationTimeout?: number;
     // Debounce time for reaction triggers in milliseconds
     debounceReactions?: number;
-    // Custom error formatting function
-    errorFormatter?: (error: ValidationError) => string;
     // Strict mode (unknown fields will throw errors)
     strictMode?: boolean;
-    // Error handler instance
-    errorHandler?: ErrorHandler;
     // Validation strategy: if true, stop validating a field after the first error
     failFast?: boolean;
 }
@@ -124,14 +119,10 @@ export interface ModelReturn<T = Record<string, any>> {
     getField: <K extends keyof T>(field: K) => T[K];
     setFields: (fields: Partial<T>) => Promise<boolean>;
     validateAll: () => Promise<boolean>;
-    getValidationSummary: () => string;
-    /**
-     * Subscribe to a model event. Returns an unsubscribe function that removes
-     * exactly this listener (equivalent to calling `off(event, callback)`),
-     * matching the ergonomics of `subscribe` / `subscribeField`.
-     */
-    on: (event: string, callback: (...args: any[]) => void) => () => void;
-    off: (event: string, callback?: (...args: any[]) => void) => void;
+    on: <E extends keyof ModelEventMap<T>>(
+        event: E,
+        callback: (payload: ModelEventMap<T>[E]) => void
+    ) => () => void;
     getDirtyData: () => Partial<T>;
     clearDirtyData: () => void;
     // Wait for all pending reactions and validations to complete

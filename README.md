@@ -2,7 +2,7 @@
 
 [中文版本](README_CN.md) | English
 
-A type-safe data model library for TypeScript: validation, dependency reactions, dirty-data tracking, and unified error handling — with optional React bindings.
+A type-safe data model library for TypeScript: validation, dependency reactions, dirty-data tracking, and typed events — with optional React bindings.
 
 ---
 
@@ -11,7 +11,7 @@ A type-safe data model library for TypeScript: validation, dependency reactions,
 - **Validation** — sync & async rules, custom messages, conditional & cross-field checks.
 - **Reactions** — fields auto-update when their dependencies change, with optional debouncing.
 - **Dirty data** — failed values are tracked separately and easy to clear.
-- **Events & errors** — subscribe to changes, validation, and a unified error pipeline.
+- **Typed events** — subscribe to field changes, validation, and reaction errors.
 - **Type-safe** — the schema fully drives `model.data` typing.
 - **Optional React adapter** — fine-grained, selector-level subscriptions; no React in the core.
 

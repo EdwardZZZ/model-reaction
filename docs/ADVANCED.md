@@ -10,7 +10,7 @@ Patterns beyond the README quick start.
 
 - [Asynchronous Validation](#asynchronous-validation)
 - [Custom Validation Rules and Messages](#custom-validation-rules-and-messages)
-- [Unified Error Handling](#unified-error-handling)
+- [Typed Error Events](#typed-error-events)
 - [Conditional and Cross-field Validation](#conditional-and-cross-field-validation)
 - [Transformation and Asynchronous Validation](#transformation-and-asynchronous-validation)
 - [Waiting for Async Operations](#waiting-for-async-operations)
@@ -63,9 +63,7 @@ console.log(asyncUserModel.getDirtyData());
 ## Custom Validation Rules and Messages
 
 ```typescript
-import { createModel, Rule, ErrorHandler } from 'model-reaction';
-
-const errorHandler = new ErrorHandler();
+import { createModel, Rule } from 'model-reaction';
 
 const customRule = new Rule(
   'custom',
@@ -79,27 +77,13 @@ const model = createModel({
     validator: [customRule.withMessage('Field value must be "custom"')],
     default: '',
   },
-}, { errorHandler });
+});
 ```
 
-## Unified Error Handling
+## Typed Error Events
 
 ```typescript
-import { createModel, ValidationRules, ErrorHandler, ErrorType } from 'model-reaction';
-
-const errorHandler = new ErrorHandler();
-
-errorHandler.onError(ErrorType.VALIDATION, (error) => {
-  console.error(`Validation error: ${error.field} - ${error.message}`);
-});
-
-errorHandler.onError(ErrorType.FIELD_NOT_FOUND, (error) => {
-  console.error(`Field not found: ${error.field}`);
-});
-
-errorHandler.onError(ErrorType.UNKNOWN, (error) => {
-  console.error(`Unknown error: ${error.message}`);
-});
+import { createModel, ModelEvents, ValidationRules } from 'model-reaction';
 
 const model = createModel({
   name: {
@@ -107,7 +91,19 @@ const model = createModel({
     validator: [ValidationRules.required.withMessage('Name cannot be empty')],
     default: '',
   },
-}, { errorHandler });
+});
+
+const unsubscribeValidation = model.on(
+  ModelEvents.VALIDATION_ERROR,
+  (error) => console.error(`Validation error: ${error.field} - ${error.message}`)
+);
+const unsubscribeMissing = model.on(
+  ModelEvents.FIELD_NOT_FOUND,
+  (error) => console.error(`Field not found: ${error.field}`)
+);
+
+unsubscribeValidation();
+unsubscribeMissing();
 ```
 
 ## Conditional and Cross-field Validation

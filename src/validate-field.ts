@@ -1,9 +1,8 @@
 import {
+    FieldSchema,
     ValidationError,
     Validator,
-    ValidateFieldOptions,
 } from './types';
-import { ErrorHandler } from './error-handler';
 
 /**
  * Run all validators of a single field.
@@ -13,7 +12,17 @@ import { ErrorHandler } from './error-handler';
  * `isCurrent()` race-guard so a stale validator can't pollute current errors.
  */
 export async function validateField(
-    options: ValidateFieldOptions
+    options: {
+        schema: FieldSchema;
+        value: unknown;
+        errors: Record<string, ValidationError[]>;
+        field: string;
+        timeout?: number;
+        failFast?: boolean;
+        data?: Record<string, any>;
+        isCurrent?: () => boolean;
+        onError?: (error: ValidationError) => void;
+    }
 ): Promise<boolean> {
     const {
         schema,
@@ -21,10 +30,10 @@ export async function validateField(
         errors,
         field,
         timeout = 5000,
-        errorHandler,
         failFast = false,
         data,
         isCurrent,
+        onError,
     } = options;
 
     if (!schema.validator) return true;
@@ -44,9 +53,9 @@ export async function validateField(
                 field,
                 timeout,
                 errors,
-                errorHandler,
                 ctxData,
-                isCurrent
+                isCurrent,
+                onError
             );
             if (!ok) {
                 isValid = false;
@@ -62,9 +71,9 @@ export async function validateField(
                     field,
                     timeout,
                     errors,
-                    errorHandler,
                     ctxData,
-                    isCurrent
+                    isCurrent,
+                    onError
                 )
             )
         );
@@ -80,9 +89,9 @@ async function runValidator(
     field: string,
     timeout: number,
     errors: Record<string, ValidationError[]>,
-    errorHandler: ErrorHandler,
     data: Record<string, any>,
-    isCurrent?: () => boolean
+    isCurrent?: () => boolean,
+    onError?: (error: ValidationError) => void
 ): Promise<boolean> {
     if (!validator.validate) return true;
 
@@ -98,7 +107,7 @@ async function runValidator(
                     validator.type,
                     validator.message,
                     errors,
-                    errorHandler
+                    onError
                 );
                 return false;
             }
@@ -124,7 +133,7 @@ async function runValidator(
                     validator.type,
                     validator.message,
                     errors,
-                    errorHandler
+                    onError
                 );
                 return false;
             }
@@ -138,7 +147,7 @@ async function runValidator(
                 'validation_error',
                 `Validation failed: ${msg}`,
                 errors,
-                errorHandler
+                onError
             );
             return false;
         }
@@ -150,7 +159,7 @@ async function runValidator(
             'validation_error',
             `Validation failed: ${msg}`,
             errors,
-            errorHandler
+            onError
         );
         return false;
     }
@@ -161,11 +170,10 @@ function pushValidationError(
     rule: string,
     message: string,
     errors: Record<string, ValidationError[]>,
-    errorHandler: ErrorHandler
+    onError?: (error: ValidationError) => void
 ): void {
     if (!errors[field]) errors[field] = [];
-    errors[field].push({ field, rule, message });
-    errorHandler.triggerError(
-        errorHandler.createValidationError(field, message)
-    );
+    const error = { field, rule, message };
+    errors[field].push(error);
+    onError?.(error);
 }

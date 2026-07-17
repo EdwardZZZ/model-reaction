@@ -16,14 +16,18 @@ export type {
     Reaction,
     FieldSchema,
     ValidationError,
-    AppError,
-    ValidateFieldOptions,
+    ModelError,
+    ModelErrorCode,
+    ModelEventMap,
     InferFieldType,
     InferModelData,
 } from './types';
-export { ErrorType, ModelEvents } from './types';
+export { ModelEvents } from './types';
 export { ValidationRules, Rule } from './rules';
-export { ErrorHandler } from './error-handler';
+export {
+    formatValidationErrors,
+    type ValidationErrorFormatter,
+} from './format-validation-errors';
 
 /**
  * Create a model instance.
@@ -47,29 +51,9 @@ export function createModel(
     schema: Record<string, FieldSchema>,
     options: ModelOptions = {}
 ): ModelReturn<any> {
-    const modelManager = new ModelManager<Record<string, any>>(
-        schema as Model,
+    const manager = new ModelManager<Record<string, any>>(
+        schema as Model<Record<string, any>>,
         options
     );
-
-    return {
-        get data() { return { ...modelManager.data }; },
-        get validationErrors() { return { ...modelManager.validationErrors }; },
-        setField: (field, value) =>
-            modelManager.setField(field as string, value),
-        getField: (field) => modelManager.getField(field as string),
-        setFields: (fields) => modelManager.setFields(fields),
-        validateAll: () => modelManager.validateAll(),
-        getValidationSummary: () => modelManager.getValidationSummary(),
-        on: (event, callback) => modelManager.on(event, callback),
-        off: (event, callback) => modelManager.off(event, callback),
-        getDirtyData: () => modelManager.getDirtyData(),
-        clearDirtyData: () => modelManager.clearDirtyData(),
-        settled: () => modelManager.settled(),
-        dispose: () => modelManager.dispose(),
-        subscribeField: (field, cb) =>
-            modelManager.subscribeField(field as string, cb),
-        subscribe: (selector, cb, isEqual) =>
-            modelManager.subscribe(selector, cb, isEqual),
-    };
+    return manager as unknown as ModelReturn<any>;
 }

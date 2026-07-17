@@ -2,13 +2,13 @@
  * integration.test.ts — 文档场景级集成测试
  *
  * 与本目录其他 `*.test.ts` 不同，本文件不对应任何单一 src 模块；它通过
- * 公共 API（`createModel` / `Rule` / `ValidationRules` / `ErrorHandler` /
- * `ErrorType`）端到端验证 README、BEST_PRACTICES、REACT 等文档中
+ * 公共 API（`createModel` / `Rule` / `ValidationRules` / `ModelEvents` /
+ * `formatValidationErrors`）端到端验证 README、BEST_PRACTICES、REACT 等文档中
  * 列出的全部使用示例，确保文档中的用法与运行时行为保持一致。
  *
  * 覆盖范围：
- *   1.  README 全部代码片段（同步 / 异步校验、自定义规则、ErrorHandler、
- *       transform、settled、setFields、failFast、errorFormatter）
+ *   1.  README 全部代码片段（同步 / 异步校验、自定义规则、类型化事件、
+ *       transform、settled、setFields、failFast、错误格式化）
  *   2.  Reaction 系统的 action 回调、多 reaction、循环依赖
  *   3.  事件系统、dirty 数据生命周期、dispose 资源回收
  *   4.  端到端注册表单流程（Best Practices §4）
@@ -22,7 +22,13 @@
  */
 import * as fs from 'fs';
 import * as path from 'path';
-import { createModel, ValidationRules, Rule, ErrorHandler, ErrorType } from '../index';
+import {
+    createModel,
+    formatValidationErrors,
+    ModelEvents,
+    ValidationRules,
+    Rule,
+} from '../index';
 import type { ModelReturn } from '../types';
 
 const repoRoot = path.resolve(__dirname, '../..');
@@ -109,7 +115,7 @@ describe('Integration Tests — Full Documentation Scenarios', () => {
 
             await userModel.setField('name', '');
             expect(errorCb).toHaveBeenCalled();
-            expect(errorCb.mock.calls[0][0].type).toBe(ErrorType.VALIDATION);
+            expect(errorCb.mock.calls[0][0].rule).toBe('required');
         });
 
         test('should emit field:not-found when accessing non-existent field', async () => {
@@ -122,7 +128,7 @@ describe('Integration Tests — Full Documentation Scenarios', () => {
             );
 
             expect(notFoundCb).toHaveBeenCalled();
-            expect(notFoundCb.mock.calls[0][0].type).toBe(ErrorType.FIELD_NOT_FOUND);
+            expect(notFoundCb.mock.calls[0][0].code).toBe('field_not_found');
         });
 
         test('should validate all fields and return summary', async () => {
@@ -131,7 +137,7 @@ describe('Integration Tests — Full Documentation Scenarios', () => {
 
             const isValid = await userModel.validateAll();
             expect(isValid).toBe(true);
-            expect(userModel.getValidationSummary()).toBe('Validation passed');
+            expect(formatValidationErrors(userModel.validationErrors)).toBe('Validation passed');
         });
 
         test('should track dirty data for invalid values', async () => {
@@ -149,10 +155,10 @@ describe('Integration Tests — Full Documentation Scenarios', () => {
             expect(snapshot.age).toBe(18);
         });
 
-        test('should unsubscribe events via off()', async () => {
+        test('should unsubscribe events via the returned function', async () => {
             const changeCb = jest.fn();
-            userModel.on('field:change', changeCb);
-            userModel.off('field:change', changeCb);
+            const unsubscribe = userModel.on('field:change', changeCb);
+            unsubscribe();
 
             await userModel.setField('name', 'Bob');
             expect(changeCb).not.toHaveBeenCalled();
@@ -235,8 +241,6 @@ describe('Integration Tests — Full Documentation Scenarios', () => {
     // =========================================================================
     describe('README: Custom Validation Rules and Messages', () => {
         test('should validate with custom rule and withMessage', async () => {
-            const errorHandler = new ErrorHandler();
-
             const customRule = new Rule(
                 'custom',
                 'Does not meet custom rules',
@@ -249,7 +253,7 @@ describe('Integration Tests — Full Documentation Scenarios', () => {
                     validator: [customRule.withMessage('Field value must be "custom"')],
                     default: ''
                 }
-            }, { errorHandler });
+            });
 
             const resultBad = await model.setField('field', 'wrong');
             expect(resultBad).toBe(false);
@@ -264,18 +268,12 @@ describe('Integration Tests — Full Documentation Scenarios', () => {
     });
 
     // =========================================================================
-    // 4. README — Unified Error Handling (ErrorHandler + ErrorType)
+    // 4. README — Typed model events
     // =========================================================================
-    describe('README: Unified Error Handling', () => {
-        test('should route errors through custom ErrorHandler', async () => {
-            const errorHandler = new ErrorHandler();
+    describe('README: Typed Model Events', () => {
+        test('should route errors through model events', async () => {
             const validationCb = jest.fn();
             const fieldNotFoundCb = jest.fn();
-            const unknownCb = jest.fn();
-
-            errorHandler.onError(ErrorType.VALIDATION, validationCb);
-            errorHandler.onError(ErrorType.FIELD_NOT_FOUND, fieldNotFoundCb);
-            errorHandler.onError(ErrorType.UNKNOWN, unknownCb);
 
             const model = createModel({
                 name: {
@@ -283,12 +281,13 @@ describe('Integration Tests — Full Documentation Scenarios', () => {
                     validator: [ValidationRules.required.withMessage('Name cannot be empty')],
                     default: ''
                 }
-            }, { errorHandler });
+            });
+            model.on(ModelEvents.VALIDATION_ERROR, validationCb);
+            model.on(ModelEvents.FIELD_NOT_FOUND, fieldNotFoundCb);
 
             await model.setField('name', '');
             expect(validationCb).toHaveBeenCalled();
             expect(validationCb.mock.calls[0][0].field).toBe('name');
-            expect(unknownCb).toHaveBeenCalled();
 
             // @ts-expect-error — testing non-existent field
             await model.setField('missing', 'x');
@@ -297,15 +296,14 @@ describe('Integration Tests — Full Documentation Scenarios', () => {
             model.dispose();
         });
 
-        test('should unsubscribe error listeners via offError', async () => {
-            const errorHandler = new ErrorHandler();
+        test('should unsubscribe error listeners', async () => {
             const cb = jest.fn();
-            errorHandler.onError(ErrorType.VALIDATION, cb);
-            errorHandler.offError(ErrorType.VALIDATION, cb);
 
             const model = createModel({
                 name: { type: 'string', validator: [ValidationRules.required], default: '' }
-            }, { errorHandler });
+            });
+            const unsubscribe = model.on(ModelEvents.VALIDATION_ERROR, cb);
+            unsubscribe();
 
             await model.setField('name', '');
             expect(cb).not.toHaveBeenCalled();
@@ -455,22 +453,23 @@ describe('Integration Tests — Full Documentation Scenarios', () => {
     });
 
     // =========================================================================
-    // 8. README — ModelOptions: errorFormatter
+    // 8. README — formatValidationErrors
     // =========================================================================
-    describe('README: Custom errorFormatter', () => {
-        test('should use custom errorFormatter in getValidationSummary', async () => {
+    describe('README: Custom validation error formatter', () => {
+        test('should format validation errors independently', async () => {
             const model = createModel({
                 field: {
                     type: 'string',
                     validator: [ValidationRules.required],
                     default: ''
                 }
-            }, {
-                errorFormatter: (err) => `[${err.field}] ${err.message}`
             });
 
             await model.setField('field', '');
-            expect(model.getValidationSummary()).toBe('[field] This field is required');
+            expect(formatValidationErrors(
+                model.validationErrors,
+                (error) => `[${error.field}] ${error.message}`
+            )).toBe('[field] This field is required');
 
             model.dispose();
         });
@@ -634,7 +633,7 @@ describe('Integration Tests — Full Documentation Scenarios', () => {
 
             expect(reactionErrorCb).toHaveBeenCalled();
             const errorArg = reactionErrorCb.mock.calls.find(
-                (call: any[]) => call[0].type === ErrorType.CIRCULAR_DEPENDENCY
+                (call: any[]) => call[0].code === 'circular_dependency'
             );
             expect(errorArg).toBeDefined();
 
@@ -809,13 +808,13 @@ describe('Integration Tests — Full Documentation Scenarios', () => {
 
             const isValid = await model.validateAll();
             expect(isValid).toBe(true);
-            expect(model.getValidationSummary()).toBe('Validation passed');
+            expect(formatValidationErrors(model.validationErrors)).toBe('Validation passed');
             expect(allEvents).toContain('field:change');
             expect(allEvents).toContain('validation:complete');
 
             await model.setField('age', 5);
             expect(model.getDirtyData()).toHaveProperty('age', 5);
-            expect(model.getValidationSummary()).toContain('Must be at least 13');
+            expect(formatValidationErrors(model.validationErrors)).toContain('Must be at least 13');
 
             await model.setField('email', 'taken@test.com');
             expect(model.getDirtyData()).toHaveProperty('email', 'taken@test.com');
@@ -826,16 +825,14 @@ describe('Integration Tests — Full Documentation Scenarios', () => {
     });
 
     // =========================================================================
-    // 17. ErrorType enum completeness
+    // 17. ModelEvents constants
     // =========================================================================
-    describe('ErrorType Enum', () => {
-        test('should contain all documented error types', () => {
-            expect(ErrorType.VALIDATION).toBe('validation');
-            expect(ErrorType.REACTION).toBe('reaction');
-            expect(ErrorType.FIELD_NOT_FOUND).toBe('field_not_found');
-            expect(ErrorType.DEPENDENCY_ERROR).toBe('dependency_error');
-            expect(ErrorType.CIRCULAR_DEPENDENCY).toBe('circular_dependency');
-            expect(ErrorType.UNKNOWN).toBe('unknown');
+    describe('ModelEvents', () => {
+        test('should contain all documented event names', () => {
+            expect(ModelEvents.VALIDATION_ERROR).toBe('validation:error');
+            expect(ModelEvents.REACTION_ERROR).toBe('reaction:error');
+            expect(ModelEvents.DEPENDENCY_ERROR).toBe('dependency:error');
+            expect(ModelEvents.FIELD_NOT_FOUND).toBe('field:not-found');
         });
     });
 
@@ -1033,7 +1030,7 @@ describe('Integration Tests — Full Documentation Scenarios', () => {
             await new Promise(r => setTimeout(r, 10));
 
             expect(reactionErrorCb).toHaveBeenCalled();
-            expect(reactionErrorCb.mock.calls[0][0].type).toBe(ErrorType.REACTION);
+            expect(reactionErrorCb.mock.calls[0][0].code).toBe('reaction_error');
 
             model.dispose();
         });
@@ -1044,9 +1041,7 @@ describe('Integration Tests — Full Documentation Scenarios', () => {
     // =========================================================================
     describe('Edge: Reaction dependency field not defined', () => {
         test('should trigger DEPENDENCY_ERROR when reaction depends on missing field', async () => {
-            const errorHandler = new ErrorHandler();
             const depErrorCb = jest.fn();
-            errorHandler.onError(ErrorType.DEPENDENCY_ERROR, depErrorCb);
 
             const model = createModel({
                 input: { type: 'string', default: '' },
@@ -1054,14 +1049,18 @@ describe('Integration Tests — Full Documentation Scenarios', () => {
                     type: 'string',
                     default: '',
                     reaction: {
-                        fields: ['ghost'],
+                        fields: ['input', 'ghost'],
                         computed: (vals) => String(vals.ghost)
                     }
                 }
-            }, { errorHandler });
+            });
+            model.on(ModelEvents.DEPENDENCY_ERROR, depErrorCb);
 
             await model.setField('input', 'x');
             await new Promise(r => setTimeout(r, 10));
+            expect(depErrorCb).toHaveBeenCalledWith(
+                expect.objectContaining({ code: 'dependency_error' })
+            );
 
             model.dispose();
         });
@@ -1168,9 +1167,9 @@ describe('Integration Tests — Full Documentation Scenarios', () => {
     });
 
     // =========================================================================
-    // 30. getValidationSummary 多字段多错误聚合
+    // 30. formatValidationErrors 多字段多错误聚合
     // =========================================================================
-    describe('Edge: getValidationSummary with multiple fields and errors', () => {
+    describe('Edge: formatValidationErrors with multiple field errors', () => {
         test('should concatenate all errors with semicolons', async () => {
             const model = createModel({
                 a: { type: 'string', validator: [ValidationRules.required.withMessage('A required')], default: '' },
@@ -1180,7 +1179,7 @@ describe('Integration Tests — Full Documentation Scenarios', () => {
             await model.setField('a', '');
             await model.setField('b', '');
 
-            const summary = model.getValidationSummary();
+            const summary = formatValidationErrors(model.validationErrors);
             expect(summary).toContain('A required');
             expect(summary).toContain('B required');
             expect(summary).toContain('; ');
@@ -1190,10 +1189,10 @@ describe('Integration Tests — Full Documentation Scenarios', () => {
     });
 
     // =========================================================================
-    // 31. off() 不传 callback 时清除该事件所有监听器
+    // 31. 每个取消订阅函数只清除对应监听器
     // =========================================================================
-    describe('Edge: off() without callback removes all listeners for event', () => {
-        test('should remove all field:change listeners when callback is omitted', async () => {
+    describe('Edge: independent event unsubscribe functions', () => {
+        test('should remove only the selected field:change listener', async () => {
             const cb1 = jest.fn();
             const cb2 = jest.fn();
 
@@ -1201,14 +1200,14 @@ describe('Integration Tests — Full Documentation Scenarios', () => {
                 name: { type: 'string', default: '' }
             });
 
-            model.on('field:change', cb1);
+            const unsubscribe1 = model.on('field:change', cb1);
             model.on('field:change', cb2);
-            model.off('field:change');
+            unsubscribe1();
 
             await model.setField('name', 'test');
 
             expect(cb1).not.toHaveBeenCalled();
-            expect(cb2).not.toHaveBeenCalled();
+            expect(cb2).toHaveBeenCalled();
 
             model.dispose();
         });
@@ -1280,7 +1279,7 @@ describe('Integration Tests — Full Documentation Scenarios', () => {
             expect(model.data).toEqual({});
             expect(model.getField('field')).toBeUndefined();
             expect(model.getDirtyData()).toEqual({});
-            expect(model.getValidationSummary()).toBe('Validation passed');
+            expect(formatValidationErrors(model.validationErrors)).toBe('Validation passed');
         });
     });
 
@@ -1401,23 +1400,24 @@ describe('Integration Tests — Full Documentation Scenarios', () => {
     });
 
     // =========================================================================
-    // 38. errorFormatter 与多个字段错误的集成
+    // 38. 自定义格式化多个字段错误
     // =========================================================================
-    describe('Edge: errorFormatter with multiple field errors', () => {
+    describe('Edge: custom formatter with multiple field errors', () => {
         test('should format each error independently and join with semicolons', async () => {
             const model = createModel({
                 a: { type: 'string', validator: [ValidationRules.required], default: '' },
                 b: { type: 'number', validator: [ValidationRules.min(10)], default: 0 }
-            }, {
-                errorFormatter: (err) => `❌ ${err.field}:${err.rule}`
             });
 
             await model.setField('a', '');
             await model.setField('b', 5);
 
-            const summary = model.getValidationSummary();
-            expect(summary).toContain('❌ a:required');
-            expect(summary).toContain('❌ b:min');
+            const summary = formatValidationErrors(
+                model.validationErrors,
+                (error) => `Error ${error.field}:${error.rule}`
+            );
+            expect(summary).toContain('Error a:required');
+            expect(summary).toContain('Error b:min');
 
             model.dispose();
         });
@@ -1454,33 +1454,29 @@ describe('Integration Tests — Full Documentation Scenarios', () => {
     });
 
     // =========================================================================
-    // 40. ErrorHandler 的 UNKNOWN 类型接收所有错误
+    // 40. 不同错误类型通过对应模型事件发送
     // =========================================================================
-    describe('Edge: ErrorType.UNKNOWN receives all error types', () => {
-        test('should fire UNKNOWN listener for every error type', async () => {
-            const errorHandler = new ErrorHandler();
-            const unknownCb = jest.fn();
-            errorHandler.onError(ErrorType.UNKNOWN, unknownCb);
-
+    describe('Edge: model error event separation', () => {
+        test('should route validation and field errors separately', async () => {
+            const validationCb = jest.fn();
+            const fieldCb = jest.fn();
             const model = createModel({
                 name: {
                     type: 'string',
                     validator: [ValidationRules.required],
                     default: ''
                 }
-            }, { errorHandler });
-
-            unknownCb.mockClear();
+            });
+            model.on(ModelEvents.VALIDATION_ERROR, validationCb);
+            model.on(ModelEvents.FIELD_NOT_FOUND, fieldCb);
 
             await model.setField('name', '');
-            const countAfterValidation = unknownCb.mock.calls.length;
-            expect(countAfterValidation).toBeGreaterThan(0);
-
-            unknownCb.mockClear();
+            expect(validationCb).toHaveBeenCalled();
+            expect(fieldCb).not.toHaveBeenCalled();
 
             // @ts-expect-error — testing non-existent field
             await model.setField('nope', 'x');
-            expect(unknownCb).toHaveBeenCalled();
+            expect(fieldCb).toHaveBeenCalled();
 
             model.dispose();
         });
@@ -1496,7 +1492,7 @@ describe('Integration Tests — Full Documentation Scenarios', () => {
             expect(model.data).toEqual({});
             const result = await model.validateAll();
             expect(result).toBe(true);
-            expect(model.getValidationSummary()).toBe('Validation passed');
+            expect(formatValidationErrors(model.validationErrors)).toBe('Validation passed');
 
             model.dispose();
         });

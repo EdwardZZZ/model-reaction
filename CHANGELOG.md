@@ -9,9 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - `Rule.when(predicate)` chainable helper for conditional validation rules.
+- Typed `ModelEventMap<T>` payloads and standalone `formatValidationErrors`.
 - Built-in rules: `integer`, `boolean`, `string`, `min`/`max` with type guards,
   `minLength`, `maxLength`, `pattern`.
-- `ModelEvents.DEPENDENCY_ERROR` event forwarded from `ErrorType.DEPENDENCY_ERROR`.
+- `ModelEvents.DEPENDENCY_ERROR` for reaction dependency failures.
 - `LICENSE` (ISC) and `CHANGELOG.md` files.
 - `prepublishOnly` script (lint + test + build) and `engines.node >= 16`,
   `sideEffects: false`, explicit `files` whitelist in `package.json`.
@@ -19,14 +20,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - ESLint flat config now lints `src/__tests__/**` and `examples/**` with
   test/example-friendly rule overrides.
 - Public type exports: `Validator`, `Reaction`, `FieldSchema`, `ValidationError`,
-  `AppError`, `ValidateFieldOptions`, `ModelEvents`.
+  `ModelError`, `ModelErrorCode`, `ModelEventMap`, `ModelEvents`.
 - Expanded test coverage across the existing suites for the high-severity and
-  hardening fixes: `strictMode`, dispose-after-use guards, shared `ErrorHandler`
-  safety, `EventEmitter` robustness, and `settled()` with in-flight async
+  hardening fixes: `strictMode`, dispose-after-use guards, typed event
+  isolation, `EventEmitter` robustness, and `settled()` with in-flight async
   validation (see `model-manager.test.ts`, `event-emitter.test.ts`,
   `reaction-system.test.ts`, and `integration.test.ts`).
 
 ### Changed
+- **Breaking:** model errors now flow only through typed `model.on(...)` events.
+  Removed `ErrorHandler`, `ErrorType`, `ModelOptions.errorHandler`, and the
+  duplicate internal error bus.
+- **Breaking:** removed `model.off(...)`; `model.on(...)` returns the sole
+  unsubscribe function.
+- **Breaking:** replaced `getValidationSummary()` and
+  `ModelOptions.errorFormatter` with standalone `formatValidationErrors`.
+- **Breaking:** stopped exporting the internal `ValidateFieldOptions` type.
 - Reworked the ad-creation technical solution document to align with the current
   `model-reaction` API guidance, and moved it from the repository root to
   `docs/TECHNICAL_SOLUTION.md`.
@@ -48,9 +57,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   after a newer request supersedes them.
 - `EventEmitter.emit` snapshots its listener array, surfaces listener errors via
   `console.error`, and isolates one listener's exception from the others.
-- `ModelManager.dispose()` only `off`s the listeners it registered; a shared
-  external `errorHandler` is preserved. An internally-created `errorHandler` is
-  fully disposed.
 - `tsconfig.json` switched to `module: esnext` + `moduleResolution: bundler`.
 - Replaced deprecated `rollup-plugin-terser` with `@rollup/plugin-terser`.
 - `examples/complex-form.ts`:

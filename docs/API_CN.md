@@ -12,8 +12,7 @@
 - [Model 方法](#model-方法)
 - [事件](#事件)
 - [ModelOptions](#modeloptions)
-- [ErrorHandler](#errorhandler)
-- [ErrorType 枚举](#errortype-枚举)
+- [错误格式化](#错误格式化)
 - [类型定义](#类型定义)
 
 ---
@@ -61,7 +60,6 @@ createModel<S extends Record<string, FieldSchema>>(
 | 方法 | 说明 |
 | --- | --- |
 | `validateAll(): Promise<boolean>` | 验证所有字段，返回是否全部通过 |
-| `getValidationSummary(): string` | 获取人类可读的验证摘要 |
 | `getDirtyData(): Partial<T>` | 获取验证失败的脏数据 |
 | `clearDirtyData(): void` | 清空所有脏数据记录 |
 
@@ -72,17 +70,15 @@ createModel<S extends Record<string, FieldSchema>>(
 | `subscribeField(field, callback)` | 订阅单个字段变化，返回取消订阅函数 |
 | `subscribe(selector, callback, isEqual?)` | 订阅派生值；默认使用 `Object.is` 比较，返回取消订阅函数 |
 | `on(event, callback)` | 订阅模型事件（见 [事件](#事件)）。返回取消订阅函数，与 `subscribe` / `subscribeField` 一致 |
-| `off(event, callback?)` | 取消订阅 |
 
-#### 两个层级：事件总线 vs. 数据订阅
+#### 两个层级：事件 vs. 数据订阅
 
-这四个方法处于**两个不同的抽象层级**，互为补充而非冗余：
+这三个方法处于**两个不同的抽象层级**，互为补充而非冗余：
 
-- **`on` / `off` —— 事件总线。** 底层。`on` 按**事件名**订阅，收到的是原始事件
-  payload。它是观察非值类事件的**唯一途径**，例如 `validation:error`、
+- **`on` —— 类型化模型事件。** 底层。它按**事件名**订阅，收到对应事件的
+  类型化 payload，并返回取消订阅函数。它是观察非值类事件的**唯一途径**，例如 `validation:error`、
   `validation:complete`、`reaction:error`、`dependency:error`、
-  `field:not-found`（见 [事件](#事件)）。`off(event)` 不传 callback 时会移除该事件
-  的**所有**监听器——这是单个取消订阅函数做不到的。
+  `field:not-found`（见 [事件](#事件)）。
 
 - **`subscribe` / `subscribeField` —— 数据订阅。** 构建在 `on('field:change', …)`
   之上的便利层。两者都观察**值变化**，且仅在被观察值真正改变时才触发：
@@ -120,8 +116,6 @@ createModel<S extends Record<string, FieldSchema>>(
 interface ModelOptions {
   debounceReactions?: number;
   asyncValidationTimeout?: number;
-  errorFormatter?: (error: ValidationError) => string;
-  errorHandler?: ErrorHandler;
   strictMode?: boolean;
   failFast?: boolean;
 }
@@ -131,38 +125,25 @@ interface ModelOptions {
 | --- | --- | --- |
 | `debounceReactions` | `0` | 反应触发的防抖时间（毫秒） |
 | `asyncValidationTimeout` | `5000` | 异步验证的超时时间（毫秒） |
-| `errorFormatter` | — | 自定义验证错误消息格式化函数 |
-| `errorHandler` | 新实例 | 注入共享的 `ErrorHandler` |
 | `strictMode` | `false` | 为 `true` 时，设置未在 schema 中声明的字段会抛错 |
 | `failFast` | `false` | 为 `true` 时，单字段在第一条规则失败后即停止后续验证 |
 
-## ErrorHandler
+## 错误格式化
 
-统一的错误管理。
+错误展示与模型状态解耦：
 
-| 方法 | 说明 |
-| --- | --- |
-| `onError(type, callback)` | 订阅指定类型的错误 |
-| `offError(type, callback)` | 取消订阅 |
-| `triggerError(error)` | 手动触发错误 |
-| `createValidationError(field, message)` | 构造验证错误对象 |
-| `createFieldNotFoundError(field)` | 构造"字段不存在"错误对象 |
-
-## ErrorType 枚举
-
-| 成员 | 含义 |
-| --- | --- |
-| `VALIDATION` | 验证规则失败 |
-| `REACTION` | 反应处理函数报错 |
-| `FIELD_NOT_FOUND` | 字段未在 schema 中声明 |
-| `DEPENDENCY_ERROR` | 反应依赖配置错误 |
-| `CIRCULAR_DEPENDENCY` | 反应图存在循环依赖 |
-| `UNKNOWN` | 未分类错误 |
+```typescript
+const summary = formatValidationErrors(model.validationErrors);
+const custom = formatValidationErrors(
+  model.validationErrors,
+  (error) => `[${error.field}] ${error.message}`
+);
+```
 
 ## 类型定义
 
 当前公开导出的类型包括 `Model`、`ModelOptions`、`ModelReturn`、
-`Validator`、`Reaction`、`FieldSchema`、`ValidationError`、`AppError`、
-`ValidateFieldOptions`、`InferFieldType`、`InferModelData` 和 `ModelEvents`。
+`Validator`、`Reaction`、`FieldSchema`、`ValidationError`、`ModelError`、
+`ModelErrorCode`、`ModelEventMap`、`InferFieldType` 和 `InferModelData`。
 
 完整类型定义请见 [`src/types.ts`](../src/types.ts)。

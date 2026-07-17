@@ -10,7 +10,7 @@
 
 - [异步验证](#异步验证)
 - [自定义验证规则与消息](#自定义验证规则与消息)
-- [统一错误处理](#统一错误处理)
+- [类型化错误事件](#类型化错误事件)
 - [条件验证与跨字段验证](#条件验证与跨字段验证)
 - [字段转换与异步验证](#字段转换与异步验证)
 - [等待异步操作](#等待异步操作)
@@ -63,9 +63,7 @@ console.log(asyncUserModel.getDirtyData());
 ## 自定义验证规则与消息
 
 ```typescript
-import { createModel, Rule, ErrorHandler } from 'model-reaction';
-
-const errorHandler = new ErrorHandler();
+import { createModel, Rule } from 'model-reaction';
 
 const customRule = new Rule(
   'custom',
@@ -79,27 +77,13 @@ const model = createModel({
     validator: [customRule.withMessage('字段值必须为 "custom"')],
     default: '',
   },
-}, { errorHandler });
+});
 ```
 
-## 统一错误处理
+## 类型化错误事件
 
 ```typescript
-import { createModel, ValidationRules, ErrorHandler, ErrorType } from 'model-reaction';
-
-const errorHandler = new ErrorHandler();
-
-errorHandler.onError(ErrorType.VALIDATION, (error) => {
-  console.error(`验证错误: ${error.field} - ${error.message}`);
-});
-
-errorHandler.onError(ErrorType.FIELD_NOT_FOUND, (error) => {
-  console.error(`字段不存在: ${error.field}`);
-});
-
-errorHandler.onError(ErrorType.UNKNOWN, (error) => {
-  console.error(`未知错误: ${error.message}`);
-});
+import { createModel, ModelEvents, ValidationRules } from 'model-reaction';
 
 const model = createModel({
   name: {
@@ -107,7 +91,19 @@ const model = createModel({
     validator: [ValidationRules.required.withMessage('姓名不能为空')],
     default: '',
   },
-}, { errorHandler });
+});
+
+const unsubscribeValidation = model.on(
+  ModelEvents.VALIDATION_ERROR,
+  (error) => console.error(`验证错误: ${error.field} - ${error.message}`)
+);
+const unsubscribeMissing = model.on(
+  ModelEvents.FIELD_NOT_FOUND,
+  (error) => console.error(`字段不存在: ${error.field}`)
+);
+
+unsubscribeValidation();
+unsubscribeMissing();
 ```
 
 ## 条件验证与跨字段验证

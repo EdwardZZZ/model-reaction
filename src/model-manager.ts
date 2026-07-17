@@ -1,15 +1,18 @@
 import {
-    ErrorType,
     FieldSchema,
     Model,
+    ModelError,
+    ModelErrorEvent,
+    ModelEventMap,
     ModelEvents,
     ModelOptions,
+    ModelReturn,
     ValidationError,
 } from './types';
 import { validateField } from './validate-field';
 import { deepEqual } from './deep-equal';
-import { ErrorHandler } from './error-handler';
 import { EventEmitter } from './event-emitter';
+import { PendingTasks } from './pending-tasks';
 import { ReactionSystem } from './reaction-system';
 
 /**
@@ -23,40 +26,28 @@ import { ReactionSystem } from './reaction-system';
  */
 export class ModelManager<
     T extends Record<string, any> = Record<string, any>,
-> {
-    data: T = {} as T;
-    validationErrors: Record<string, ValidationError[]> = {};
+> implements ModelReturn<T> {
+    private modelData: T = {} as T;
+    private errors: Record<string, ValidationError[]> = {};
     /** Last value provided for a field whose validation failed. */
     dirtyData: Partial<T> = {};
 
-    private readonly schema: Model;
+    private readonly schema: Model<T>;
     private readonly options: ModelOptions;
-    private readonly eventEmitter = new EventEmitter();
-    private readonly errorHandler: ErrorHandler;
-    private readonly ownsErrorHandler: boolean;
-    private readonly errorListenerRegistrations: Array<{
-        type: ErrorType;
-        listener: (e: any) => void;
-    }> = [];
+    private readonly eventEmitter = new EventEmitter<ModelEventMap<T>>();
+    private readonly pendingTasks = new PendingTasks();
     private readonly reactionSystem: ReactionSystem;
 
     private readonly asyncValidationTimeout: number;
     private validationRequestIds: Record<string, number> = {};
     private requestIdCounter = 0;
 
-    private pendingValidations = 0;
-    private validationSettledResolvers: Array<() => void> = [];
-
     private disposed = false;
 
-    constructor(schema: Model, options: ModelOptions = {}) {
+    constructor(schema: Model<T>, options: ModelOptions = {}) {
         this.schema = schema;
         this.options = options;
         this.asyncValidationTimeout = options.asyncValidationTimeout ?? 5000;
-        this.ownsErrorHandler = !options.errorHandler;
-        this.errorHandler = options.errorHandler ?? new ErrorHandler();
-
-        this.setupErrorHandling();
 
         this.reactionSystem = new ReactionSystem(
             this.schema,
@@ -65,56 +56,46 @@ export class ModelManager<
                 getValue: (field) => this.getField(field as keyof T),
                 setValue: (field, value, opts) =>
                     this.updateField(field, value, opts),
-                emit: (event, data) => this.emit(event, data),
                 setError: (field, error) => {
-                    if (!this.validationErrors[field]) {
-                        this.validationErrors[field] = [];
+                    if (!this.errors[field]) {
+                        this.errors[field] = [];
                     }
-                    this.validationErrors[field].push(error);
+                    this.errors[field].push(error);
                 },
+                reportError: (event, error) =>
+                    this.reportError(event, error),
             },
-            this.errorHandler
+            this.pendingTasks
         );
 
         this.initializeDefaults();
+        this.bindPublicMethods();
     }
 
     // -------------------------------------------------------------------------
     // Lifecycle helpers
     // -------------------------------------------------------------------------
 
-    private setupErrorHandling(): void {
-        const register = (
-            type: ErrorType,
-            listener: (error: any) => void
-        ): void => {
-            this.errorHandler.onError(type, listener);
-            this.errorListenerRegistrations.push({ type, listener });
-        };
-
-        register(ErrorType.VALIDATION, (e) =>
-            this.emit(ModelEvents.VALIDATION_ERROR, e)
-        );
-        register(ErrorType.REACTION, (e) =>
-            this.emit(ModelEvents.REACTION_ERROR, e)
-        );
-        register(ErrorType.CIRCULAR_DEPENDENCY, (e) =>
-            this.emit(ModelEvents.REACTION_ERROR, e)
-        );
-        register(ErrorType.DEPENDENCY_ERROR, (e) =>
-            this.emit(ModelEvents.DEPENDENCY_ERROR, e)
-        );
-        register(ErrorType.FIELD_NOT_FOUND, (e) =>
-            this.emit(ModelEvents.FIELD_NOT_FOUND, e)
-        );
-    }
-
     private initializeDefaults(): void {
         Object.entries(this.schema).forEach(([field, schema]) => {
             if (schema.default !== undefined) {
-                (this.data as any)[field] = cloneDefault(schema.default);
+                (this.modelData as any)[field] = cloneDefault(schema.default);
             }
         });
+    }
+
+    private bindPublicMethods(): void {
+        this.setField = this.setField.bind(this);
+        this.getField = this.getField.bind(this);
+        this.setFields = this.setFields.bind(this);
+        this.validateAll = this.validateAll.bind(this);
+        this.on = this.on.bind(this);
+        this.getDirtyData = this.getDirtyData.bind(this);
+        this.clearDirtyData = this.clearDirtyData.bind(this);
+        this.settled = this.settled.bind(this);
+        this.dispose = this.dispose.bind(this);
+        this.subscribeField = this.subscribeField.bind(this);
+        this.subscribe = this.subscribe.bind(this);
     }
 
     private ensureNotDisposed(): void {
@@ -129,17 +110,38 @@ export class ModelManager<
     // Event facade
     // -------------------------------------------------------------------------
 
-    on(event: string, callback: (data: any) => void): () => void {
+    on<E extends keyof ModelEventMap<T>>(
+        event: E,
+        callback: (data: ModelEventMap<T>[E]) => void
+    ): () => void {
         this.eventEmitter.on(event, callback);
-        return () => this.off(event, callback);
+        return () => this.eventEmitter.off(event, callback);
     }
 
-    off(event: string, callback?: (data: any) => void): void {
-        this.eventEmitter.off(event, callback);
-    }
-
-    private emit(event: string, data: any): void {
+    private emit<E extends keyof ModelEventMap<T>>(
+        event: E,
+        data: ModelEventMap<T>[E]
+    ): void {
         this.eventEmitter.emit(event, data);
+    }
+
+    private reportError(
+        event: ModelErrorEvent,
+        error: ModelError
+    ): void {
+        /* eslint-disable no-console */
+        console.error(
+            `[${error.code}] ${error.field ? `field ${error.field}: ` : ''}${error.message}`
+        );
+        this.emit(event, error);
+    }
+
+    private reportValidationError(error: ValidationError): void {
+        /* eslint-disable no-console */
+        console.error(
+            `[validation] field ${error.field}: ${error.message}`
+        );
+        this.emit(ModelEvents.VALIDATION_ERROR, error);
     }
 
     // -------------------------------------------------------------------------
@@ -209,9 +211,9 @@ export class ModelManager<
         callback: (value: R, prev: R) => void,
         isEqual: (a: R, b: R) => boolean = Object.is
     ): () => void {
-        let prev = selector(this.data);
+        let prev = selector(this.modelData);
         const handler = (): void => {
-            const next = selector(this.data);
+            const next = selector(this.modelData);
             if (!isEqual(next, prev)) {
                 const old = prev;
                 prev = next;
@@ -226,8 +228,16 @@ export class ModelManager<
     // Public read API
     // -------------------------------------------------------------------------
 
+    get data(): T {
+        return { ...this.modelData };
+    }
+
+    get validationErrors(): Record<string, ValidationError[]> {
+        return { ...this.errors };
+    }
+
     getField<K extends keyof T>(field: K): T[K] {
-        return this.data[field];
+        return this.modelData[field];
     }
 
     getDirtyData(): Partial<T> {
@@ -238,32 +248,12 @@ export class ModelManager<
         this.dirtyData = {};
     }
 
-    getValidationSummary(): string {
-        const errors = Object.values(this.validationErrors).flat();
-        if (errors.length === 0) return 'Validation passed';
-        if (this.options.errorFormatter) {
-            return errors.map(this.options.errorFormatter).join('; ');
-        }
-        return errors.map((err) => `${err.field}: ${err.message}`).join('; ');
-    }
-
     // -------------------------------------------------------------------------
     // Settled / dispose
     // -------------------------------------------------------------------------
 
-    /**
-     * Resolve once both reactions and validations are quiet at the same time.
-     * Reactions can spawn validations and vice versa, so a single pass isn't
-     * enough; the loop is bounded defensively.
-     */
-    async settled(): Promise<void> {
-        for (let i = 0; i < 50; i++) {
-            await this.reactionSystem.settled();
-            if (this.pendingValidations === 0) return;
-            await new Promise<void>((resolve) => {
-                this.validationSettledResolvers.push(resolve);
-            });
-        }
+    settled(): Promise<void> {
+        return this.pendingTasks.settled();
     }
 
     dispose(): void {
@@ -272,23 +262,11 @@ export class ModelManager<
 
         this.reactionSystem.dispose();
         this.eventEmitter.clear();
+        this.pendingTasks.dispose();
 
-        // Only off the listeners we registered so a shared errorHandler keeps
-        // working for other consumers.
-        this.errorListenerRegistrations.forEach(({ type, listener }) => {
-            this.errorHandler.offError(type, listener);
-        });
-        this.errorListenerRegistrations.length = 0;
-
-        if (this.ownsErrorHandler) this.errorHandler.dispose();
-
-        // Wake up anyone waiting on settled() so they don't hang forever.
-        const waiters = this.validationSettledResolvers.splice(0);
-        waiters.forEach((resolve) => resolve());
-
-        this.data = {} as T;
+        this.modelData = {} as T;
         this.dirtyData = {};
-        this.validationErrors = {};
+        this.errors = {};
         this.validationRequestIds = {};
     }
 
@@ -305,49 +283,23 @@ export class ModelManager<
         value: any,
         options: { reactionStack?: string[]; suppressReactions?: boolean } = {}
     ): Promise<boolean> {
-        this.pendingValidations++;
-        try {
-            const schema = this.schema[field];
-            if (!schema) {
-                const error = this.errorHandler.createFieldNotFoundError(field);
-                this.errorHandler.triggerError(error);
-                if (this.options.strictMode) throw new Error(error.message);
-                return false;
-            }
-
-            const requestId = ++this.requestIdCounter;
-            this.validationRequestIds[field] = requestId;
-            this.validationErrors[field] = [];
-
-            const transformed = schema.transform
-                ? schema.transform(value)
-                : value;
-
-            const isValid = await this.runValidators(
-                schema,
-                transformed,
+        const schema = this.schema[field];
+        if (!schema) {
+            const error: ModelError = {
+                code: 'field_not_found',
                 field,
-                requestId
-            );
-
-            // Stale: a newer request superseded us.
-            if (this.validationRequestIds[field] !== requestId) return false;
-
-            if (isValid) {
-                this.commitValid(
-                    field,
-                    transformed,
-                    options.reactionStack,
-                    options.suppressReactions
-                );
-            } else {
-                this.dirtyData[field as keyof T] = transformed as T[keyof T];
-            }
-            return isValid;
-        } finally {
-            this.pendingValidations--;
-            this.notifyValidationsSettledIfIdle();
+                message: `Field ${field} does not exist in the model schema`,
+            };
+            this.reportError(ModelEvents.FIELD_NOT_FOUND, error);
+            if (this.options.strictMode) throw new Error(error.message);
+            return false;
         }
+
+        const transformed = schema.transform
+            ? schema.transform(value)
+            : value;
+
+        return this.validateAndCommit(field, schema, transformed, options);
     }
 
     /**
@@ -358,18 +310,31 @@ export class ModelManager<
         field: string,
         opts: { suppressReactions?: boolean } = {}
     ): Promise<boolean> {
-        this.pendingValidations++;
-        try {
-            const schema = this.schema[field] as FieldSchema;
-            const fieldKey = field as keyof T;
-            const value =
-                field in this.dirtyData
-                    ? this.dirtyData[fieldKey]
-                    : this.data[fieldKey];
+        const fieldKey = field as keyof T;
+        const value =
+            field in this.dirtyData
+                ? this.dirtyData[fieldKey]
+                : this.modelData[fieldKey];
 
+        return this.validateAndCommit(
+            field,
+            this.schema[field] as FieldSchema,
+            value,
+            opts
+        );
+    }
+
+    private async validateAndCommit(
+        field: string,
+        schema: FieldSchema,
+        value: unknown,
+        options: { reactionStack?: string[]; suppressReactions?: boolean }
+    ): Promise<boolean> {
+        const endTask = this.pendingTasks.begin();
+        try {
             const requestId = ++this.requestIdCounter;
             this.validationRequestIds[field] = requestId;
-            this.validationErrors[field] = [];
+            this.errors[field] = [];
 
             const isValid = await this.runValidators(
                 schema,
@@ -377,24 +342,22 @@ export class ModelManager<
                 field,
                 requestId
             );
+
             if (this.validationRequestIds[field] !== requestId) return false;
 
-            if (!isValid) {
-                this.dirtyData[fieldKey] = value as T[keyof T];
-            } else if (field in this.dirtyData) {
-                delete this.dirtyData[fieldKey];
-                if (!deepEqual(this.data[fieldKey], value)) {
-                    this.data[fieldKey] = value as T[keyof T];
-                    this.emit(ModelEvents.FIELD_CHANGE, { field, value });
-                    if (!opts.suppressReactions) {
-                        this.reactionSystem.triggerReactions(field);
-                    }
-                }
+            if (isValid) {
+                this.commitValid(
+                    field,
+                    value,
+                    options.reactionStack,
+                    options.suppressReactions
+                );
+            } else {
+                this.dirtyData[field as keyof T] = value as T[keyof T];
             }
             return isValid;
         } finally {
-            this.pendingValidations--;
-            this.notifyValidationsSettledIfIdle();
+            endTask();
         }
     }
 
@@ -407,13 +370,13 @@ export class ModelManager<
         return validateField({
             schema,
             value,
-            errors: this.validationErrors,
+            errors: this.errors,
             field,
             timeout: this.asyncValidationTimeout,
-            errorHandler: this.errorHandler,
             failFast: this.options.failFast ?? false,
-            data: this.data as Record<string, any>,
+            data: this.modelData as Record<string, any>,
             isCurrent: () => this.validationRequestIds[field] === requestId,
+            onError: (error) => this.reportValidationError(error),
         });
     }
 
@@ -434,13 +397,13 @@ export class ModelManager<
         suppressReactions = false
     ): void {
         const fieldKey = field as keyof T;
-        const dataChanged = !deepEqual(this.data[fieldKey], value);
+        const dataChanged = !deepEqual(this.modelData[fieldKey], value);
         const hadDirty = field in this.dirtyData;
 
         if (!dataChanged && !hadDirty) return;
 
         if (dataChanged) {
-            this.data[fieldKey] = value;
+            this.modelData[fieldKey] = value;
         }
         if (hadDirty) {
             delete this.dirtyData[field];
@@ -451,16 +414,6 @@ export class ModelManager<
             if (!suppressReactions) {
                 this.reactionSystem.triggerReactions(field, reactionStack);
             }
-        }
-    }
-
-    private notifyValidationsSettledIfIdle(): void {
-        if (
-            this.pendingValidations === 0 &&
-            this.validationSettledResolvers.length > 0
-        ) {
-            const resolvers = this.validationSettledResolvers.splice(0);
-            resolvers.forEach((resolve) => resolve());
         }
     }
 }

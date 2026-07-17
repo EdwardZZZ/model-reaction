@@ -12,8 +12,7 @@ Reference for the public `model-reaction` API surface.
 - [Model Methods](#model-methods)
 - [Events](#events)
 - [ModelOptions](#modeloptions)
-- [ErrorHandler](#errorhandler)
-- [ErrorType Enum](#errortype-enum)
+- [Error Formatting](#error-formatting)
 - [Type Definitions](#type-definitions)
 
 ---
@@ -62,7 +61,6 @@ createModel<S extends Record<string, FieldSchema>>(
 | Method | Description |
 | --- | --- |
 | `validateAll(): Promise<boolean>` | Validate every field and return whether all passed. |
-| `getValidationSummary(): string` | Get a human-readable validation summary. |
 | `getDirtyData(): Partial<T>` | Get values that failed validation. |
 | `clearDirtyData(): void` | Clear all dirty data records. |
 
@@ -73,19 +71,18 @@ createModel<S extends Record<string, FieldSchema>>(
 | `subscribeField(field, callback)` | Subscribe to a single field's value changes. Returns an unsubscribe function. |
 | `subscribe(selector, callback, isEqual?)` | Subscribe to a derived value. Default equality is `Object.is`. Returns an unsubscribe function. |
 | `on(event, callback)` | Subscribe to a model event (see [Events](#events)). Returns an unsubscribe function, like `subscribe` / `subscribeField`. |
-| `off(event, callback?)` | Unsubscribe from an event. |
 
-#### Two layers: event bus vs. data subscription
+#### Two layers: events vs. data subscription
 
-These four methods live at **two different abstraction levels** — they are
+These three methods live at **two different abstraction levels** — they are
 complementary, not redundant:
 
-- **`on` / `off` — the event bus.** The low-level layer. `on` subscribes by
-  **event name** and receives the raw event payload. It is the *only* way to
+- **`on` — typed model events.** The low-level layer. It subscribes by
+  **event name**, receives that event's typed payload, and returns an
+  unsubscribe function. It is the *only* way to
   observe non-value events such as `validation:error`, `validation:complete`,
   `reaction:error`, `dependency:error`, and `field:not-found` (see
-  [Events](#events)). `off(event)` with no callback removes **all** listeners
-  for that event — something a single unsubscribe function cannot do.
+  [Events](#events)).
 
 - **`subscribe` / `subscribeField` — data subscription.** A convenience layer
   built on top of `on('field:change', …)`. Both observe **value changes** and
@@ -125,8 +122,6 @@ Subscribe via `model.on(eventName, handler)`.
 interface ModelOptions {
   debounceReactions?: number;
   asyncValidationTimeout?: number;
-  errorFormatter?: (error: ValidationError) => string;
-  errorHandler?: ErrorHandler;
   strictMode?: boolean;
   failFast?: boolean;
 }
@@ -136,38 +131,25 @@ interface ModelOptions {
 | --- | --- | --- |
 | `debounceReactions` | `0` | Debounce window (ms) for reaction triggers. |
 | `asyncValidationTimeout` | `5000` | Timeout (ms) for async validators. |
-| `errorFormatter` | — | Customise validation error message formatting. |
-| `errorHandler` | new instance | Inject a shared `ErrorHandler`. |
 | `strictMode` | `false` | If `true`, setting a field absent from the schema throws. |
 | `failFast` | `false` | If `true`, stop validating a field after its first failure. |
 
-## ErrorHandler
+## Error Formatting
 
-Unified error management.
+Formatting is independent from model state:
 
-| Method | Description |
-| --- | --- |
-| `onError(type, callback)` | Subscribe to a specific error type. |
-| `offError(type, callback)` | Unsubscribe. |
-| `triggerError(error)` | Trigger an error manually. |
-| `createValidationError(field, message)` | Build a validation error object. |
-| `createFieldNotFoundError(field)` | Build a "field not found" error object. |
-
-## ErrorType Enum
-
-| Member | Meaning |
-| --- | --- |
-| `VALIDATION` | Validation rule failed. |
-| `REACTION` | Reaction handler errored. |
-| `FIELD_NOT_FOUND` | Field is not declared in the schema. |
-| `DEPENDENCY_ERROR` | Reaction dependency is invalid. |
-| `CIRCULAR_DEPENDENCY` | Reaction graph contains a cycle. |
-| `UNKNOWN` | Unclassified error. |
+```typescript
+const summary = formatValidationErrors(model.validationErrors);
+const custom = formatValidationErrors(
+  model.validationErrors,
+  (error) => `[${error.field}] ${error.message}`
+);
+```
 
 ## Type Definitions
 
 Publicly exported types include `Model`, `ModelOptions`, `ModelReturn`,
-`Validator`, `Reaction`, `FieldSchema`, `ValidationError`, `AppError`,
-`ValidateFieldOptions`, `InferFieldType`, `InferModelData`, and `ModelEvents`.
+`Validator`, `Reaction`, `FieldSchema`, `ValidationError`, `ModelError`,
+`ModelErrorCode`, `ModelEventMap`, `InferFieldType`, and `InferModelData`.
 
 For full type definitions, see [`src/types.ts`](../src/types.ts).

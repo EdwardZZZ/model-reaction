@@ -17,17 +17,18 @@
 
 ### Global Error Handling
 ```typescript
-const errorHandler = new ErrorHandler();
-errorHandler.onError(ErrorType.UNKNOWN, (error) => {
+const unsubscribe = model.on('reaction:error', (error) => {
   console.error('Error occurred:', error);
   // Display global error notification
 });
+// cleanup
+unsubscribe();
 ```
 
 ### Field-Level Error Handling
 - Use the `validationErrors` object to get errors for specific fields
 - Display error messages for each field in the UI
-- Use `getValidationSummary()` to get an error summary
+- Use `formatValidationErrors(model.validationErrors)` for an error summary
 
 ## 3. Complex Business Rules
 

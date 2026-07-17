@@ -1,6 +1,5 @@
 import { createModel, Model } from '../index';
 import { ReactionSystem } from '../reaction-system';
-import { ErrorHandler } from '../error-handler';
 import { ModelManager } from '../model-manager';
 
 describe('ReactionSystem - via createModel', () => {
@@ -146,12 +145,6 @@ describe('ReactionSystem - via createModel', () => {
     });
 
     test('legitimate undefined value in dep does NOT trigger DEPENDENCY_ERROR', async () => {
-        const errorHandler = new ErrorHandler();
-        const depErrors: string[] = [];
-        errorHandler.onError('dependency_error' as any, (e) => {
-            depErrors.push(e.message);
-        });
-
         interface S {
             source: any;
             mirror: any;
@@ -166,7 +159,11 @@ describe('ReactionSystem - via createModel', () => {
                 },
             },
         };
-        const model = createModel<S>(schema, { errorHandler });
+        const model = createModel<S>(schema);
+        const depErrors: string[] = [];
+        model.on('dependency:error', (error) => {
+            depErrors.push(error.message);
+        });
 
         await model.setField('source', undefined);
         await model.settled();
@@ -432,6 +429,34 @@ describe('ReactionSystem - settled() waits for chained async reactions', () => {
         expect(model.getField('target')).toBe('HELLO');
         model.dispose();
     });
+
+    test('settled() stays pending when a debounced reaction is rescheduled', async () => {
+        const model = createModel({
+            source: { type: 'string', default: '' },
+            target: {
+                type: 'string',
+                default: '',
+                reaction: {
+                    fields: ['source'],
+                    computed: (deps) => deps.source.toUpperCase(),
+                },
+            },
+        }, { debounceReactions: 30 });
+
+        await model.setField('source', 'first');
+        let settled = false;
+        const settledPromise = model.settled().then(() => {
+            settled = true;
+        });
+
+        await model.setField('source', 'second');
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        expect(settled).toBe(false);
+
+        await settledPromise;
+        expect(model.getField('target')).toBe('SECOND');
+        model.dispose();
+    });
 });
 
 describe('ReactionSystem - direct unit tests', () => {
@@ -439,9 +464,9 @@ describe('ReactionSystem - direct unit tests', () => {
         const errorSpy = jest
             .spyOn(console, 'error')
             .mockImplementation(() => {});
-        const handler = new ErrorHandler();
 
         const setError = jest.fn();
+        const reportError = jest.fn();
         const system = new ReactionSystem(
             {
                 a: { type: 'string', default: '' },
@@ -460,10 +485,9 @@ describe('ReactionSystem - direct unit tests', () => {
                     throw new Error('getValue failed');
                 },
                 setValue: async () => true,
-                emit: () => {},
                 setError,
-            },
-            handler
+                reportError,
+            }
         );
 
         system.triggerReactions('a');
@@ -472,8 +496,13 @@ describe('ReactionSystem - direct unit tests', () => {
             '__reactions',
             expect.objectContaining({ rule: 'reaction_error' })
         );
-        expect(errorSpy).toHaveBeenCalledWith(
-            expect.stringContaining('[reaction] field b: getValue failed')
+        expect(reportError).toHaveBeenCalledWith(
+            'reaction:error',
+            expect.objectContaining({
+                code: 'reaction_error',
+                field: 'b',
+                message: 'getValue failed',
+            })
         );
 
         errorSpy.mockRestore();
@@ -482,7 +511,6 @@ describe('ReactionSystem - direct unit tests', () => {
     test('clears pending reaction timeouts on dispose', () => {
         jest.useFakeTimers();
         const clearSpy = jest.spyOn(globalThis, 'clearTimeout');
-        const handler = new ErrorHandler();
 
         const system = new ReactionSystem(
             {
@@ -500,10 +528,9 @@ describe('ReactionSystem - direct unit tests', () => {
             {
                 getValue: () => 'x',
                 setValue: async () => true,
-                emit: () => {},
                 setError: () => {},
-            },
-            handler
+                reportError: () => {},
+            }
         );
 
         system.triggerReactions('input');
@@ -517,7 +544,6 @@ describe('ReactionSystem - direct unit tests', () => {
     test('clears previous timeout when re-scheduling debounced reactions', () => {
         jest.useFakeTimers();
         const clearSpy = jest.spyOn(globalThis, 'clearTimeout');
-        const handler = new ErrorHandler();
 
         const system = new ReactionSystem(
             {
@@ -535,10 +561,9 @@ describe('ReactionSystem - direct unit tests', () => {
             {
                 getValue: () => 'x',
                 setValue: async () => true,
-                emit: () => {},
                 setError: () => {},
-            },
-            handler
+                reportError: () => {},
+            }
         );
 
         system.triggerReactions('input');
@@ -550,7 +575,6 @@ describe('ReactionSystem - direct unit tests', () => {
     });
 
     test('scheduleReaction / processReaction work with default reactionStack', () => {
-        const handler = new ErrorHandler();
         const reaction = {
             fields: ['input'],
             computed: (values: Record<string, any>) => values.input,
@@ -565,10 +589,9 @@ describe('ReactionSystem - direct unit tests', () => {
             {
                 getValue: () => 'x',
                 setValue: async () => true,
-                emit: () => {},
                 setError: () => {},
-            },
-            handler
+                reportError: () => {},
+            }
         );
 
         const anySystem = system as any;

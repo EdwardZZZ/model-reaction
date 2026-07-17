@@ -100,14 +100,14 @@ model-reaction:  setField -> [transform] -> [validate] -> commit -> [reaction] -
 - **Schema-first**: types / validators / defaults / reactions / transforms
   declared together, easy to skim.
 - **Validation built-in**: sync / async / conditional / cross-field, plus
-  `dirtyData` + `validationErrors` + `getValidationSummary`.
+  `dirtyData` + `validationErrors` + `formatValidationErrors`.
 - **Reactions built-in**: `fields → computed → action`, with automatic
   dependency tracking and circular-dependency detection.
 - **Field-level subscriptions**: `subscribeField` / `useModelField` are
   more precise than selectors + memoization.
 - **Async coordination**: `settled()` waits for *all* pending reactions
   and validations in one line.
-- **Error classification**: `ErrorType` enum + `ErrorHandler` — cleaner
+- **Error classification**: typed model error events — cleaner
   than try/catch inside reducers.
 
 **Cons**
@@ -256,7 +256,7 @@ Real projects often combine them:
   `transform / validator / dirtyData / reactionSystem`, classified
   errors, and field-level subscriptions.
 - **Creation is 118× slower.** Every model constructs an
-  `EventEmitter`, an `ErrorHandler`, a `ReactionSystem`, and the
+  `EventEmitter`, a `ReactionSystem`, and the
   dependency graph. This is a **one-time cost** — a typical SPA creates
   one model per form, not 1000 in a loop.
 - **Field isolation matches zustand (~1×).** With 1000 subscribers, the

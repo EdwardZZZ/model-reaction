@@ -1,11 +1,10 @@
 import { ModelManager } from '../model-manager';
 import {
     createModel,
+    formatValidationErrors,
     Model,
     ModelReturn,
     ValidationRules,
-    ErrorType,
-    ErrorHandler,
     ModelEvents,
 } from '../index';
 
@@ -61,7 +60,7 @@ describe('ModelManager - Basic Operations', () => {
         const result = await model.setField('age', 'not-a-number');
         expect(result).toBe(false);
         expect(model.getField('age')).toBe(original);
-        expect(model.getValidationSummary()).toContain('age: Must be a number');
+        expect(formatValidationErrors(model.validationErrors)).toContain('age: Must be a number');
     });
 
     test('handles non-existent field modification', async () => {
@@ -73,9 +72,7 @@ describe('ModelManager - Basic Operations', () => {
 
         expect(result).toBe(false);
         expect(errorCallback).toHaveBeenCalled();
-        expect(errorCallback.mock.calls[0][0].type).toBe(
-            ErrorType.FIELD_NOT_FOUND
-        );
+        expect(errorCallback.mock.calls[0][0].code).toBe('field_not_found');
         expect(errorCallback.mock.calls[0][0].field).toBe('nonexistentField');
         // @ts-expect-error - runtime check for non-existent field
         expect(model.getField('nonexistentField')).toBeUndefined();
@@ -165,7 +162,7 @@ describe('ModelManager - Batch Operations (setFields)', () => {
             email: 'not-an-email',
         });
         expect(result).toBe(false);
-        const summary = model.getValidationSummary();
+        const summary = formatValidationErrors(model.validationErrors);
         expect(summary).toContain('name: This field is required');
         expect(summary).toContain('age: Must be a number');
         expect(summary).toContain('email: Invalid email format');
@@ -443,7 +440,7 @@ describe('ModelManager - Boundary values', () => {
 
         await model.setField('requiredField', null);
         await model.validateAll();
-        expect(model.getValidationSummary()).toContain(
+        expect(formatValidationErrors(model.validationErrors)).toContain(
             'requiredField: This field is required'
         );
 
@@ -471,17 +468,17 @@ describe('ModelManager - Boundary values', () => {
 
         await model.setField('age', 18);
         await model.validateAll();
-        expect(model.getValidationSummary()).toBe('Validation passed');
+        expect(formatValidationErrors(model.validationErrors)).toBe('Validation passed');
 
         await model.setField('age', 17.9);
         await model.validateAll();
-        expect(model.getValidationSummary()).toContain(
+        expect(formatValidationErrors(model.validationErrors)).toContain(
             'age: Value must be greater than or equal to 18'
         );
 
         await model.setField('age', Number.MAX_SAFE_INTEGER);
         await model.validateAll();
-        expect(model.getValidationSummary()).toBe('Validation passed');
+        expect(formatValidationErrors(model.validationErrors)).toBe('Validation passed');
 
         jest.restoreAllMocks();
         model.dispose();
@@ -510,12 +507,12 @@ describe('ModelManager - Boundary values', () => {
         const model = createModel({});
         const ok = await model.validateAll();
         expect(ok).toBe(true);
-        expect(model.getValidationSummary()).toBe('Validation passed');
+        expect(formatValidationErrors(model.validationErrors)).toBe('Validation passed');
         model.dispose();
     });
 });
 
-describe('ModelManager - Error routing & ErrorHandler integration', () => {
+describe('ModelManager - Error event routing', () => {
     beforeEach(() => {
         jest.spyOn(console, 'error').mockImplementation(() => {});
     });
@@ -524,31 +521,36 @@ describe('ModelManager - Error routing & ErrorHandler integration', () => {
         jest.restoreAllMocks();
     });
 
-    test('routes errors through a custom shared ErrorHandler', async () => {
-        const errorHandler = new ErrorHandler();
+    test('routes errors through typed model events', async () => {
         const validationCb = jest.fn();
         const fieldNotFoundCb = jest.fn();
 
-        errorHandler.onError(ErrorType.VALIDATION, validationCb);
-        errorHandler.onError(ErrorType.FIELD_NOT_FOUND, fieldNotFoundCb);
-
-        const model = createModel(
-            {
-                name: {
-                    type: 'string',
-                    validator: [ValidationRules.required],
-                    default: '',
-                },
+        const model = createModel({
+            name: {
+                type: 'string',
+                validator: [ValidationRules.required],
+                default: '',
             },
-            { errorHandler }
-        );
+        });
+        model.on('validation:error', validationCb);
+        model.on('field:not-found', fieldNotFoundCb);
 
         await model.setField('name', '');
-        expect(validationCb).toHaveBeenCalled();
+        expect(validationCb).toHaveBeenCalledWith(
+            expect.objectContaining({
+                field: 'name',
+                rule: 'required',
+            })
+        );
 
         // @ts-expect-error - testing non-existent field
         await model.setField('missing', 'x');
-        expect(fieldNotFoundCb).toHaveBeenCalled();
+        expect(fieldNotFoundCb).toHaveBeenCalledWith(
+            expect.objectContaining({
+                code: 'field_not_found',
+                field: 'missing',
+            })
+        );
 
         model.dispose();
     });
@@ -562,63 +564,40 @@ describe('ModelManager - Error routing & ErrorHandler integration', () => {
         // @ts-expect-error - runtime check for non-existent field
         await model.setField('nonexistentField', 'value');
         expect(cb).toHaveBeenCalled();
-        expect(cb.mock.calls[0][0].type).toBe(ErrorType.FIELD_NOT_FOUND);
+        expect(cb.mock.calls[0][0].code).toBe('field_not_found');
         expect(cb.mock.calls[0][0].field).toBe('nonexistentField');
         model.dispose();
     });
 
-    test('disposing one model does NOT remove other listeners on a shared handler', async () => {
-        const sharedHandler = new ErrorHandler();
-        const externalCalls: string[] = [];
-        sharedHandler.onError(ErrorType.VALIDATION, (e) => {
-            externalCalls.push(e.message);
-        });
-
-        const modelA = createModel<{ x: string }>(
-            {
-                x: {
-                    type: 'string',
-                    default: '',
-                    validator: [
-                        {
-                            type: 'always',
-                            message: 'always-fail',
-                            validate: () => false,
-                        },
-                    ],
-                },
+    test('disposing one model does not affect another model event bus', async () => {
+        const schema = {
+            value: {
+                type: 'string' as const,
+                default: '',
+                validator: [
+                    {
+                        type: 'always',
+                        message: 'always-fail',
+                        validate: () => false,
+                    },
+                ],
             },
-            { errorHandler: sharedHandler }
-        );
+        };
+        const modelA = createModel(schema);
+        const modelB = createModel(schema);
+        const callback = jest.fn();
+        modelB.on('validation:error', callback);
 
         modelA.dispose();
+        await modelB.setField('value', 'invalid');
 
-        const modelB = createModel<{ y: string }>(
-            {
-                y: {
-                    type: 'string',
-                    default: '',
-                    validator: [
-                        {
-                            type: 'always',
-                            message: 'always-fail-B',
-                            validate: () => false,
-                        },
-                    ],
-                },
-            },
-            { errorHandler: sharedHandler }
+        expect(callback).toHaveBeenCalledWith(
+            expect.objectContaining({
+                field: 'value',
+                message: 'always-fail',
+            })
         );
-
-        await modelB.setField('y', 'something');
-        expect(externalCalls).toContain('always-fail-B');
-
         modelB.dispose();
-
-        sharedHandler.triggerError(
-            sharedHandler.createValidationError('manual', 'manual-error')
-        );
-        expect(externalCalls).toContain('manual-error');
     });
 });
 
@@ -642,13 +621,13 @@ describe('ModelManager - Event facade', () => {
         model.dispose();
     });
 
-    test('off() unsubscribes a single callback', async () => {
+    test('the unsubscribe function removes a single callback', async () => {
         const cb = jest.fn();
         const model = createModel({
             field: { type: 'string', default: '' },
         });
-        model.on('field:change', cb);
-        model.off('field:change', cb);
+        const unsubscribe = model.on('field:change', cb);
+        unsubscribe();
 
         await model.setField('field', 'value');
         expect(cb).not.toHaveBeenCalled();
@@ -703,22 +682,6 @@ describe('ModelManager - Event facade', () => {
         model.dispose();
     });
 
-    test('off() without callback removes all listeners for that event', async () => {
-        const cb1 = jest.fn();
-        const cb2 = jest.fn();
-        const model = createModel({
-            name: { type: 'string', default: '' },
-        });
-        model.on('field:change', cb1);
-        model.on('field:change', cb2);
-        model.off('field:change');
-
-        await model.setField('name', 'test');
-        expect(cb1).not.toHaveBeenCalled();
-        expect(cb2).not.toHaveBeenCalled();
-        model.dispose();
-    });
-
     test('listener throwing does not prevent subsequent listeners', async () => {
         const model = createModel<{ a: number }>({
             a: { type: 'number', default: 0 },
@@ -745,27 +708,27 @@ describe('ModelManager - Event facade', () => {
     });
 });
 
-describe('ModelManager - Validation summary & errorFormatter', () => {
+describe('formatValidationErrors', () => {
     afterEach(() => {
         jest.restoreAllMocks();
     });
 
-    test('uses custom errorFormatter for getValidationSummary', async () => {
+    test('supports a custom formatter', async () => {
         jest.spyOn(console, 'error').mockImplementation(() => {});
-        const model = createModel(
-            {
-                field: {
-                    type: 'string',
-                    validator: [ValidationRules.required],
-                    default: '',
-                },
+        const model = createModel({
+            field: {
+                type: 'string',
+                validator: [ValidationRules.required],
+                default: '',
             },
-            { errorFormatter: (err) => `[${err.field}] ${err.message}` }
-        );
+        });
         await model.setField('field', '');
-        expect(model.getValidationSummary()).toBe(
-            '[field] This field is required'
-        );
+        expect(
+            formatValidationErrors(
+                model.validationErrors,
+                (error) => `[${error.field}] ${error.message}`
+            )
+        ).toBe('[field] This field is required');
         model.dispose();
     });
 
@@ -791,7 +754,7 @@ describe('ModelManager - Validation summary & errorFormatter', () => {
         await model.setField('a', '');
         await model.setField('b', '');
 
-        const summary = model.getValidationSummary();
+        const summary = formatValidationErrors(model.validationErrors);
         expect(summary).toContain('A required');
         expect(summary).toContain('B required');
         expect(summary).toContain('; ');
@@ -841,7 +804,7 @@ describe('ModelManager - dispose / settled lifecycle', () => {
         expect(model.validationErrors).toEqual({});
         expect(model.getDirtyData()).toEqual({});
         expect(model.getField('field')).toBeUndefined();
-        expect(model.getValidationSummary()).toBe('Validation passed');
+        expect(formatValidationErrors(model.validationErrors)).toBe('Validation passed');
     });
 
     test('clearDirtyData isolation: does not clear data or errors', async () => {
@@ -924,22 +887,21 @@ describe('ModelManager - dispose / settled lifecycle', () => {
 });
 
 describe('ModelManager - Direct (internal collaborators)', () => {
-    test('reaction-system emit forwards through model manager event bus', () => {
+    test('createModel returns the core manager with bound public methods', async () => {
         interface Schema {
             field: string;
         }
         const schema: Model<Schema> = {
             field: { type: 'string', default: 'val' },
         };
-        const manager = new ModelManager<Schema>(schema);
-        const cb = jest.fn();
-        manager.on('custom:event', cb);
+        const model = createModel<Schema>(schema);
+        const { getField, setField } = model;
 
-        const internal = manager as any;
-        internal.reactionSystem.callbacks.emit('custom:event', { value: 1 });
-
-        expect(cb).toHaveBeenCalledWith({ value: 1 });
-        manager.dispose();
+        expect(model).toBeInstanceOf(ModelManager);
+        expect(getField('field')).toBe('val');
+        await expect(setField('field', 'next')).resolves.toBe(true);
+        expect(getField('field')).toBe('next');
+        model.dispose();
     });
 
     test('reaction setError reuses existing validation error array', () => {

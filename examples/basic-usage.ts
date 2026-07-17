@@ -1,4 +1,9 @@
-import { createModel, ValidationRules, Model } from '../src/index';
+import {
+  createModel,
+  formatValidationErrors,
+  ValidationRules,
+  Model,
+} from '../src/index';
 
 interface User {
   name: string;
@@ -45,11 +50,11 @@ async function runExample() {
   const isValid = await userModel.validateAll();
   console.log('验证是否通过:', isValid);
   console.log('验证错误:', userModel.validationErrors);
-  console.log('验证摘要:', userModel.getValidationSummary());
+  console.log('验证摘要:', formatValidationErrors(userModel.validationErrors));
 
   // 尝试设置无效值
   await userModel.setField('age', 15);
-  console.log('设置无效年龄后验证摘要:', userModel.getValidationSummary());
+  console.log('设置无效年龄后验证摘要:', formatValidationErrors(userModel.validationErrors));
 
   // 查看脏数据
   console.log('脏数据:', userModel.getDirtyData());

@@ -174,12 +174,7 @@ export function useModelComputed<T extends Record<string, any>, R>(
     }, [model]);
 
     const subscribe = useCallback(
-        (notify: () => void) => {
-            model.on(ModelEvents.FIELD_CHANGE, notify);
-            return () => {
-                model.off(ModelEvents.FIELD_CHANGE, notify);
-            };
-        },
+        (notify: () => void) => model.on(ModelEvents.FIELD_CHANGE, notify),
         [model]
     );
 
@@ -282,16 +277,25 @@ export function useModelFieldState<
             const handler = (e: { field: string }): void => {
                 if (e.field === field) notify();
             };
-            model.on(ModelEvents.FIELD_CHANGE, handler);
+            const unsubscribeChange = model.on(
+                ModelEvents.FIELD_CHANGE,
+                handler
+            );
             const validationHandler = (e: { field?: string }): void => {
                 if (e.field === field) notify();
             };
-            model.on(ModelEvents.VALIDATION_ERROR, validationHandler);
-            model.on(ModelEvents.VALIDATION_COMPLETE, notify);
+            const unsubscribeError = model.on(
+                ModelEvents.VALIDATION_ERROR,
+                validationHandler
+            );
+            const unsubscribeComplete = model.on(
+                ModelEvents.VALIDATION_COMPLETE,
+                notify
+            );
             return () => {
-                model.off(ModelEvents.FIELD_CHANGE, handler);
-                model.off(ModelEvents.VALIDATION_ERROR, validationHandler);
-                model.off(ModelEvents.VALIDATION_COMPLETE, notify);
+                unsubscribeChange();
+                unsubscribeError();
+                unsubscribeComplete();
             };
         },
         [model, field]

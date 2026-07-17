@@ -1,14 +1,10 @@
 import { validateField } from '../validate-field';
-import { ErrorHandler } from '../error-handler';
 import { FieldSchema } from '../types';
 import { Rule, ValidationRules } from '../rules';
 import { createModel, Model } from '../index';
 
 describe('validateField (unit)', () => {
-    let errorHandler: ErrorHandler;
-
     beforeEach(() => {
-        errorHandler = new ErrorHandler();
         jest.spyOn(console, 'error').mockImplementation(() => {});
     });
 
@@ -26,7 +22,6 @@ describe('validateField (unit)', () => {
             errors,
             field: 'testField',
             timeout: 1000,
-            errorHandler,
         });
 
         expect(result).toBe(true);
@@ -52,15 +47,12 @@ describe('validateField (unit)', () => {
             errors,
             field: 'testField',
             timeout: 1000,
-            errorHandler,
         });
         expect(result).toBe(true);
     });
 
     test('catches synchronous validator throwing an Error', async () => {
-        const triggerSpy = jest
-            .spyOn(errorHandler, 'triggerError')
-            .mockImplementation(() => {});
+        const onError = jest.fn();
         const errors: Record<string, any[]> = {};
 
         const schema: FieldSchema = {
@@ -82,13 +74,13 @@ describe('validateField (unit)', () => {
             errors,
             field: 'testField',
             timeout: 1000,
-            errorHandler,
+            onError,
         });
 
         expect(result).toBe(false);
         expect(errors.testField?.[0]?.rule).toBe('validation_error');
         expect(errors.testField?.[0]?.message).toContain('Validation failed: sync boom');
-        expect(triggerSpy).toHaveBeenCalled();
+        expect(onError).toHaveBeenCalledWith(errors.testField?.[0]);
     });
 
     test('catches synchronous validator throwing a non-Error value', async () => {
@@ -112,7 +104,6 @@ describe('validateField (unit)', () => {
             errors,
             field: 'testField',
             timeout: 1000,
-            errorHandler,
         });
 
         expect(result).toBe(false);
@@ -140,7 +131,6 @@ describe('validateField (unit)', () => {
             errors,
             field: 'testField',
             timeout: 1000,
-            errorHandler,
         });
 
         expect(result).toBe(false);
@@ -169,7 +159,6 @@ describe('validateField (unit)', () => {
             errors,
             field: 'testField',
             timeout: 1000,
-            errorHandler,
         });
 
         expect(result).toBe(false);
@@ -192,7 +181,6 @@ describe('validateField (unit)', () => {
             errors,
             field: 'testField',
             timeout: 1000,
-            errorHandler,
         });
 
         expect(result).toBe(false);
@@ -211,7 +199,6 @@ describe('validateField (unit)', () => {
             value: 'value',
             errors,
             field: 'testField',
-            errorHandler,
         });
 
         expect(result).toBe(true);
@@ -237,7 +224,6 @@ describe('validateField (unit)', () => {
             errors,
             field: 'f',
             timeout: 20,
-            errorHandler,
         });
 
         expect(result).toBe(false);
@@ -258,7 +244,6 @@ describe('validateField (unit)', () => {
             value: 'v',
             errors,
             field: 'f',
-            errorHandler,
             isCurrent: () => false,
         });
 
@@ -285,7 +270,6 @@ describe('validateField (unit)', () => {
             value: 'v',
             errors,
             field: 'f',
-            errorHandler,
             isCurrent: () => false,
         });
 
@@ -314,7 +298,6 @@ describe('validateField (unit)', () => {
             value: 'v',
             errors: {},
             field: 'f',
-            errorHandler,
             data: { other: 'value' },
         });
 
@@ -339,7 +322,6 @@ describe('validateField (unit)', () => {
             value: 'v',
             errors,
             field: 'f',
-            errorHandler,
         });
         expect(result).toBe(true);
         expect(errors.f).toBeUndefined();

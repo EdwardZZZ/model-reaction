@@ -1,17 +1,27 @@
 // Event emitter class
-export class EventEmitter {
-    private events: Record<string, Array<(data: any) => void>> = {};
+export class EventEmitter<
+    Events extends Record<string, any> = Record<string, any>,
+> {
+    private events: Partial<{
+        [E in keyof Events]: Array<(data: Events[E]) => void>;
+    }> = {};
 
     // Subscribe to event
-    on(event: string, callback: (data: any) => void): void {
+    on<E extends keyof Events>(
+        event: E,
+        callback: (data: Events[E]) => void
+    ): void {
         if (!this.events[event]) {
             this.events[event] = [];
         }
-        this.events[event].push(callback);
+        this.events[event]!.push(callback);
     }
 
     // Unsubscribe from event
-    off(event: string, callback?: (data: any) => void): void {
+    off<E extends keyof Events>(
+        event: E,
+        callback?: (data: Events[E]) => void
+    ): void {
         if (!this.events[event]) return;
 
         if (callback) {
@@ -24,7 +34,7 @@ export class EventEmitter {
     }
 
     // Trigger event
-    emit(event: string, data: any): void {
+    emit<E extends keyof Events>(event: E, data: Events[E]): void {
         if (this.events[event]) {
             // Snapshot listeners so on/off during dispatch don't affect this iteration
             const listeners = this.events[event].slice();
@@ -34,22 +44,13 @@ export class EventEmitter {
                 } catch (err) {
                     /* eslint-disable no-console */
                     console.error(
-                        `[EventEmitter] listener for event "${event}" threw`,
+                        `[EventEmitter] listener for event "${String(event)}" threw`,
                         err
                     );
                     /* eslint-enable no-console */
                 }
             });
         }
-    }
-
-    // One-time event subscription
-    once(event: string, callback: (data: any) => void): void {
-        const wrapper = (data: any) => {
-            callback(data);
-            this.off(event, wrapper);
-        };
-        this.on(event, wrapper);
     }
 
     // Clear all events

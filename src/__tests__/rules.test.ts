@@ -1,5 +1,5 @@
 import { Rule, ValidationRules } from '../rules';
-import { createModel, Model } from '../index';
+import { createModel, formatValidationErrors, Model } from '../index';
 import type { ModelReturn } from '../types';
 
 describe('Rule class', () => {
@@ -256,36 +256,36 @@ describe('Custom validation messages (withMessage end-to-end)', () => {
 
     test('uses custom required message', async () => {
         await model.setField('name', '');
-        expect(model.getValidationSummary()).toContain('name: Name cannot be empty');
+        expect(formatValidationErrors(model.validationErrors)).toContain('name: Name cannot be empty');
     });
 
     test('uses custom number message', async () => {
         // @ts-expect-error - runtime type check
         await model.setField('age', 'not-a-number');
-        expect(model.getValidationSummary()).toContain('age: Age must be a number');
+        expect(formatValidationErrors(model.validationErrors)).toContain('age: Age must be a number');
     });
 
     test('uses custom min message', async () => {
         await model.setField('age', 16);
-        expect(model.getValidationSummary()).toContain('age: Age must be at least 18');
+        expect(formatValidationErrors(model.validationErrors)).toContain('age: Age must be at least 18');
     });
 
     test('uses custom email message', async () => {
         await model.setField('email', 'invalid-email');
-        expect(model.getValidationSummary()).toContain(
+        expect(formatValidationErrors(model.validationErrors)).toContain(
             'email: Please enter a valid email address'
         );
     });
 
     test('uses custom rule message', async () => {
         await model.setField('customRule', 'wrong_value');
-        expect(model.getValidationSummary()).toContain(
+        expect(formatValidationErrors(model.validationErrors)).toContain(
             'customRule: Value must start with custom_'
         );
     });
 
     test('falls back to default message when no custom message is set', async () => {
         await model.setField('email', '');
-        expect(model.getValidationSummary()).toContain('email: This field is required');
+        expect(formatValidationErrors(model.validationErrors)).toContain('email: This field is required');
     });
 });

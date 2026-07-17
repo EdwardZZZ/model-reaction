@@ -1,28 +1,47 @@
-import { Model, ModelOptions, Reaction, ValidationError } from './types';
-import { ErrorHandler } from './error-handler';
+import {
+    Model,
+    ModelError,
+    ModelErrorEvent,
+    ModelEvents,
+    ModelOptions,
+    Reaction,
+    ValidationError,
+} from './types';
+import { PendingTasks } from './pending-tasks';
 
 export interface ReactionCallbacks {
     getValue: (field: string) => any;
     setValue: (field: string, value: any, options?: { reactionStack?: string[] }) => Promise<boolean>;
-    emit: (event: string, data: any) => void;
     setError: (field: string, error: ValidationError) => void;
+    reportError: (
+        event: Exclude<ModelErrorEvent, 'field:not-found'>,
+        error: ModelError
+    ) => void;
 }
 
 export class ReactionSystem {
     private reactionDeps: Map<string, Array<{ field: string; reaction: Reaction }>> = new Map();
-    private reactionTimeouts: Map<Reaction, any> = new Map();
-    private settledResolvers: Array<() => void> = [];
-    private pendingReactions = 0;
+    private reactionTimeouts: Map<
+        Reaction,
+        { timeoutId: ReturnType<typeof setTimeout>; endTask: () => void }
+    > = new Map();
     private schema: Model;
     private options: ModelOptions;
     private callbacks: ReactionCallbacks;
-    private errorHandler: ErrorHandler;
+    private pendingTasks: PendingTasks;
+    private ownsPendingTasks: boolean;
 
-    constructor(schema: Model, options: ModelOptions, callbacks: ReactionCallbacks, errorHandler: ErrorHandler) {
+    constructor(
+        schema: Model,
+        options: ModelOptions,
+        callbacks: ReactionCallbacks,
+        pendingTasks?: PendingTasks
+    ) {
         this.schema = schema;
         this.options = options;
         this.callbacks = callbacks;
-        this.errorHandler = errorHandler;
+        this.ownsPendingTasks = !pendingTasks;
+        this.pendingTasks = pendingTasks ?? new PendingTasks();
         this.collectReactions();
     }
 
@@ -61,8 +80,11 @@ export class ReactionSystem {
 
         reactionsToTrigger.forEach((field, reaction) => {
             if (reactionStack.includes(field)) {
-                const error = this.errorHandler.createCircularDependencyError(reactionStack.join(' -> '), field);
-                this.errorHandler.triggerError(error);
+                this.callbacks.reportError(ModelEvents.REACTION_ERROR, {
+                    code: 'circular_dependency',
+                    field,
+                    message: `Circular dependency detected: ${reactionStack.join(' -> ')} -> ${field}`,
+                });
                 return;
             }
 
@@ -71,42 +93,46 @@ export class ReactionSystem {
     }
 
     private scheduleReaction(field: string, reaction: Reaction, debounceTime: number, reactionStack: string[] = []): void {
-        if (this.reactionTimeouts.has(reaction)) {
-            clearTimeout(this.reactionTimeouts.get(reaction));
+        // Register the replacement before releasing the old task so settled()
+        // never observes a false idle state during debounce rescheduling.
+        const endTask = this.pendingTasks.begin();
+        const scheduled = this.reactionTimeouts.get(reaction);
+        if (scheduled) {
+            clearTimeout(scheduled.timeoutId);
+            scheduled.endTask();
         }
 
         if (debounceTime > 0) {
             const timeoutId = setTimeout(() => {
                 this.reactionTimeouts.delete(reaction);
-                this.runReaction(field, reaction, reactionStack);
+                this.runReaction(field, reaction, reactionStack, endTask);
             }, debounceTime);
-            this.reactionTimeouts.set(reaction, timeoutId);
+            this.reactionTimeouts.set(reaction, { timeoutId, endTask });
         } else {
-            this.runReaction(field, reaction, reactionStack);
+            this.runReaction(field, reaction, reactionStack, endTask);
         }
     }
 
-    private runReaction(field: string, reaction: Reaction, reactionStack: string[]): void {
-        this.pendingReactions++;
+    private runReaction(
+        field: string,
+        reaction: Reaction,
+        reactionStack: string[],
+        endTask: () => void
+    ): void {
         this.processReaction(field, reaction, reactionStack).finally(() => {
-            this.pendingReactions--;
-            this.notifySettledIfIdle();
+            endTask();
         });
-    }
-
-    private notifySettledIfIdle(): void {
-        if (this.reactionTimeouts.size === 0 && this.pendingReactions === 0 && this.settledResolvers.length > 0) {
-            const resolvers = this.settledResolvers.splice(0);
-            resolvers.forEach(resolve => resolve());
-        }
     }
 
     private async processReaction(field: string, reaction: Reaction, reactionStack: string[] = []): Promise<void> {
         try {
             const dependentValues = reaction.fields.reduce((values, f) => {
                 if (!(f in this.schema)) {
-                    const error = this.errorHandler.createDependencyError(field, f);
-                    this.errorHandler.triggerError(error);
+                    this.callbacks.reportError(ModelEvents.DEPENDENCY_ERROR, {
+                        code: 'dependency_error',
+                        field,
+                        message: `Dependency field ${f} is not defined`,
+                    });
                     return { ...values, [f]: undefined };
                 }
                 return { ...values, [f]: this.callbacks.getValue(f) };
@@ -123,31 +149,32 @@ export class ReactionSystem {
     }
 
     private handleReactionError(field: string, error: Error): void {
-        const appError = this.errorHandler.createReactionError(field, error);
-        this.errorHandler.triggerError(appError);
+        const modelError: ModelError = {
+            code: 'reaction_error',
+            field,
+            message: error.message,
+            originalError: error,
+        };
+        this.callbacks.reportError(ModelEvents.REACTION_ERROR, modelError);
         
         this.callbacks.setError('__reactions', {
             field,
             rule: 'reaction_error',
-            message: appError.message
+            message: modelError.message
         });
     }
 
     public dispose(): void {
-        this.reactionTimeouts.forEach((timeoutId) => {
+        this.reactionTimeouts.forEach(({ timeoutId, endTask }) => {
             clearTimeout(timeoutId);
+            endTask();
         });
         this.reactionTimeouts.clear();
         this.reactionDeps.clear();
-        const resolvers = this.settledResolvers.splice(0);
-        resolvers.forEach(resolve => resolve());
+        if (this.ownsPendingTasks) this.pendingTasks.dispose();
     }
 
-    public async settled(): Promise<void> {
-        if (this.reactionTimeouts.size === 0 && this.pendingReactions === 0) return;
-
-        return new Promise<void>(resolve => {
-            this.settledResolvers.push(resolve);
-        });
+    public settled(): Promise<void> {
+        return this.pendingTasks.settled();
     }
 }
