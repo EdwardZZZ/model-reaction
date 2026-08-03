@@ -1530,6 +1530,18 @@ describe('Integration Tests — Full Documentation Scenarios', () => {
     // 43. README / React docs — AI-friendly lifecycle guidance stays in sync
     // =========================================================================
     describe('Docs: AI-friendly lifecycle guidance', () => {
+        test('npm package includes the AI guidance, documentation, and examples', () => {
+            const packageJson = JSON.parse(readProjectFile('package.json')) as {
+                files?: string[];
+            };
+
+            expect(packageJson.files).toEqual(expect.arrayContaining([
+                'AGENTS.md',
+                'docs',
+                'examples'
+            ]));
+        });
+
         test('README and README_CN keep the AI-friendly design note near the top', () => {
             const readme = readProjectFile('README.md');
             const readmeCn = readProjectFile('README_CN.md');

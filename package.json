@@ -1,6 +1,6 @@
 {
   "name": "model-reaction",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "main": "dist/index.cjs.js",
   "module": "dist/index.esm.js",
   "types": "dist/types/index.d.ts",
@@ -20,6 +20,9 @@
   "sideEffects": false,
   "files": [
     "dist",
+    "docs",
+    "examples",
+    "AGENTS.md",
     "README.md",
     "README_CN.md",
     "LICENSE"
@@ -57,7 +60,7 @@
   "homepage": "https://github.com/EdwardZZZ/model-reaction",
   "repository": {
     "type": "git",
-    "url": "https://github.com/EdwardZZZ/model-reaction"
+    "url": "git+https://github.com/EdwardZZZ/model-reaction.git"
   },
   "bugs": {
     "url": "https://github.com/EdwardZZZ/model-reaction/issues"

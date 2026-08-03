@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-08-03
+
+### Changed
+- Included `AGENTS.md`, `docs/`, and `examples/` in the npm package so coding
+  agents and consumers receive the documentation referenced by the README.
+
+## [1.1.0] - 2026-07-17
+
 ### Added
 - `Rule.when(predicate)` chainable helper for conditional validation rules.
 - Typed `ModelEventMap<T>` payloads and standalone `formatValidationErrors`.
