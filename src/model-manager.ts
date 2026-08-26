@@ -1,8 +1,8 @@
 import {
+    CommitOptions,
     FieldSchema,
     Model,
     ModelError,
-    ModelErrorEvent,
     ModelEventMap,
     ModelEvents,
     ModelOptions,
@@ -64,7 +64,7 @@ export class ModelManager<
                     this.errors[field].push(error);
                 },
                 reportError: (event, error) =>
-                    this.reportError(event, error),
+                    this.emit(event, error),
             },
             this.pendingTasks
         );
@@ -119,30 +119,16 @@ export class ModelManager<
         return () => this.eventEmitter.off(event, callback);
     }
 
+    /**
+     * Surface an event through the typed bus. Failed validation and reaction
+     * errors are normal, recoverable outcomes, so the library does not log them
+     * itself — subscribe via `model.on(...)` to observe or log.
+     */
     private emit<E extends keyof ModelEventMap<T>>(
         event: E,
         data: ModelEventMap<T>[E]
     ): void {
         this.eventEmitter.emit(event, data);
-    }
-
-    private reportError(
-        event: ModelErrorEvent,
-        error: ModelError
-    ): void {
-        /* eslint-disable no-console */
-        console.error(
-            `[${error.code}] ${error.field ? `field ${error.field}: ` : ''}${error.message}`
-        );
-        this.emit(event, error);
-    }
-
-    private reportValidationError(error: ValidationError): void {
-        /* eslint-disable no-console */
-        console.error(
-            `[validation] field ${error.field}: ${error.message}`
-        );
-        this.emit(ModelEvents.VALIDATION_ERROR, error);
     }
 
     // -------------------------------------------------------------------------
@@ -157,28 +143,39 @@ export class ModelManager<
     async setFields(fields: Partial<T>): Promise<boolean> {
         this.ensureNotDisposed();
         const entries = Object.entries(fields);
+        // Collect only fields whose committed value actually changed, so the
+        // batched reaction pass mirrors the single-field path (which fires a
+        // reaction only on a real change) instead of firing for every input.
+        const changedFields = new Set<string>();
         const results = await Promise.all(
             entries.map(([field, value]) =>
-                this.updateField(field, value, { suppressReactions: true })
+                this.updateField(field, value, {
+                    suppressReactions: true,
+                    changedFields,
+                })
             )
         );
         // Single batched reaction trigger after all fields settle.
-        this.reactionSystem.triggerReactionsForFields(entries.map(([f]) => f));
+        this.reactionSystem.triggerReactionsForFields([...changedFields]);
         return results.every(Boolean);
     }
 
     async validateAll(): Promise<boolean> {
         this.ensureNotDisposed();
         const fields = Object.keys(this.schema);
+        const changedFields = new Set<string>();
         const results = await Promise.all(
             fields.map((field) =>
-                this.revalidateField(field, { suppressReactions: true })
+                this.revalidateField(field, {
+                    suppressReactions: true,
+                    changedFields,
+                })
             )
         );
         const allValid = results.every(Boolean);
 
-        // Single batched reaction trigger for any fields that committed.
-        this.reactionSystem.triggerReactionsForFields(fields);
+        // Single batched reaction trigger for fields that actually committed.
+        this.reactionSystem.triggerReactionsForFields([...changedFields]);
 
         this.emit(ModelEvents.VALIDATION_COMPLETE, { isValid: allValid });
         return allValid;
@@ -282,7 +279,7 @@ export class ModelManager<
     private async updateField(
         field: string,
         value: any,
-        options: { reactionStack?: string[]; suppressReactions?: boolean } = {}
+        options: CommitOptions = {}
     ): Promise<boolean> {
         const schema = this.schema[field];
         if (!schema) {
@@ -291,7 +288,7 @@ export class ModelManager<
                 field,
                 message: `Field ${field} does not exist in the model schema`,
             };
-            this.reportError(ModelEvents.FIELD_NOT_FOUND, error);
+            this.emit(ModelEvents.FIELD_NOT_FOUND, error);
             if (this.options.strictMode) throw new Error(error.message);
             return false;
         }
@@ -309,7 +306,7 @@ export class ModelManager<
      */
     private async revalidateField(
         field: string,
-        opts: { suppressReactions?: boolean } = {}
+        opts: CommitOptions = {}
     ): Promise<boolean> {
         const fieldKey = field as keyof T;
         const value =
@@ -329,7 +326,7 @@ export class ModelManager<
         field: string,
         schema: FieldSchema,
         value: unknown,
-        options: { reactionStack?: string[]; suppressReactions?: boolean }
+        options: CommitOptions
     ): Promise<boolean> {
         const endTask = this.pendingTasks.begin();
         try {
@@ -347,12 +344,7 @@ export class ModelManager<
             if (this.validationRequestIds[field] !== requestId) return false;
 
             if (isValid) {
-                this.commitValid(
-                    field,
-                    value,
-                    options.reactionStack,
-                    options.suppressReactions
-                );
+                this.commitValid(field, value, options);
             } else {
                 this.dirtyData[field as keyof T] = value as T[keyof T];
             }
@@ -377,7 +369,7 @@ export class ModelManager<
             failFast: this.options.failFast ?? false,
             data: this.modelData as Record<string, any>,
             isCurrent: () => this.validationRequestIds[field] === requestId,
-            onError: (error) => this.reportValidationError(error),
+            onError: (error) => this.emit(ModelEvents.VALIDATION_ERROR, error),
         });
     }
 
@@ -394,9 +386,10 @@ export class ModelManager<
     private commitValid(
         field: string,
         value: any,
-        reactionStack: string[] = [],
-        suppressReactions = false
+        options: CommitOptions = {}
     ): void {
+        const { reactionStack = [], suppressReactions = false, changedFields } =
+            options;
         const fieldKey = field as keyof T;
         const dataChanged = !deepEqual(this.modelData[fieldKey], value);
         const hadDirty = field in this.dirtyData;
@@ -411,6 +404,9 @@ export class ModelManager<
         }
 
         if (dataChanged) {
+            // Record the real change so a batched caller can trigger reactions
+            // for exactly the fields that moved.
+            changedFields?.add(field);
             this.emit(ModelEvents.FIELD_CHANGE, { field, value });
             if (!suppressReactions) {
                 this.reactionSystem.triggerReactions(field, reactionStack);

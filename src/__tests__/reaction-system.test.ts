@@ -1,6 +1,7 @@
 import { createModel, Model } from '../index';
 import { ReactionSystem } from '../reaction-system';
 import { ModelManager } from '../model-manager';
+import { PendingTasks } from '../pending-tasks';
 
 describe('ReactionSystem - via createModel', () => {
     beforeEach(() => {
@@ -39,7 +40,7 @@ describe('ReactionSystem - via createModel', () => {
         model.dispose();
     });
 
-    test('emits reaction error and stores it under __reactions', async () => {
+    test('emits reaction error and stores it under the computed field', async () => {
         interface S {
             input: string;
             output: string;
@@ -65,16 +66,17 @@ describe('ReactionSystem - via createModel', () => {
         await model.setField('input', 'error');
         await model.settled();
 
-        expect(model.validationErrors).toHaveProperty('__reactions');
+        // The failure is recorded under the field the reaction computes,
+        // reachable via validationErrors[field] (not a hidden key).
+        expect(model.validationErrors).toHaveProperty('output');
         expect(
-            model.validationErrors?.__reactions?.[0]?.message
+            model.validationErrors?.output?.[0]?.message
         ).toContain('Computation error');
+        expect(model.validationErrors).not.toHaveProperty('__reactions');
         model.dispose();
     });
 
     test('detects invalid (non-existent) dependent fields', async () => {
-        const consoleSpy = jest.spyOn(console, 'error');
-
         interface S {
             validField: string;
             invalidField: string;
@@ -92,21 +94,23 @@ describe('ReactionSystem - via createModel', () => {
             },
         };
         const model = createModel<S>(schema);
+        const depErrors: Array<{ field?: string; message: string }> = [];
+        model.on('dependency:error', (error) => depErrors.push(error));
 
         await model.setField('validField', 'test');
         await model.settled();
 
-        expect(consoleSpy).toHaveBeenCalledWith(
-            expect.stringContaining(
-                '[dependency_error] field invalidField: Dependency field nonexistentField is not defined'
-            )
+        expect(depErrors).toContainEqual(
+            expect.objectContaining({
+                field: 'invalidField',
+                message:
+                    'Dependency field nonexistentField is not defined',
+            })
         );
         model.dispose();
     });
 
     test('detects circular dependencies', async () => {
-        const consoleSpy = jest.spyOn(console, 'error');
-
         interface S {
             fieldA: number;
             fieldB: number;
@@ -131,15 +135,19 @@ describe('ReactionSystem - via createModel', () => {
         };
 
         const model = createModel<S>(schema);
+        const reactionErrors: Array<{ code: string; message: string }> = [];
+        model.on('reaction:error', (error) => reactionErrors.push(error));
 
         await model.setField('fieldA', 1);
         await model.settled();
 
-        expect(consoleSpy).toHaveBeenCalledWith(
-            expect.stringContaining('[circular_dependency]')
-        );
-        expect(consoleSpy).toHaveBeenCalledWith(
-            expect.stringContaining('Circular dependency detected')
+        expect(reactionErrors).toContainEqual(
+            expect.objectContaining({
+                code: 'circular_dependency',
+                message: expect.stringContaining(
+                    'Circular dependency detected'
+                ),
+            })
         );
         model.dispose();
     });
@@ -288,6 +296,75 @@ describe('ReactionSystem - via createModel', () => {
 
         expect(reactionFn).toHaveBeenCalledTimes(1);
         expect(model.getField('c')).toBe(3);
+        model.dispose();
+    });
+
+    test('setFields fires reactions only for fields that actually changed', async () => {
+        const aReaction = jest.fn((deps: Record<string, any>) => deps.a);
+        const bAction = jest.fn();
+        interface Schema {
+            a: number;
+            b: number;
+            mirrorA: number;
+            mirrorB: number;
+        }
+        const schema: Model<Schema> = {
+            a: { type: 'number', default: 1 },
+            b: { type: 'number', default: 2 },
+            mirrorA: {
+                type: 'number',
+                default: 0,
+                reaction: { fields: ['a'], computed: aReaction },
+            },
+            mirrorB: {
+                type: 'number',
+                default: 0,
+                reaction: {
+                    fields: ['b'],
+                    computed: (deps) => deps.b,
+                    action: bAction,
+                },
+            },
+        };
+        const model = createModel<Schema>(schema);
+
+        // `b` is set to its current value → not a real change. Its reaction's
+        // action must not fire, while `a` (a real change) still reacts.
+        await model.setFields({ a: 10, b: 2 });
+        await model.settled();
+
+        expect(aReaction).toHaveBeenCalledTimes(1);
+        expect(bAction).not.toHaveBeenCalled();
+        expect(model.getField('mirrorA')).toBe(10);
+        model.dispose();
+    });
+
+    test('validateAll fires reactions only for fields that commit a change', async () => {
+        const action = jest.fn();
+        interface Schema {
+            source: string;
+            mirror: string;
+        }
+        const schema: Model<Schema> = {
+            source: { type: 'string', default: 'stable' },
+            mirror: {
+                type: 'string',
+                default: '',
+                reaction: {
+                    fields: ['source'],
+                    computed: (deps) => deps.source,
+                    action,
+                },
+            },
+        };
+        const model = createModel<Schema>(schema);
+
+        // Nothing is dirty and no value changes → validateAll must not
+        // re-fire the reaction action for unchanged fields.
+        await model.validateAll();
+        await model.settled();
+
+        expect(action).not.toHaveBeenCalled();
         model.dispose();
     });
 
@@ -487,13 +564,14 @@ describe('ReactionSystem - direct unit tests', () => {
                 setValue: async () => true,
                 setError,
                 reportError,
-            }
+            },
+            new PendingTasks()
         );
 
         system.triggerReactions('a');
 
         expect(setError).toHaveBeenCalledWith(
-            '__reactions',
+            'b',
             expect.objectContaining({ rule: 'reaction_error' })
         );
         expect(reportError).toHaveBeenCalledWith(
@@ -530,7 +608,8 @@ describe('ReactionSystem - direct unit tests', () => {
                 setValue: async () => true,
                 setError: () => {},
                 reportError: () => {},
-            }
+            },
+            new PendingTasks()
         );
 
         system.triggerReactions('input');
@@ -563,7 +642,8 @@ describe('ReactionSystem - direct unit tests', () => {
                 setValue: async () => true,
                 setError: () => {},
                 reportError: () => {},
-            }
+            },
+            new PendingTasks()
         );
 
         system.triggerReactions('input');
@@ -591,7 +671,8 @@ describe('ReactionSystem - direct unit tests', () => {
                 setValue: async () => true,
                 setError: () => {},
                 reportError: () => {},
-            }
+            },
+            new PendingTasks()
         );
 
         const anySystem = system as any;

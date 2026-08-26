@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- GitHub Actions CI workflow running lint, typecheck, tests, and build across
+  Node 16/18/20/22.
+
+### Changed
+- The library no longer writes to `console.error` on validation, reaction, or
+  dependency errors. These outcomes are surfaced exclusively through the typed
+  event bus (`validation:error`, `reaction:error`, `dependency:error`,
+  `field:not-found`); subscribe via `model.on(...)` to observe or log them.
+- Reaction failures are now recorded in `validationErrors` under the field the
+  reaction computes, instead of the internal `__reactions` key. The
+  `__reactions` key is no longer produced.
+- `setFields` and `validateAll` now trigger reactions only for fields whose
+  committed value actually changed, matching the single-field `setField` path.
+  Previously a reaction's `action` side effect could fire for fields that were
+  re-submitted unchanged or that failed validation.
+
+### Performance
+- Reaction dependency collection is now single-pass (O(n)) instead of building
+  intermediate objects per dependency.
+
+
 ## [1.1.1] - 2026-08-03
 
 ### Changed

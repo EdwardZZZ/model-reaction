@@ -143,3 +143,19 @@ export interface ModelReturn<T = Record<string, any>> {
         isEqual?: (a: R, b: R) => boolean
     ) => () => void;
 }
+
+/**
+ * Internal options threaded through the validate → commit pipeline.
+ * Not re-exported from the package entry point (`index.ts`); it is an
+ * implementation detail shared inside the library only.
+ *
+ * `changedFields`, when provided, collects the names of fields whose committed
+ * value actually changed. Batched callers (`setFields` / `validateAll`) suppress
+ * per-field reactions and use this set to fire a single reaction pass for only
+ * the fields that really moved.
+ */
+export interface CommitOptions {
+    reactionStack?: string[];
+    suppressReactions?: boolean;
+    changedFields?: Set<string>;
+}

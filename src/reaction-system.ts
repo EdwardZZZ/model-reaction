@@ -29,19 +29,17 @@ export class ReactionSystem {
     private options: ModelOptions;
     private callbacks: ReactionCallbacks;
     private pendingTasks: PendingTasks;
-    private ownsPendingTasks: boolean;
 
     constructor(
         schema: Model,
         options: ModelOptions,
         callbacks: ReactionCallbacks,
-        pendingTasks?: PendingTasks
+        pendingTasks: PendingTasks
     ) {
         this.schema = schema;
         this.options = options;
         this.callbacks = callbacks;
-        this.ownsPendingTasks = !pendingTasks;
-        this.pendingTasks = pendingTasks ?? new PendingTasks();
+        this.pendingTasks = pendingTasks;
         this.collectReactions();
     }
 
@@ -126,17 +124,19 @@ export class ReactionSystem {
 
     private async processReaction(field: string, reaction: Reaction, reactionStack: string[] = []): Promise<void> {
         try {
-            const dependentValues = reaction.fields.reduce((values, f) => {
+            const dependentValues: Record<string, any> = {};
+            for (const f of reaction.fields) {
                 if (!(f in this.schema)) {
                     this.callbacks.reportError(ModelEvents.DEPENDENCY_ERROR, {
                         code: 'dependency_error',
                         field,
                         message: `Dependency field ${f} is not defined`,
                     });
-                    return { ...values, [f]: undefined };
+                    dependentValues[f] = undefined;
+                    continue;
                 }
-                return { ...values, [f]: this.callbacks.getValue(f) };
-            }, {} as Record<string, any>);
+                dependentValues[f] = this.callbacks.getValue(f);
+            }
 
             const computedValue = reaction.computed(dependentValues);
             await this.callbacks.setValue(field, computedValue, { reactionStack });
@@ -156,8 +156,10 @@ export class ReactionSystem {
             originalError: error,
         };
         this.callbacks.reportError(ModelEvents.REACTION_ERROR, modelError);
-        
-        this.callbacks.setError('__reactions', {
+
+        // Record the failure under the field the reaction computes, so it is
+        // reachable via `validationErrors[field]` rather than a hidden key.
+        this.callbacks.setError(field, {
             field,
             rule: 'reaction_error',
             message: modelError.message
@@ -171,10 +173,6 @@ export class ReactionSystem {
         });
         this.reactionTimeouts.clear();
         this.reactionDeps.clear();
-        if (this.ownsPendingTasks) this.pendingTasks.dispose();
-    }
-
-    public settled(): Promise<void> {
-        return this.pendingTasks.settled();
+        // The shared PendingTasks is owned and disposed by ModelManager.
     }
 }
