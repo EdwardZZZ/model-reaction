@@ -98,59 +98,23 @@ async function runValidator(
     try {
         const result = validator.validate(value, data);
 
-        // Sync result: no timeout needed
-        if (!(result instanceof Promise)) {
-            if (!result) {
-                if (isCurrent && !isCurrent()) return false;
-                pushValidationError(
-                    field,
-                    validator.type,
-                    validator.message,
-                    errors,
-                    onError
-                );
-                return false;
-            }
-            return true;
-        }
+        // Only async results race a timeout; sync results resolve immediately.
+        const ok =
+            result instanceof Promise
+                ? await raceTimeout(result, field, timeout)
+                : result;
 
-        // Async result: race against timeout
-        let timeoutId: ReturnType<typeof setTimeout> | undefined;
-        const timeoutPromise = new Promise<boolean>((_, reject) => {
-            timeoutId = setTimeout(
-                () => reject(new Error(`Validation timeout: ${field}`)),
-                timeout
-            );
-        });
+        if (ok) return true;
 
-        try {
-            const ok = await Promise.race([result, timeoutPromise]);
-            if (timeoutId) clearTimeout(timeoutId);
-            if (!ok) {
-                if (isCurrent && !isCurrent()) return false;
-                pushValidationError(
-                    field,
-                    validator.type,
-                    validator.message,
-                    errors,
-                    onError
-                );
-                return false;
-            }
-            return true;
-        } catch (err) {
-            if (timeoutId) clearTimeout(timeoutId);
-            if (isCurrent && !isCurrent()) return false;
-            const msg = err instanceof Error ? err.message : String(err);
-            pushValidationError(
-                field,
-                'validation_error',
-                `Validation failed: ${msg}`,
-                errors,
-                onError
-            );
-            return false;
-        }
+        if (isCurrent && !isCurrent()) return false;
+        pushValidationError(
+            field,
+            validator.type,
+            validator.message,
+            errors,
+            onError
+        );
+        return false;
     } catch (err) {
         if (isCurrent && !isCurrent()) return false;
         const msg = err instanceof Error ? err.message : String(err);
@@ -162,6 +126,26 @@ async function runValidator(
             onError
         );
         return false;
+    }
+}
+
+/** Resolve `promise`, rejecting if it does not settle within `timeout` ms. */
+async function raceTimeout(
+    promise: Promise<boolean>,
+    field: string,
+    timeout: number
+): Promise<boolean> {
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    const timeoutPromise = new Promise<boolean>((_, reject) => {
+        timeoutId = setTimeout(
+            () => reject(new Error(`Validation timeout: ${field}`)),
+            timeout
+        );
+    });
+    try {
+        return await Promise.race([promise, timeoutPromise]);
+    } finally {
+        if (timeoutId) clearTimeout(timeoutId);
     }
 }
 

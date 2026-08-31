@@ -31,7 +31,7 @@ export class ModelManager<
     private modelData: T = {} as T;
     private errors: Record<string, ValidationError[]> = {};
     /** Last value provided for a field whose validation failed. */
-    dirtyData: Partial<T> = {};
+    private dirtyData: Partial<T> = {};
 
     private readonly schema: Model<T>;
     private readonly options: ModelOptions;
@@ -70,7 +70,6 @@ export class ModelManager<
         );
 
         this.initializeDefaults();
-        this.bindPublicMethods();
     }
 
     // -------------------------------------------------------------------------
@@ -85,20 +84,6 @@ export class ModelManager<
         });
     }
 
-    private bindPublicMethods(): void {
-        this.setField = this.setField.bind(this);
-        this.getField = this.getField.bind(this);
-        this.setFields = this.setFields.bind(this);
-        this.validateAll = this.validateAll.bind(this);
-        this.on = this.on.bind(this);
-        this.getDirtyData = this.getDirtyData.bind(this);
-        this.clearDirtyData = this.clearDirtyData.bind(this);
-        this.settled = this.settled.bind(this);
-        this.dispose = this.dispose.bind(this);
-        this.subscribeField = this.subscribeField.bind(this);
-        this.subscribe = this.subscribe.bind(this);
-    }
-
     private ensureNotDisposed(): void {
         if (this.disposed) {
             throw new Error(
@@ -111,13 +96,13 @@ export class ModelManager<
     // Event facade
     // -------------------------------------------------------------------------
 
-    on<E extends keyof ModelEventMap<T>>(
+    on = <E extends keyof ModelEventMap<T>>(
         event: E,
         callback: (data: ModelEventMap<T>[E]) => void
-    ): () => void {
+    ): (() => void) => {
         this.eventEmitter.on(event, callback);
         return () => this.eventEmitter.off(event, callback);
-    }
+    };
 
     /**
      * Surface an event through the typed bus. Failed validation and reaction
@@ -135,12 +120,15 @@ export class ModelManager<
     // Public mutation API
     // -------------------------------------------------------------------------
 
-    async setField<K extends keyof T>(field: K, value: T[K]): Promise<boolean> {
+    setField = async <K extends keyof T>(
+        field: K,
+        value: T[K]
+    ): Promise<boolean> => {
         this.ensureNotDisposed();
         return this.updateField(field as string, value);
-    }
+    };
 
-    async setFields(fields: Partial<T>): Promise<boolean> {
+    setFields = async (fields: Partial<T>): Promise<boolean> => {
         this.ensureNotDisposed();
         const entries = Object.entries(fields);
         // Collect only fields whose committed value actually changed, so the
@@ -158,9 +146,9 @@ export class ModelManager<
         // Single batched reaction trigger after all fields settle.
         this.reactionSystem.triggerReactionsForFields([...changedFields]);
         return results.every(Boolean);
-    }
+    };
 
-    async validateAll(): Promise<boolean> {
+    validateAll = async (): Promise<boolean> => {
         this.ensureNotDisposed();
         const fields = Object.keys(this.schema);
         const changedFields = new Set<string>();
@@ -179,7 +167,7 @@ export class ModelManager<
 
         this.emit(ModelEvents.VALIDATION_COMPLETE, { isValid: allValid });
         return allValid;
-    }
+    };
 
     // -------------------------------------------------------------------------
     // Selector / field subscriptions (UI binding layer)
@@ -189,38 +177,34 @@ export class ModelManager<
      * Subscribe to a single field. Callback fires only when that field's
      * committed value changes. Returns an unsubscribe function.
      */
-    subscribeField<K extends keyof T>(
+    subscribeField = <K extends keyof T>(
         field: K,
         callback: (value: T[K]) => void
-    ): () => void {
-        const handler = (e: { field: string; value: any }): void => {
+    ): (() => void) => {
+        return this.on(ModelEvents.FIELD_CHANGE, (e) => {
             if (e.field === field) callback(e.value as T[K]);
-        };
-        this.eventEmitter.on(ModelEvents.FIELD_CHANGE, handler);
-        return () => this.eventEmitter.off(ModelEvents.FIELD_CHANGE, handler);
-    }
+        });
+    };
 
     /**
      * Subscribe to a derived value. Callback fires only when `selector(data)`
      * changes (compared via `isEqual`, default `Object.is`).
      */
-    subscribe<R>(
+    subscribe = <R>(
         selector: (data: T) => R,
         callback: (value: R, prev: R) => void,
         isEqual: (a: R, b: R) => boolean = Object.is
-    ): () => void {
+    ): (() => void) => {
         let prev = selector(this.modelData);
-        const handler = (): void => {
+        return this.on(ModelEvents.FIELD_CHANGE, () => {
             const next = selector(this.modelData);
             if (!isEqual(next, prev)) {
                 const old = prev;
                 prev = next;
                 callback(next, old);
             }
-        };
-        this.eventEmitter.on(ModelEvents.FIELD_CHANGE, handler);
-        return () => this.eventEmitter.off(ModelEvents.FIELD_CHANGE, handler);
-    }
+        });
+    };
 
     // -------------------------------------------------------------------------
     // Public read API
@@ -234,27 +218,27 @@ export class ModelManager<
         return { ...this.errors };
     }
 
-    getField<K extends keyof T>(field: K): T[K] {
+    getField = <K extends keyof T>(field: K): T[K] => {
         return this.modelData[field];
-    }
+    };
 
-    getDirtyData(): Partial<T> {
+    getDirtyData = (): Partial<T> => {
         return { ...this.dirtyData };
-    }
+    };
 
-    clearDirtyData(): void {
+    clearDirtyData = (): void => {
         this.dirtyData = {};
-    }
+    };
 
     // -------------------------------------------------------------------------
     // Settled / dispose
     // -------------------------------------------------------------------------
 
-    settled(): Promise<void> {
+    settled = (): Promise<void> => {
         return this.pendingTasks.settled();
-    }
+    };
 
-    dispose(): void {
+    dispose = (): void => {
         if (this.disposed) return;
         this.disposed = true;
 
@@ -266,7 +250,7 @@ export class ModelManager<
         this.dirtyData = {};
         this.errors = {};
         this.validationRequestIds = {};
-    }
+    };
 
     // -------------------------------------------------------------------------
     // Internal: validate + commit
