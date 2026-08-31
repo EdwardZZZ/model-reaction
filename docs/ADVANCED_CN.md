@@ -118,11 +118,11 @@ const model = createModel({
   discountCode: {
     type: 'string',
     validator: [
-      // 条件验证：仅在 hasDiscount 为 true 时执行
-      {
-        ...ValidationRules.required.withMessage('启用折扣时，折扣码为必填项'),
-        condition: (data) => data.hasDiscount === true,
-      },
+      // 条件验证：仅在 hasDiscount 为 true 时执行。`.when(predicate)`
+      // 是附加 `condition` 的简洁写法。
+      ValidationRules.required
+        .withMessage('启用折扣时，折扣码为必填项')
+        .when((data) => data.hasDiscount === true),
       // 跨字段验证：通过 `data` 读取其他字段
       new Rule(
         'validCode',

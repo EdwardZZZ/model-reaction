@@ -23,6 +23,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   committed value actually changed, matching the single-field `setField` path.
   Previously a reaction's `action` side effect could fire for fields that were
   re-submitted unchanged or that failed validation.
+- `dirtyData` is now a private field on the model instance. It was never part
+  of the `ModelReturn` type, but was reachable on the concrete instance at
+  runtime; read/clear it exclusively through `getDirtyData()` /
+  `clearDirtyData()`.
+
+### Internal
+- Public `ModelManager` methods are now bound arrow-function class fields
+  instead of prototype methods bound in the constructor.
+- `subscribe` / `subscribeField` route through the public `on(...)` facade
+  instead of touching the internal event emitter directly.
+- Async validator timeout handling was extracted into a single `raceTimeout`
+  helper, collapsing the previously duplicated sync/async error branches in
+  `validateField`. No behavior change.
 
 ### Performance
 - Reaction dependency collection is now single-pass (O(n)) instead of building

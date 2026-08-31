@@ -12,6 +12,7 @@ Reference for the public `model-reaction` API surface.
 - [Model Methods](#model-methods)
 - [Events](#events)
 - [ModelOptions](#modeloptions)
+- [Validation Rules](#validation-rules)
 - [Error Formatting](#error-formatting)
 - [Type Definitions](#type-definitions)
 
@@ -134,6 +135,58 @@ interface ModelOptions {
 | `strictMode` | `false` | If `true`, setting a field absent from the schema throws. |
 | `failFast` | `false` | If `true`, stop validating a field after its first failure. |
 
+## Validation Rules
+
+`ValidationRules` is a collection of reusable built-in rules, and `Rule` is the
+class behind them. Both are exported from the package entry point:
+
+```typescript
+import { ValidationRules, Rule } from 'model-reaction';
+```
+
+Each rule implements the `Validator` interface, so it can be dropped straight
+into a field's `validator` array.
+
+### Built-in rules
+
+| Rule | Form | Passes when |
+| --- | --- | --- |
+| `required` | constant | value is not `undefined`, `null`, or `''` |
+| `number` | constant | value is a finite number |
+| `integer` | constant | value is a finite integer |
+| `boolean` | constant | value is a boolean |
+| `string` | constant | value is a string |
+| `min(n)` | factory | numeric value `>= n` |
+| `max(n)` | factory | numeric value `<= n` |
+| `minLength(n)` | factory | string/array length `>= n` |
+| `maxLength(n)` | factory | string/array length `<= n` |
+| `pattern(regex, message?)` | factory | string matches `regex` |
+| `email` | constant | value is a valid email string |
+
+### Rule chaining
+
+Every rule (constant or factory result) is a `Rule` instance with two chainable
+helpers that return a **new** rule, leaving the original untouched:
+
+| Method | Description |
+| --- | --- |
+| `.withMessage(message)` | Override the error message. |
+| `.when(predicate)` | Only run the rule when `predicate(data)` is truthy — handy for cross-field conditional validation. |
+
+```typescript
+createModel({
+  discountCode: {
+    type: 'string',
+    default: '',
+    validator: [
+      ValidationRules.required
+        .withMessage('Code required when a discount is applied')
+        .when((data) => data.hasDiscount === true),
+    ],
+  },
+});
+```
+
 ## Error Formatting
 
 Formatting is independent from model state:
@@ -151,5 +204,8 @@ const custom = formatValidationErrors(
 Publicly exported types include `Model`, `ModelOptions`, `ModelReturn`,
 `Validator`, `Reaction`, `FieldSchema`, `ValidationError`, `ModelError`,
 `ModelErrorCode`, `ModelEventMap`, `InferFieldType`, and `InferModelData`.
+
+Runtime values exported from the package entry point are `createModel`,
+`ValidationRules`, `Rule`, `ModelEvents`, and `formatValidationErrors`.
 
 For full type definitions, see [`src/types.ts`](../src/types.ts).

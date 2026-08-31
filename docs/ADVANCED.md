@@ -119,11 +119,11 @@ const model = createModel({
   discountCode: {
     type: 'string',
     validator: [
-      // Conditional: only runs when hasDiscount is true.
-      {
-        ...ValidationRules.required.withMessage('Discount code is required when discount is enabled'),
-        condition: (data) => data.hasDiscount === true,
-      },
+      // Conditional: only runs when hasDiscount is true. `.when(predicate)`
+      // is the concise form of attaching a `condition`.
+      ValidationRules.required
+        .withMessage('Discount code is required when discount is enabled')
+        .when((data) => data.hasDiscount === true),
       // Cross-field: read other fields via `data`.
       new Rule(
         'validCode',

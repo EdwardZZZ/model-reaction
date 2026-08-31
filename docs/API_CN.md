@@ -12,6 +12,7 @@
 - [Model 方法](#model-方法)
 - [事件](#事件)
 - [ModelOptions](#modeloptions)
+- [验证规则](#验证规则)
 - [错误格式化](#错误格式化)
 - [类型定义](#类型定义)
 
@@ -128,6 +129,57 @@ interface ModelOptions {
 | `strictMode` | `false` | 为 `true` 时，设置未在 schema 中声明的字段会抛错 |
 | `failFast` | `false` | 为 `true` 时，单字段在第一条规则失败后即停止后续验证 |
 
+## 验证规则
+
+`ValidationRules` 是一组可复用的内置规则，`Rule` 则是它们背后的类。两者都从
+包入口导出：
+
+```typescript
+import { ValidationRules, Rule } from 'model-reaction';
+```
+
+每条规则都实现了 `Validator` 接口，可直接放进字段的 `validator` 数组。
+
+### 内置规则
+
+| 规则 | 形式 | 通过条件 |
+| --- | --- | --- |
+| `required` | 常量 | 值不是 `undefined`、`null` 或 `''` |
+| `number` | 常量 | 值是有限数字 |
+| `integer` | 常量 | 值是有限整数 |
+| `boolean` | 常量 | 值是布尔值 |
+| `string` | 常量 | 值是字符串 |
+| `min(n)` | 工厂 | 数字值 `>= n` |
+| `max(n)` | 工厂 | 数字值 `<= n` |
+| `minLength(n)` | 工厂 | 字符串/数组长度 `>= n` |
+| `maxLength(n)` | 工厂 | 字符串/数组长度 `<= n` |
+| `pattern(regex, message?)` | 工厂 | 字符串匹配 `regex` |
+| `email` | 常量 | 值是合法邮箱字符串 |
+
+### 规则链式方法
+
+每条规则（常量或工厂结果）都是一个 `Rule` 实例，带有两个链式方法，它们返回
+**新的**规则，不修改原规则：
+
+| 方法 | 说明 |
+| --- | --- |
+| `.withMessage(message)` | 覆盖错误提示信息。 |
+| `.when(predicate)` | 仅当 `predicate(data)` 为真时才运行该规则——适合跨字段条件验证。 |
+
+```typescript
+createModel({
+  discountCode: {
+    type: 'string',
+    default: '',
+    validator: [
+      ValidationRules.required
+        .withMessage('使用折扣时必须填写折扣码')
+        .when((data) => data.hasDiscount === true),
+    ],
+  },
+});
+```
+
 ## 错误格式化
 
 错误展示与模型状态解耦：
@@ -145,5 +197,8 @@ const custom = formatValidationErrors(
 当前公开导出的类型包括 `Model`、`ModelOptions`、`ModelReturn`、
 `Validator`、`Reaction`、`FieldSchema`、`ValidationError`、`ModelError`、
 `ModelErrorCode`、`ModelEventMap`、`InferFieldType` 和 `InferModelData`。
+
+从包入口导出的运行时值包括 `createModel`、`ValidationRules`、`Rule`、
+`ModelEvents` 和 `formatValidationErrors`。
 
 完整类型定义请见 [`src/types.ts`](../src/types.ts)。
