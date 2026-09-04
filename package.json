@@ -66,6 +66,10 @@
   "bugs": {
     "url": "https://github.com/EdwardZZZ/model-reaction/issues"
   },
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/",
+    "access": "public"
+  },
   "peerDependencies": {
     "react": ">=18.0.0"
   },
