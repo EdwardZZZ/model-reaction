@@ -9,7 +9,8 @@ import {
 } from './types';
 import { PendingTasks } from './pending-tasks';
 
-export interface ReactionCallbacks {
+/** Internal contract between {@link ReactionSystem} and its owning model. */
+interface ReactionCallbacks {
     getValue: (field: string) => any;
     setValue: (field: string, value: any, options?: { reactionStack?: string[] }) => Promise<boolean>;
     setError: (field: string, error: ValidationError) => void;

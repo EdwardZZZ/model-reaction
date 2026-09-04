@@ -135,7 +135,9 @@ async function raceTimeout(
     field: string,
     timeout: number
 ): Promise<boolean> {
-    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    // Assigned synchronously inside the executor below, so it is always set
+    // by the time `finally` runs.
+    let timeoutId!: ReturnType<typeof setTimeout>;
     const timeoutPromise = new Promise<boolean>((_, reject) => {
         timeoutId = setTimeout(
             () => reject(new Error(`Validation timeout: ${field}`)),
@@ -145,7 +147,7 @@ async function raceTimeout(
     try {
         return await Promise.race([promise, timeoutPromise]);
     } finally {
-        if (timeoutId) clearTimeout(timeoutId);
+        clearTimeout(timeoutId);
     }
 }
 

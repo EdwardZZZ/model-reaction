@@ -11,7 +11,17 @@ import { useCallback, useRef, useState } from 'react';
 import { act, render, renderHook } from '@testing-library/react';
 
 import { createModel, ValidationRules } from '../index';
-import { useModelComputed, useModelSelector } from '../react';
+import {
+    Field,
+    ModelProvider,
+    shallow,
+    useModel,
+    useModelComputed,
+    useModelField,
+    useModelFields,
+    useModelFieldState,
+    useModelSelector,
+} from '../react';
 import type { ModelReturn } from '../types';
 
 // ---------------------------------------------------------------------------
@@ -629,5 +639,354 @@ describe('Provider-owned model dispose lifecycle', () => {
 
         spyA.mockRestore();
         spyB.mockRestore();
+    });
+});
+
+// ---------------------------------------------------------------------------
+// useModelField — single-field subscription
+// ---------------------------------------------------------------------------
+
+describe('useModelField', () => {
+    it('returns the current value and re-renders only when that field changes', async () => {
+        const cart = makeCart();
+        let renderCount = 0;
+        let lastQty = 0;
+
+        function Qty() {
+            renderCount++;
+            lastQty = useModelField(cart, 'qty');
+            return <span>{lastQty}</span>;
+        }
+
+        render(<Qty />);
+        const initial = renderCount;
+        expect(lastQty).toBe(1);
+
+        // Unrelated field → no re-render.
+        await act(async () => {
+            await cart.setField('coupon', 'SAVE10');
+        });
+        expect(renderCount).toBe(initial);
+        expect(lastQty).toBe(1);
+
+        // The subscribed field → exactly one re-render.
+        await act(async () => {
+            await cart.setField('qty', 7);
+        });
+        expect(lastQty).toBe(7);
+        expect(renderCount).toBe(initial + 1);
+
+        cart.dispose();
+    });
+
+    it('does not re-render when a failed set leaves the value unchanged', async () => {
+        const model = makeOrderModel();
+        let renderCount = 0;
+
+        function Note() {
+            renderCount++;
+            const note = useModelField(model, 'note');
+            return <span>{note}</span>;
+        }
+
+        render(<Note />);
+        const initial = renderCount;
+
+        // `note` only accepts strings; a number fails validation and is
+        // diverted to dirtyData, so the committed value never changes.
+        await act(async () => {
+            await model.setField('note', 123 as unknown as string);
+        });
+        expect(renderCount).toBe(initial);
+
+        model.dispose();
+    });
+});
+
+// ---------------------------------------------------------------------------
+// useModelFields — multi-field subscription
+// ---------------------------------------------------------------------------
+
+describe('useModelFields', () => {
+    it('returns the picked fields and re-renders only on shallow change', async () => {
+        const cart = makeCart();
+        let renderCount = 0;
+        let last: { qty: number; price: number } = { qty: 0, price: 0 };
+
+        function Picked() {
+            renderCount++;
+            last = useModelFields(cart, ['qty', 'price']);
+            return <span>{last.qty * last.price}</span>;
+        }
+
+        render(<Picked />);
+        const initial = renderCount;
+        expect(last).toEqual({ qty: 1, price: 100 });
+
+        // A field outside the picked set → no re-render.
+        await act(async () => {
+            await cart.setField('coupon', 'SAVE10');
+        });
+        expect(renderCount).toBe(initial);
+
+        // A picked field changes → one re-render.
+        await act(async () => {
+            await cart.setField('price', 250);
+        });
+        expect(last).toEqual({ qty: 1, price: 250 });
+        expect(renderCount).toBe(initial + 1);
+
+        cart.dispose();
+    });
+
+    it('rebuilds the snapshot when the list of fields changes', async () => {
+        const cart = makeCart();
+        let setFieldsList: (f: Array<'qty' | 'price' | 'coupon'>) => void =
+            () => undefined;
+        let last: Record<string, unknown> = {};
+
+        function Picked() {
+            const [fields, setFields] = useState<
+                Array<'qty' | 'price' | 'coupon'>
+            >(['qty']);
+            setFieldsList = setFields;
+            last = useModelFields(cart, fields);
+            return <span>{Object.keys(last).join(',')}</span>;
+        }
+
+        render(<Picked />);
+        expect(last).toEqual({ qty: 1 });
+
+        // Change the requested field list → snapshot rebuilds to the new shape.
+        await act(async () => {
+            setFieldsList(['qty', 'coupon']);
+        });
+        expect(last).toEqual({ qty: 1, coupon: '' });
+
+        cart.dispose();
+    });
+});
+
+// ---------------------------------------------------------------------------
+// useModelFieldState — value + setter + meta
+// ---------------------------------------------------------------------------
+
+describe('useModelFieldState', () => {
+    interface Signup {
+        email: string;
+    }
+
+    function makeSignupModel() {
+        return createModel<Signup>({
+            email: {
+                type: 'string',
+                default: '',
+                validator: [ValidationRules.required, ValidationRules.email],
+            },
+        });
+    }
+
+    it('commits a valid value and exposes clean meta', async () => {
+        const model = makeSignupModel();
+        const { result } = renderHook(() =>
+            useModelFieldState(model, 'email')
+        );
+
+        expect(result.current[0]).toBe('');
+        expect(result.current[2].error).toBeNull();
+        expect(result.current[2].dirty).toBe(false);
+
+        await act(async () => {
+            const ok = await result.current[1]('user@example.com');
+            expect(ok).toBe(true);
+        });
+
+        expect(result.current[0]).toBe('user@example.com');
+        expect(result.current[2].error).toBeNull();
+        expect(result.current[2].errors).toHaveLength(0);
+        expect(result.current[2].dirty).toBe(false);
+
+        model.dispose();
+    });
+
+    it('surfaces error + dirty meta when the set fails validation', async () => {
+        const model = makeSignupModel();
+        const { result } = renderHook(() =>
+            useModelFieldState(model, 'email')
+        );
+
+        await act(async () => {
+            const ok = await result.current[1]('not-an-email');
+            expect(ok).toBe(false);
+        });
+
+        // Committed value stays at the default; the failed input is dirty.
+        expect(result.current[0]).toBe('');
+        expect(result.current[2].error).toBe('Invalid email format');
+        expect(result.current[2].errors.length).toBeGreaterThan(0);
+        expect(result.current[2].dirty).toBe(true);
+
+        // Correcting it clears both error and dirty state.
+        await act(async () => {
+            await result.current[1]('user@example.com');
+        });
+        expect(result.current[2].error).toBeNull();
+        expect(result.current[2].dirty).toBe(false);
+
+        model.dispose();
+    });
+});
+
+// ---------------------------------------------------------------------------
+// useModel — Provider consumption
+// ---------------------------------------------------------------------------
+
+describe('useModel', () => {
+    interface UserData {
+        name: string;
+    }
+
+    it('reads the model from the nearest ModelProvider', () => {
+        const model = createModel<UserData>({
+            name: { type: 'string', default: 'Ada' },
+        });
+
+        function Consumer() {
+            const m = useModel<UserData>();
+            const name = useModelField(m, 'name');
+            return <span data-testid="name">{name}</span>;
+        }
+
+        const { getByTestId } = render(
+            <ModelProvider model={model}>
+                <Consumer />
+            </ModelProvider>
+        );
+
+        expect(getByTestId('name').textContent).toBe('Ada');
+        model.dispose();
+    });
+
+    it('throws when used without a surrounding ModelProvider', () => {
+        function Orphan() {
+            useModel();
+            return null;
+        }
+        // Silence the expected React error boundary logging.
+        const spy = jest.spyOn(console, 'error').mockImplementation(() => {});
+        expect(() => render(<Orphan />)).toThrow(/must be used inside/);
+        spy.mockRestore();
+    });
+});
+
+// ---------------------------------------------------------------------------
+// Field — render-prop binding
+// ---------------------------------------------------------------------------
+
+describe('Field', () => {
+    interface FormData {
+        email: string;
+    }
+
+    function makeFormModel() {
+        return createModel<FormData>({
+            email: {
+                type: 'string',
+                default: '',
+                validator: [ValidationRules.email],
+            },
+        });
+    }
+
+    it('binds a render-prop to a field via the surrounding provider', async () => {
+        const model = makeFormModel();
+
+        const { getByTestId } = render(
+            <ModelProvider model={model}>
+                <Field<FormData, 'email'> name="email">
+                    {({ value, setValue, meta }) => (
+                        <div>
+                            <span data-testid="value">{value}</span>
+                            <span data-testid="error">{meta.error ?? ''}</span>
+                            <button
+                                data-testid="set"
+                                onClick={() => setValue('me@example.com')}
+                            >
+                                set
+                            </button>
+                        </div>
+                    )}
+                </Field>
+            </ModelProvider>
+        );
+
+        expect(getByTestId('value').textContent).toBe('');
+
+        await act(async () => {
+            await model.setField('email', 'me@example.com');
+        });
+        expect(getByTestId('value').textContent).toBe('me@example.com');
+
+        model.dispose();
+    });
+
+    it('accepts an explicit model prop instead of a provider', () => {
+        const model = makeFormModel();
+
+        const { getByTestId } = render(
+            <Field<FormData, 'email'> name="email" model={model}>
+                {({ value }) => <span data-testid="v">{value}</span>}
+            </Field>
+        );
+        expect(getByTestId('v').textContent).toBe('');
+        model.dispose();
+    });
+
+    it('throws when neither a model prop nor a provider is available', () => {
+        const spy = jest.spyOn(console, 'error').mockImplementation(() => {});
+        expect(() =>
+            render(
+                <Field name={'email' as never}>
+                    {() => null}
+                </Field>
+            )
+        ).toThrow(/requires either a `model` prop or a surrounding/);
+        spy.mockRestore();
+    });
+});
+
+// ---------------------------------------------------------------------------
+// shallow — equality helper
+// ---------------------------------------------------------------------------
+
+describe('shallow', () => {
+    it('treats identical references and primitives as equal', () => {
+        const obj = { a: 1 };
+        expect(shallow(obj, obj)).toBe(true);
+        expect(shallow(1, 1)).toBe(true);
+        expect(shallow('x', 'x')).toBe(true);
+        expect(shallow(null, null)).toBe(true);
+    });
+
+    it('compares plain objects one level deep', () => {
+        expect(shallow({ a: 1, b: 2 }, { a: 1, b: 2 })).toBe(true);
+        expect(shallow({ a: 1, b: 2 }, { a: 1, b: 3 })).toBe(false);
+        expect(shallow({ a: 1 }, { a: 1, b: 2 })).toBe(false);
+        // Nested objects are compared by reference, not structurally.
+        const nested = { c: 1 };
+        expect(shallow({ a: nested }, { a: nested })).toBe(true);
+        expect(shallow({ a: { c: 1 } }, { a: { c: 1 } })).toBe(false);
+    });
+
+    it('compares arrays one level deep', () => {
+        expect(shallow([1, 2, 3], [1, 2, 3])).toBe(true);
+        expect(shallow([1, 2], [1, 2, 3])).toBe(false);
+        expect(shallow([1, 2, 3], [1, 2, 4])).toBe(false);
+    });
+
+    it('returns false for mismatched types and null vs object', () => {
+        expect(shallow([1] as unknown as object, { 0: 1 })).toBe(false);
+        expect(shallow(null as unknown as object, { a: 1 })).toBe(false);
+        expect(shallow({ a: 1 }, null as unknown as object)).toBe(false);
     });
 });

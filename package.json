@@ -1,6 +1,6 @@
 {
   "name": "model-reaction",
-  "version": "1.1.1",
+  "version": "1.2.0",
   "main": "dist/index.cjs.js",
   "module": "dist/index.esm.js",
   "types": "dist/types/index.d.ts",
@@ -44,8 +44,9 @@
     "example:async": "ts-node -O '{\"module\":\"commonjs\",\"moduleResolution\":\"node\"}' examples/async-validation.ts",
     "example:event": "ts-node -O '{\"module\":\"commonjs\",\"moduleResolution\":\"node\"}' examples/event-listening.ts",
     "example:complex": "ts-node -O '{\"module\":\"commonjs\",\"moduleResolution\":\"node\"}' examples/complex-form.ts",
+    "example:dirty": "ts-node -O '{\"module\":\"commonjs\",\"moduleResolution\":\"node\"}' examples/dirty-data-conditional.ts",
     "example:multi-record": "ts-node -O '{\"module\":\"commonjs\",\"moduleResolution\":\"node\"}' examples/multi-record-deep-deps.ts",
-    "examples": "npm run example:basic && npm run example:reaction && npm run example:async && npm run example:event && npm run example:complex && npm run example:multi-record && npm run example:react"
+    "examples": "npm run example:basic && npm run example:reaction && npm run example:async && npm run example:event && npm run example:complex && npm run example:dirty && npm run example:multi-record && npm run example:react"
   },
   "keywords": [
     "model",

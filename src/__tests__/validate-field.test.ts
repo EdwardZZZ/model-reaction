@@ -277,6 +277,65 @@ describe('validateField (unit)', () => {
         expect(errors.f).toBeUndefined();
     });
 
+    test('isCurrent guard suppresses stale async *rejections*', async () => {
+        // Distinct from the "returns false" case above: here the async
+        // validator throws, exercising the catch branch's stale-request guard.
+        const errors: Record<string, any[]> = {};
+        const schema: FieldSchema = {
+            type: 'string',
+            validator: [
+                {
+                    type: 'asyncThrow',
+                    message: 'boom',
+                    validate: async () => {
+                        throw new Error('network down');
+                    },
+                },
+            ],
+        };
+
+        const result = await validateField({
+            schema,
+            value: 'v',
+            errors,
+            field: 'f',
+            isCurrent: () => false,
+        });
+
+        expect(result).toBe(false);
+        // Stale request → the rejection must be swallowed, no error recorded.
+        expect(errors.f).toBeUndefined();
+    });
+
+    test('records async rejection error when the request is still current', async () => {
+        // Complements the stale-guard test: with isCurrent true (the default),
+        // a rejection is turned into a recorded validation error.
+        const errors: Record<string, any[]> = {};
+        const schema: FieldSchema = {
+            type: 'string',
+            validator: [
+                {
+                    type: 'asyncThrow',
+                    message: 'boom',
+                    validate: async () => {
+                        throw new Error('network down');
+                    },
+                },
+            ],
+        };
+
+        const result = await validateField({
+            schema,
+            value: 'v',
+            errors,
+            field: 'f',
+            isCurrent: () => true,
+        });
+
+        expect(result).toBe(false);
+        expect(errors.f?.[0]?.message).toContain('network down');
+    });
+
     test('passes cross-field data to validator', async () => {
         let receivedData: any = null;
         const schema: FieldSchema = {

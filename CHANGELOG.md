@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-09-04
+
 ### Added
 - GitHub Actions CI workflow running lint, typecheck, tests, and build across
   Node 16/18/20/22.
@@ -36,6 +38,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Async validator timeout handling was extracted into a single `raceTimeout`
   helper, collapsing the previously duplicated sync/async error branches in
   `validateField`. No behavior change.
+- Removed unreachable defensive defaults: the private `revalidateField` and
+  `commitValid` methods no longer declare `= {}` option defaults (every call
+  site already passes options), and `raceTimeout` drops its `if (timeoutId)`
+  guard since the id is assigned synchronously. No behavior change.
 
 ### Performance
 - Reaction dependency collection is now single-pass (O(n)) instead of building

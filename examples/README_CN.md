@@ -21,6 +21,9 @@
 ### 复杂表单示例 (complex-form.ts)
 展示复杂表单场景下的字段关联、依赖验证和错误处理机制。
 
+### 脏数据与条件校验示例 (dirty-data-conditional.ts)
+展示校验失败的输入如何被转存到 `dirtyData`（可通过 `getDirtyData()` 取回、`clearDirtyData()` 清空）而不污染 `data`，以及 `Rule.when(predicate)` 如何让规则仅在满足跨字段条件时才生效。
+
 ### React 绑定示例 (react-bindings.tsx)
 展示如何使用 `model-reaction/react` 适配层（`useModelField`、`useModelSelector`）实现字段级与 selector 级的组件订阅，以及 Schema 类型推导。可直接拷贝到 React 18+ 项目中使用（不能通过 CLI 直接运行）。
 
@@ -39,6 +42,7 @@ npm run example:reaction
 npm run example:async
 npm run example:event
 npm run example:complex
+npm run example:dirty
 ```
 
 > React 示例（`examples/react-bindings.tsx`）是独立片段，请在真实的 React

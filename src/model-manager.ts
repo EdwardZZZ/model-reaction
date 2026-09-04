@@ -290,7 +290,7 @@ export class ModelManager<
      */
     private async revalidateField(
         field: string,
-        opts: CommitOptions = {}
+        opts: CommitOptions
     ): Promise<boolean> {
         const fieldKey = field as keyof T;
         const value =
@@ -370,7 +370,7 @@ export class ModelManager<
     private commitValid(
         field: string,
         value: any,
-        options: CommitOptions = {}
+        options: CommitOptions
     ): void {
         const { reactionStack = [], suppressReactions = false, changedFields } =
             options;
