@@ -97,7 +97,11 @@ model-reaction:  setField -> [transform] -> [validate] -> commit -> [reaction] -
 **劣势**
 - **不是通用 store**：不适合管 UI 状态 / 路由 / 全局共享。
 - **生态薄**：无 DevTools、无 persist、无中间件。
-- **多 store 协调弱**：跨 model 联动需自行编排。
+- **多 store 协调弱**：跨 model 联动需自行编排（`subscribeField` 手动串）。
+  注意这指的是**多个独立 model 之间**的联动，不等于「大型表单要拆 model」——
+  大型表单的正确姿势是**单个 model + schema 片段解构组合**（`{ ...baseSchema, ...contactSchema }`），
+  这样 `reaction` 的跨字段依赖图仍在同一 model 内自动管理，反而绕开了本条弱项；
+  只有当两块表单**生命周期不同**（如分步向导各步骤独立 dispose / 复用）时才真需要拆 model。
 - **写入需 await**：`setField` 返回 Promise（因校验异步）。
 - **React 集成虽已加强（`ModelProvider` / `Field` / `useModelFieldState`）**，但社区资源远不如 RTK / zustand。
 

@@ -114,7 +114,15 @@ model-reaction:  setField -> [transform] -> [validate] -> commit -> [reaction] -
 - **Not a general-purpose store**: not designed for UI / routing / global
   shared state.
 - **Thin ecosystem**: no DevTools, no persist, no middleware story yet.
-- **Weak multi-store coordination**: cross-model orchestration is manual.
+- **Weak multi-store coordination**: cross-model orchestration is manual
+  (wired by hand via `subscribeField`). Note this refers to linking
+  **multiple independent models**, not "large forms must be split into
+  models" — the right approach for a large form is a **single model composed
+  from schema fragments** (`{ ...baseSchema, ...contactSchema }`), so the
+  `reaction` cross-field dependency graph stays managed within one model and
+  actually sidesteps this weakness; you only truly need multiple models when
+  the sections have **different lifecycles** (e.g. a step wizard where each
+  step is disposed / reused independently).
 - **Writes must be awaited**: `setField` returns a Promise (validation is
   async).
 - **React integration is now solid (`ModelProvider` / `<Field>` /
