@@ -1,0 +1,18 @@
+{
+  // Shared compiler options for every package in the monorepo.
+  // Each package's own tsconfig `extends` this and adds what differs
+  // (rootDir/outDir, lib, types, jsx, declaration, module/target overrides).
+  "compilerOptions": {
+    "moduleResolution": "bundler",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "isolatedModules": true,
+    "moduleDetection": "force",
+    "noUncheckedSideEffectImports": true,
+    "verbatimModuleSyntax": false,
+    "sourceMap": true,
+    "declarationMap": false,
+    "skipLibCheck": true
+  }
+}

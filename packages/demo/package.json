@@ -1,0 +1,26 @@
+{
+  "name": "model-reaction-demo",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Demo app showcasing model-reaction and its DevTools extension: multi-instance, async validation, and reaction chains.",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "model-reaction": "workspace:*",
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6"
+  },
+  "devDependencies": {
+    "@types/node": "^24.2.1",
+    "@types/react": "^19.2.15",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^4.6.0",
+    "typescript": "^5.9.2",
+    "vite": "^6.0.6"
+  }
+}

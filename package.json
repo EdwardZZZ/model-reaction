@@ -1,111 +1,19 @@
 {
-  "name": "model-reaction",
-  "version": "1.2.0",
-  "main": "dist/index.cjs.js",
-  "module": "dist/index.esm.js",
-  "types": "dist/types/index.d.ts",
-  "exports": {
-    ".": {
-      "types": "./dist/types/index.d.ts",
-      "import": "./dist/index.esm.js",
-      "require": "./dist/index.cjs.js",
-      "default": "./dist/index.js"
-    },
-    "./react": {
-      "types": "./dist/types/react.d.ts",
-      "import": "./dist/react.esm.js",
-      "require": "./dist/react.cjs.js"
-    }
-  },
-  "sideEffects": false,
-  "files": [
-    "dist",
-    "docs",
-    "examples",
-    "AGENTS.md",
-    "README.md",
-    "README_CN.md",
-    "LICENSE"
-  ],
+  "name": "model-reaction-monorepo",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Monorepo for model-reaction: the core library, its DevTools extension, and a demo app.",
   "engines": {
-    "node": ">=16"
+    "node": ">=18"
   },
   "scripts": {
-    "build": "rimraf dist && rollup -c",
-    "test": "jest",
-    "typecheck:test": "tsc --noEmit -p tsconfig.test.json",
-    "format": "prettier --write src/**/*.ts",
-    "lint": "eslint \"src/**/*.{ts,js}\"",
-    "lint:fix": "eslint \"src/**/*.{ts,js}\" --fix",
-    "prepublishOnly": "npm run lint && npm run typecheck:test && npm test && npm run build",
-    "example:basic": "ts-node -O '{\"module\":\"commonjs\",\"moduleResolution\":\"node\"}' examples/basic-usage.ts",
-    "example:react": "tsx examples/react-bindings.tsx",
-    "example:reaction": "ts-node -O '{\"module\":\"commonjs\",\"moduleResolution\":\"node\"}' examples/reaction-system.ts",
-    "example:async": "ts-node -O '{\"module\":\"commonjs\",\"moduleResolution\":\"node\"}' examples/async-validation.ts",
-    "example:event": "ts-node -O '{\"module\":\"commonjs\",\"moduleResolution\":\"node\"}' examples/event-listening.ts",
-    "example:complex": "ts-node -O '{\"module\":\"commonjs\",\"moduleResolution\":\"node\"}' examples/complex-form.ts",
-    "example:dirty": "ts-node -O '{\"module\":\"commonjs\",\"moduleResolution\":\"node\"}' examples/dirty-data-conditional.ts",
-    "example:multi-record": "ts-node -O '{\"module\":\"commonjs\",\"moduleResolution\":\"node\"}' examples/multi-record-deep-deps.ts",
-    "examples": "npm run example:basic && npm run example:reaction && npm run example:async && npm run example:event && npm run example:complex && npm run example:dirty && npm run example:multi-record && npm run example:react"
+    "build": "pnpm -r run build",
+    "test": "pnpm -r run test",
+    "typecheck": "pnpm -r run typecheck",
+    "lint": "pnpm -r run lint",
+    "build:lib": "pnpm --filter model-reaction run build",
+    "test:lib": "pnpm --filter model-reaction run test",
+    "test:devtools": "pnpm --filter model-reaction-devtools run test"
   },
-  "keywords": [
-    "model",
-    "reaction",
-    "validation",
-    "batch",
-    "typescript"
-  ],
-  "author": "Zephyr <zzh627@126.com>",
-  "license": "ISC",
-  "description": "A TypeScript model library with validation, reaction system, and batch operations",
-  "homepage": "https://github.com/EdwardZZZ/model-reaction",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/EdwardZZZ/model-reaction.git"
-  },
-  "bugs": {
-    "url": "https://github.com/EdwardZZZ/model-reaction/issues"
-  },
-  "publishConfig": {
-    "registry": "https://registry.npmjs.org/",
-    "access": "public"
-  },
-  "peerDependencies": {
-    "react": ">=18.0.0"
-  },
-  "peerDependenciesMeta": {
-    "react": {
-      "optional": true
-    }
-  },
-  "devDependencies": {
-    "@eslint/js": "^9.39.2",
-    "@rollup/plugin-alias": "^5.1.1",
-    "@rollup/plugin-commonjs": "^28.0.6",
-    "@rollup/plugin-node-resolve": "^16.0.1",
-    "@rollup/plugin-replace": "^6.0.2",
-    "@rollup/plugin-terser": "^0.4.4",
-    "@rollup/plugin-typescript": "^12.1.4",
-    "@testing-library/react": "^16.3.2",
-    "@types/jest": "^30.0.0",
-    "@types/node": "^24.2.1",
-    "@types/react": "^19.2.15",
-    "@types/react-dom": "^19.2.3",
-    "eslint": "^9.39.2",
-    "eslint-config-prettier": "^10.1.8",
-    "globals": "^16.5.0",
-    "jest": "^30.0.5",
-    "jest-environment-jsdom": "^30.4.1",
-    "prettier": "^3.7.4",
-    "react": "^19.2.6",
-    "react-dom": "^19.2.6",
-    "rimraf": "^6.0.1",
-    "rollup": "^2.79.2",
-    "ts-jest": "^29.4.1",
-    "ts-node": "^10.9.2",
-    "tslib": "^2.8.1",
-    "tsx": "^4.22.3",
-    "typescript": "^5.9.2",
-    "typescript-eslint": "^8.51.0"
-  }
+  "license": "ISC"
 }

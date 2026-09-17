@@ -12,29 +12,40 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        node-version: [16.x, 18.x, 20.x, 22.x]
+        # Node 18+ only: the toolchain (jest 30, vite 6, esbuild 0.28) dropped
+        # Node 16. The published library still targets Node >=16 at runtime.
+        node-version: [18.x, 20.x, 22.x]
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
       - name: Use Node.js ${{ matrix.node-version }}
         uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node-version }}
-          cache: npm
+          cache: pnpm
 
       - name: Install dependencies
-        run: npm ci
+        run: pnpm install --frozen-lockfile
 
-      - name: Lint
-        run: npm run lint
+      - name: Lint (library)
+        run: pnpm --filter model-reaction run lint
 
-      - name: Typecheck (test sources)
-        run: npm run typecheck:test
+      - name: Typecheck (library test sources)
+        run: pnpm --filter model-reaction run typecheck:test
 
-      - name: Test
-        run: npm test
+      - name: Typecheck (devtools)
+        run: pnpm --filter model-reaction-devtools run typecheck
 
-      - name: Build
-        run: npm run build
+      - name: Typecheck (demo)
+        run: pnpm --filter model-reaction-demo run typecheck
+
+      - name: Test (all packages)
+        run: pnpm -r run test
+
+      - name: Build (all packages)
+        run: pnpm -r run build
