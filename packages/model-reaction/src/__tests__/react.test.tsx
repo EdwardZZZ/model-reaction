@@ -15,6 +15,7 @@ import {
     Field,
     ModelProvider,
     shallow,
+    useDraftField,
     useModel,
     useModelComputed,
     useModelField,
@@ -988,5 +989,121 @@ describe('shallow', () => {
         expect(shallow([1] as unknown as object, { 0: 1 })).toBe(false);
         expect(shallow(null as unknown as object, { a: 1 })).toBe(false);
         expect(shallow({ a: 1 }, null as unknown as object)).toBe(false);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// useDraftField — controlled-input binding with a local draft
+// ---------------------------------------------------------------------------
+
+describe('useDraftField', () => {
+    interface Signup {
+        username: string;
+        priceCents: number;
+    }
+
+    const makeSignup = () =>
+        createModel<Signup>({
+            username: {
+                type: 'string',
+                default: 'ada',
+                validator: [ValidationRules.minLength(3).withMessage('too short')],
+            },
+            priceCents: {
+                type: 'number',
+                default: 350,
+                transform: (v) => Number(v),
+                validator: [ValidationRules.min(0)],
+            },
+        });
+
+    it('seeds the draft from the committed value on mount', () => {
+        const model = makeSignup();
+        const { result } = renderHook(() => useDraftField(model, 'username'));
+        expect(result.current.draft).toBe('ada');
+        model.dispose();
+    });
+
+    it('keeps invalid keystrokes in the draft while they stay out of data', async () => {
+        const model = makeSignup();
+        const { result } = renderHook(() => useDraftField(model, 'username'));
+
+        await act(async () => {
+            result.current.setDraft('ab'); // fails minLength(3)
+        });
+
+        // Draft shows what was typed; committed data is untouched.
+        expect(result.current.draft).toBe('ab');
+        expect(model.getField('username')).toBe('ada');
+        expect(model.getDirtyData().username).toBe('ab');
+        model.dispose();
+    });
+
+    it('commits a valid keystroke through to the model', async () => {
+        const model = makeSignup();
+        const { result } = renderHook(() => useDraftField(model, 'username'));
+
+        await act(async () => {
+            result.current.setDraft('alan');
+        });
+
+        expect(result.current.draft).toBe('alan');
+        expect(model.getField('username')).toBe('alan');
+        expect('username' in model.getDirtyData()).toBe(false);
+        model.dispose();
+    });
+
+    it('seeds from a pending dirtyData value when the model outlives the input', async () => {
+        const model = makeSignup();
+        // Stash a failed input, then mount a fresh hook (simulating remount).
+        await act(async () => {
+            await model.setField('username', 'xy'); // fails, lands in dirtyData
+        });
+
+        const { result } = renderHook(() => useDraftField(model, 'username'));
+        expect(result.current.draft).toBe('xy'); // restored, not 'ada'
+        model.dispose();
+    });
+
+    it('renders an unparseable NaN as blank rather than the text "NaN"', async () => {
+        const model = makeSignup();
+        // "12a" → transform Number → NaN, stashed in dirtyData.
+        await act(async () => {
+            await model.setField('priceCents', '12a' as unknown as number);
+        });
+        expect(Number.isNaN(model.getDirtyData().priceCents as number)).toBe(true);
+
+        const { result } = renderHook(() => useDraftField(model, 'priceCents'));
+        expect(result.current.draft).toBe('');
+        model.dispose();
+    });
+
+    it('honours a custom format on reseed', () => {
+        const model = makeSignup();
+        const { result } = renderHook(() =>
+            useDraftField(model, 'priceCents', {
+                format: (c) => (c / 100).toFixed(2),
+            })
+        );
+        expect(result.current.draft).toBe('3.50');
+        model.dispose();
+    });
+
+    it('gates showError on touched', async () => {
+        const model = makeSignup();
+        const { result } = renderHook(() => useDraftField(model, 'username'));
+
+        await act(async () => {
+            result.current.setDraft('ab'); // invalid
+        });
+        // Error exists but is not shown until blurred.
+        expect(result.current.meta.error).toBe('too short');
+        expect(result.current.showError).toBe(false);
+
+        await act(async () => {
+            result.current.onBlur();
+        });
+        expect(result.current.showError).toBe(true);
+        model.dispose();
     });
 });

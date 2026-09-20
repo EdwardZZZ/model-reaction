@@ -12,6 +12,7 @@ only when its watched slice actually changes.
 
 - [Hooks & Components](#hooks--components)
 - [Basic Example](#basic-example)
+- [Controlled Inputs Under Strict / Async Validation](#controlled-inputs-under-strict--async-validation)
 - [Model Lifecycle in React](#model-lifecycle-in-react)
 - [`useModelSelector` vs `useModelComputed`](#usemodelselector-vs-usemodelcomputed)
 - [Decision Tree](#decision-tree)
@@ -28,6 +29,7 @@ only when its watched slice actually changes.
 | `useModelComputed(model, selector, isEqual?)` | hook | Same shape as `useModelSelector`, but selector / `isEqual` are stored in refs and refreshed every render — inline arrows and per-render closure variables (`id`, `index`, …) work without `useCallback`. |
 | `useModelFields(model, fields)` | hook | Subscribe to several fields at once (shallow-compared). |
 | `useModelFieldState(model, field)` | hook | `[value, setValue, meta]` form-style binding with `error / dirty / validating`. |
+| `useDraftField(model, field, options?)` | hook | **Optional** controlled-input binding: local draft + `touched`/error gating on top of `useModelFieldState`. For strict/async validators. |
 | `shallow` | function | Shallow equality helper for object/array selectors. |
 | `<ModelProvider model>` | component | Provide a model via context. |
 | `useModel<T>()` | hook | Read the model from the nearest provider. |
@@ -157,6 +159,101 @@ function Snapshot() {
 ```
 
 A complete sample lives at [`examples/react-bindings.tsx`](../examples/react-bindings.tsx).
+
+## Controlled Inputs Under Strict / Async Validation
+
+The examples above bind an input's `value` straight to the committed field
+(`value={name}` + `onChange={setField}`). That works when the validator is
+loose and synchronous — e.g. `required` accepts every non-empty keystroke, so
+each edit commits immediately and reads back cleanly.
+
+It stops working the moment validation can **reject** an intermediate keystroke
+or resolve **asynchronously**, because of the library's verify-then-commit
+contract (see [AGENTS.md §1](../AGENTS.md)):
+
+- **Rejected intermediates snap back.** Under `minLength(3)` or `email`, typing
+  `"a"` fails validation, so it lands in `dirtyData` and never reaches `data`.
+  An input reading committed data would blank out on every transient-invalid
+  keystroke — the field feels impossible to type in.
+- **Async commits lag, and superseded ones vanish.** An async validator only
+  commits *after* its round-trip resolves, so the input would sit blank during
+  the in-flight window. Worse, a keystroke whose validation is superseded by a
+  newer one is dropped (the race guard returns early) and never even reaches
+  `dirtyData`.
+
+The fix is a **local draft**: hold "the text being edited" in component state so
+it updates on every keystroke, fire `setField` to validate/commit in the
+background, and surface errors separately via `meta`. This is the same rationale
+the library gives for leaving `touched` out of the model — "text being edited"
+is UI lifecycle state, not model truth (see [AGENTS.md §5](../AGENTS.md)).
+
+The adapter ships this pattern as an **optional** hook, `useDraftField`, built
+on top of `useModelFieldState`. Import it only if you want it — the core binding
+(`useModelFieldState`, `[value, setValue, meta]`) does not depend on it:
+
+```tsx
+import { useDraftField } from 'model-reaction/react';
+import type { ModelReturn } from 'model-reaction';
+
+function UsernameInput({ model }: { model: ModelReturn<{ username: string }> }) {
+    const { draft, setDraft, onBlur, showError, meta } = useDraftField(model, 'username');
+    return (
+        <label>
+            <input
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                onBlur={onBlur}
+                aria-invalid={showError}
+            />
+            {meta.validating && <span>validating…</span>}
+            {showError && <span role="alert">{meta.error}</span>}
+        </label>
+    );
+}
+```
+
+`useDraftField(model, field, options?)` returns `{ draft, setDraft, meta,
+touched, onBlur, showError, committed }`:
+
+- `draft` / `setDraft` — the local editing text and its updater; wire them to
+  the input's `value` / `onChange`.
+- `touched` / `onBlur` / `showError` — the blur-gated error display, so you
+  don't re-implement it per input.
+- `meta` / `committed` — the underlying `useModelFieldState` metadata and the
+  last committed value.
+- `options.format` — how a committed/pending value renders as text on reseed
+  (defaults to `String`); see the field-type contract below.
+
+> It bakes in UI policy `useModelFieldState` deliberately leaves open — when
+> `touched` flips, seeding, the value→text direction — so it's a **separate,
+> opt-in** export rather than folded into `meta`. Reach for the plain
+> `useModelFieldState` when you want to make those calls yourself. A runnable
+> integration lives in the demo app (`packages/demo/src/TextField.tsx`).
+
+### Field-type contract
+
+The draft models "the text in a controlled `<input>`", so it is always a
+`string`. That constrains which fields the hook fits:
+
+- **string fields** — the natural case; no extra work.
+- **number (or other non-string) fields** — must declare a schema `transform`
+  (e.g. `transform: Number`) so the string draft is coerced back to the real
+  type on commit. Without one, the string is written straight into `data` as a
+  silent type lie.
+- **boolean / enum / date fields** bound to checkboxes, selects or pickers —
+  **not** a fit; their control `value` isn't a string. Use a plain
+  `useModelFieldState` binding instead.
+
+Two edge cases on the value→text (reseed) direction, which `useDraftField`
+handles internally (nullish/non-finite collapse) plus the optional `format`:
+
+- **Unparseable numbers.** A number field that stashed `"12a"` holds `NaN`;
+  rendering `String(NaN)` would surface the literal text `"NaN"`. Collapse
+  non-finite numbers (and nullish) to `''` so the input shows blank.
+- **Lost display format.** The model stores only the committed value, so a
+  field that commits cents as an integer loses `"3.50"` on reseed. Pass a
+  `format` (e.g. `(cents) => (cents / 100).toFixed(2)`) to restore it; the
+  parse direction stays with the schema `transform`.
 
 ## Model Lifecycle in React
 

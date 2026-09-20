@@ -131,6 +131,11 @@ function Input({ model, field, label }) {
 }
 ```
 
+> Under strict or async validators (a keystroke can be rejected or still
+> in-flight), bind through the optional `useDraftField(model, field)` from
+> `model-reaction/react` instead — it holds the edit-in-progress text in a local
+> draft so the input stays typeable. Same reasoning as the `touched` row in §5.
+
 ### 4.4 Selector subscription
 
 ```ts

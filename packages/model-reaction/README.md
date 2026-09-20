@@ -198,6 +198,12 @@ function NameField() {
 
 > `validating` is component-local (per hook instance); it tracks only setters issued from this hook, not arbitrary `model.setField` calls elsewhere.
 
+For inputs under **strict or async** validators — where a rejected or in-flight
+keystroke must not blank the field — the adapter also ships an optional
+`useDraftField(model, field, options?)` that layers a local draft and blur-gated
+error display on top of `useModelFieldState`. Import it only if you want it; the
+core binding stays draft-free. See [docs/REACT.md](docs/REACT.md#controlled-inputs-under-strict--async-validation).
+
 ## Documentation
 
 | Topic | Link |

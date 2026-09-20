@@ -10,6 +10,7 @@
 
 - [Hooks 与组件](#hooks-与组件)
 - [基本示例](#基本示例)
+- [严格 / 异步校验下的受控输入](#严格--异步校验下的受控输入)
 - [React 中的 Model 生命周期](#react-中的-model-生命周期)
 - [`useModelSelector` vs `useModelComputed`](#usemodelselector-vs-usemodelcomputed)
 - [选择决策树](#选择决策树)
@@ -26,6 +27,7 @@
 | `useModelComputed(model, selector, isEqual?)` | hook | 与 `useModelSelector` 形参相同，但 selector / `isEqual` 通过 ref 每次渲染刷新——内联箭头函数与渲染期闭包变量（`id`、`index` 等）无需 `useCallback` |
 | `useModelFields(model, fields)` | hook | 一次订阅多个字段（浅比较） |
 | `useModelFieldState(model, field)` | hook | `[value, setValue, meta]` 一体化表单绑定，含 `error / dirty / validating` |
+| `useDraftField(model, field, options?)` | hook | **可选** 受控输入绑定：在 `useModelFieldState` 之上加本地 draft + `touched`/错误门控。用于严格/异步校验 |
 | `shallow` | 函数 | 用于对象/数组选择器的浅比较工具 |
 | `<ModelProvider model>` | 组件 | 通过 Context 注入 model |
 | `useModel<T>()` | hook | 读取最近 Provider 中的 model |
@@ -153,6 +155,88 @@ function Snapshot() {
 ```
 
 完整示例见 [`examples/react-bindings.tsx`](../examples/react-bindings.tsx)。
+
+## 严格 / 异步校验下的受控输入
+
+上面的示例把输入框的 `value` 直接绑定到已提交的字段（`value={name}` +
+`onChange={setField}`）。当校验器宽松且同步时，这样没问题——比如 `required`
+接受任何非空按键，每次编辑都会立即提交并干净地读回。
+
+但只要校验会**拒绝**某个中间态按键，或**异步**返回结果，这种直连就会失效。
+根源是库的 verify-then-commit 契约（见 [AGENTS.md §1](../AGENTS.md)）：
+
+- **被拒的中间态会回弹。** 在 `minLength(3)` 或 `email` 下输入 `"a"` 校验失败，
+  于是它进入 `dirtyData` 而不会进入 `data`。读取已提交值的输入框会在每一个
+  「暂时非法」的按键上被清空——字段变得根本没法打字。
+- **异步提交有延迟，被取代的还会丢失。** 异步校验器只在往返*完成后*才提交，
+  所以在途窗口内输入框会保持空白；更糟的是，某次按键的校验若被更新的一次取代，
+  它会被直接丢弃（竞态守卫提前返回），连 `dirtyData` 都进不去。
+
+解法是引入**本地 draft**：把「正在编辑的文本」放进组件本地 state，让它随每次按键
+即时更新，同时在后台触发 `setField` 校验并提交，错误则通过 `meta` 单独展示。
+这与库把 `touched` 排除在 model 之外的理由一致——「正在编辑的文本」属于 UI
+生命周期状态，而非 model 真理（见 [AGENTS.md §5](../AGENTS.md)）。
+
+这个模式已由适配层作为**可选** hook `useDraftField` 提供，构建在
+`useModelFieldState` 之上。需要才 import —— 核心绑定（`useModelFieldState`、
+`[value, setValue, meta]`）并不依赖它：
+
+```tsx
+import { useDraftField } from 'model-reaction/react';
+import type { ModelReturn } from 'model-reaction';
+
+function UsernameInput({ model }: { model: ModelReturn<{ username: string }> }) {
+    const { draft, setDraft, onBlur, showError, meta } = useDraftField(model, 'username');
+    return (
+        <label>
+            <input
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                onBlur={onBlur}
+                aria-invalid={showError}
+            />
+            {meta.validating && <span>validating…</span>}
+            {showError && <span role="alert">{meta.error}</span>}
+        </label>
+    );
+}
+```
+
+`useDraftField(model, field, options?)` 返回 `{ draft, setDraft, meta, touched,
+onBlur, showError, committed }`：
+
+- `draft` / `setDraft` —— 本地编辑文本及其更新器；接到输入框的 `value` / `onChange`。
+- `touched` / `onBlur` / `showError` —— 失焦门控的错误展示，免得每个输入框各写一遍。
+- `meta` / `committed` —— 底层 `useModelFieldState` 的元数据与最后提交的值。
+- `options.format` —— 回填时已提交/待定值如何渲染成文本（默认 `String`），见下方字段类型契约。
+
+> 它固化了 `useModelFieldState` 刻意留白的 UI 策略（`touched` 何时翻转、如何播种、
+> value→text 方向），所以是**独立、opt-in** 的导出，而非折进 `meta`。想自己拿捏这些
+> 取舍时，就用普通的 `useModelFieldState`。可运行的集成示例见 demo 应用
+> （`packages/demo/src/TextField.tsx`）。
+
+### 字段类型契约
+
+draft 建模的是「受控 `<input>` 里的文本」，所以它永远是 `string`。这限定了
+这个 hook 适配哪些字段：
+
+- **string 字段** —— 天然适配，无需额外处理。
+- **number（或其他非 string）字段** —— 必须声明 schema `transform`
+  （如 `transform: Number`），提交时把字符串 draft 转回真实类型。否则字符串会
+  被直接写进 `data`，成为一个静默的类型谎言。
+- **绑到 checkbox / select / date picker 的 boolean / enum / date 字段** ——
+  **不**适配；它们的控件 `value` 不是字符串。请改用普通的 `useModelFieldState`
+  绑定。
+
+value→text（回填）方向上有两个边界情况，`useDraftField` 内部已处理（nullish /
+非有限数收敛）加上可选的 `format`：
+
+- **无法解析的数字。** number 字段存进 `"12a"` 会得到 `NaN`；直接 `String(NaN)`
+  会把字面文本 `"NaN"` 显示出来。把非有限数（及 nullish）收敛为 `''`，让输入框
+  显示空白。
+- **丢失的显示格式。** 模型只存已提交的值，所以以整数分提交的字段回填时会丢掉
+  `"3.50"`。传一个 `format`（如 `(cents) => (cents / 100).toFixed(2)`）把它补回；
+  解析方向仍交给 schema `transform`。
 
 ## React 中的 Model 生命周期
 

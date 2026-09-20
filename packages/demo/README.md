@@ -44,7 +44,8 @@ recreates the model if a prior instance was torn down. In production it behaves
 identically to the naive pattern (create once, dispose on real unmount).
 
 Text inputs keep their draft in local component state (see
-[`TextField`](src/TextField.tsx)) rather than reading `getField`, because the
+[`TextField`](src/TextField.tsx), which uses `useDraftField` from
+`model-reaction/react`) rather than reading `getField`, because the
 library uses verify-then-commit: a transiently invalid value never lands in
 `data`, so a value-from-`data` controlled input would snap back to empty while
 typing. This matches the library's guidance that edit-in-progress text is a

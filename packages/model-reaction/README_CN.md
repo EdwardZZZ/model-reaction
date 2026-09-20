@@ -196,6 +196,11 @@ function NameField() {
 
 > `validating` 是组件本地状态（每个 hook 实例独立），仅追踪本 hook 发起的 setter，不会跟踪其他位置的 `model.setField` 调用。
 
+对于处于**严格或异步**校验下的输入框 —— 被拒或在途的按键不能把字段清空 —— 适配层还
+提供一个可选的 `useDraftField(model, field, options?)`，在 `useModelFieldState` 之上
+叠加本地 draft 与失焦门控的错误展示。需要才 import；核心绑定不含 draft。
+详见 [docs/REACT_CN.md](docs/REACT_CN.md#严格--异步校验下的受控输入)。
+
 ## 文档
 
 | 主题 | 链接 |
