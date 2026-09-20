@@ -37,7 +37,9 @@ createModel<S extends Record<string, FieldSchema>>(
 >
 > **反应产物会经过校验。** 字段的 `reaction.computed` 结果会走与 `setField`
 > 相同的"先校验再提交"流程。若该派生字段声明了 `validator` 且计算结果未通过，
-> `data` 会保留旧值，计算结果被存入 `dirtyData`。
+> `data` 会保留旧值，计算结果被存入 `dirtyData`。反应的可选 `action`
+> **仅在计算结果通过校验时**才会执行——若结果校验失败并落入 `dirtyData`，
+> 则既不会触发派生字段的变更，也不会执行 `action`。
 
 ## Model 方法
 
@@ -54,7 +56,7 @@ createModel<S extends Record<string, FieldSchema>>(
 | 方法 | 说明 |
 | --- | --- |
 | `setField(field, value): Promise<boolean>` | 设置单个字段；返回该字段的验证结果 |
-| `setFields(fields): Promise<boolean>` | 在一次校验 + 反应流程中批量设置多个字段；返回所有字段结果的逻辑与。**非原子**——即使某个字段校验失败，其余通过校验的字段仍会提交到 `data`。 |
+| `setFields(fields): Promise<boolean>` | 在一次校验 + 反应流程中批量设置多个字段；返回所有字段结果的逻辑与。跨字段校验看到的是**合并后的批次数据**——每个字段针对已叠加了本次调用全部字段的 `data` 进行校验，因此相互依赖的字段（如 `password` / `confirmPassword`）可在一次调用中一起设置。**非原子**——即使某个字段校验失败，其余通过校验的字段仍会提交到 `data`。 |
 
 ### 验证
 

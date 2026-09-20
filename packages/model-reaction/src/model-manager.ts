@@ -157,16 +157,37 @@ export class ModelManager<
     setFields = async (fields: Partial<T>): Promise<boolean> => {
         this.ensureNotDisposed();
         const entries = Object.entries(fields);
+        const prepared = entries.map(([field, value]) => {
+            const schema = this.schema[field];
+            return {
+                field,
+                schema,
+                value: schema ? this.transformValue(schema, value) : value,
+            };
+        });
+        const validationData = {
+            ...(this.modelData as Record<string, any>),
+        };
+        prepared.forEach(({ field, schema, value }) => {
+            if (schema) validationData[field] = value;
+        });
         // Collect only fields whose committed value actually changed, so the
         // batched reaction pass mirrors the single-field path (which fires a
         // reaction only on a real change) instead of firing for every input.
         const changedFields = new Set<string>();
         const results = await Promise.all(
-            entries.map(([field, value]) =>
-                this.updateField(field, value, {
-                    suppressReactions: true,
-                    changedFields,
-                })
+            prepared.map(({ field, schema, value }) =>
+                schema
+                    ? this.validateAndCommit(field, schema, value, {
+                          suppressReactions: true,
+                          changedFields,
+                          validationData,
+                      })
+                    : this.updateField(field, value, {
+                          suppressReactions: true,
+                          changedFields,
+                          validationData,
+                      })
             )
         );
         // Single batched reaction trigger after all fields settle.
@@ -303,11 +324,13 @@ export class ModelManager<
             return false;
         }
 
-        const transformed = schema.transform
-            ? schema.transform(value)
-            : value;
+        const transformed = this.transformValue(schema, value);
 
         return this.validateAndCommit(field, schema, transformed, options);
+    }
+
+    private transformValue(schema: FieldSchema, value: any): any {
+        return schema.transform ? schema.transform(value) : value;
     }
 
     /**
@@ -348,7 +371,8 @@ export class ModelManager<
                 schema,
                 value,
                 field,
-                requestId
+                requestId,
+                options.validationData
             );
 
             if (this.validationRequestIds[field] !== requestId) return false;
@@ -368,7 +392,8 @@ export class ModelManager<
         schema: FieldSchema,
         value: unknown,
         field: string,
-        requestId: number
+        requestId: number,
+        validationData?: Record<string, any>
     ): Promise<boolean> {
         return validateField({
             schema,
@@ -377,7 +402,7 @@ export class ModelManager<
             field,
             timeout: this.asyncValidationTimeout,
             failFast: this.options.failFast ?? false,
-            data: this.modelData as Record<string, any>,
+            data: validationData ?? (this.modelData as Record<string, any>),
             isCurrent: () => this.validationRequestIds[field] === requestId,
             onError: (error) => this.emit(ModelEvents.VALIDATION_ERROR, error),
         });
@@ -424,4 +449,3 @@ export class ModelManager<
         }
     }
 }
-

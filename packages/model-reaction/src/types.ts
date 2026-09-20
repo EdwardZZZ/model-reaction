@@ -158,4 +158,5 @@ export interface CommitOptions {
     reactionStack?: string[];
     suppressReactions?: boolean;
     changedFields?: Set<string>;
+    validationData?: Record<string, any>;
 }

@@ -60,7 +60,7 @@ m.dispose();                                  // ALWAYS call this in cleanup
 
 6. **Assuming `default` values are validated** — `default`s are written straight into `data` at construction and **bypass validation entirely**. A model can start in an invalid state with an empty `validationErrors`. If initial validity matters (e.g. before reading `data` to submit), call `await validateAll()` first. Note: defaults do **not** bypass reactions — after seeding defaults, the constructor runs one initial reaction pass so derived fields start with a correct computed value (await `settled()` to observe it). Only the *validation* of the seeded defaults is skipped.
 
-7. **Assuming a reaction's `computed` output skips validation** — a reaction writes its result back through the same validate-then-commit path. If the derived field has a `validator` and the computed value fails it, `data` keeps the old value and the computed value lands silently in `dirtyData`. Keep derived-field validators loose, or watch `dirtyData` / `reaction:error`.
+7. **Assuming a reaction's `computed` output skips validation** — a reaction writes its result back through the same validate-then-commit path. If the derived field has a `validator` and the computed value fails it, `data` keeps the old value and the computed value lands silently in `dirtyData`. The optional `reaction.action` fires only when that computed value passes validation — a value that lands in `dirtyData` fires neither the field change nor the `action`. Keep derived-field validators loose, or watch `dirtyData` / `reaction:error`.
 
 ---
 
@@ -166,7 +166,7 @@ These are **deliberate omissions**. Don't add them; don't fake them.
 | Per-field `touched` state in the model | Belongs to UI lifecycle, not to data model. Use component-local `useState` (see §4.3). |
 | `commitDirty(field)` / `resetDirty(field)` | Computed fields that depend on a dirty field could be poisoned. Reset by recreating the model. |
 | Arbitrary side-effect from validators | Validators are pure boolean tests. Use reactions for side-effects. |
-| Synchronous batching across `setField` calls | Each `setField` is its own validation cycle. Use `setFields({ ... })` to batch validation + a single reaction pass. |
+| Synchronous batching across `setField` calls | Each `setField` is its own validation cycle. Use `setFields({ ... })` to batch validation + a single reaction pass — its cross-field validators also see the merged batch, so co-dependent fields can be set together. |
 | True all-or-nothing transactional writes | `setFields` is **not atomic**: each field commits independently; valid fields land in `data` even if a sibling fails (return value is the AND of all fields). Validate first, or reset by recreating the model, if you need all-or-nothing. |
 | Plugin / middleware system | Compose at the schema level (factory functions returning `FieldSchema`). |
 | `model.describe()` schema introspection | The schema literal is already a plain object; iterate it directly (see §4.5). |

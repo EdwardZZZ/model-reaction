@@ -39,6 +39,9 @@ createModel<S extends Record<string, FieldSchema>>(
 > committed through the same validate-then-commit path as `setField`. If the
 > derived field declares a `validator` and the computed value fails it, `data`
 > keeps its previous value and the computed value is stored in `dirtyData`.
+> The reaction's optional `action` runs **only when that computed value passes
+> validation** — a value that fails and lands in `dirtyData` fires neither the
+> derived field's change nor its `action`.
 
 ## Model Methods
 
@@ -55,7 +58,7 @@ createModel<S extends Record<string, FieldSchema>>(
 | Method | Description |
 | --- | --- |
 | `setField(field, value): Promise<boolean>` | Set a single field; returns its validation result. |
-| `setFields(fields): Promise<boolean>` | Batch set multiple fields in one validation + reaction pass; returns the AND of every field's result. **Not atomic** — valid fields commit to `data` even if a sibling field fails validation. |
+| `setFields(fields): Promise<boolean>` | Batch set multiple fields in one validation + reaction pass; returns the AND of every field's result. Cross-field validators see the **merged batch** — each field validates against `data` with all fields in the same call already applied, so co-dependent fields (e.g. `password` / `confirmPassword`) can be set together in one call. **Not atomic** — valid fields commit to `data` even if a sibling field fails validation. |
 
 ### Validation
 

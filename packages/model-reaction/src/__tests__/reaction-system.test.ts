@@ -436,6 +436,45 @@ describe('ReactionSystem - via createModel', () => {
         model.dispose();
     });
 
+    test('does not run reaction action when computed value fails validation', async () => {
+        const action = jest.fn();
+        interface Schema {
+            source: string;
+            target: string;
+        }
+        const schema: Model<Schema> = {
+            source: { type: 'string', default: 'valid' },
+            target: {
+                type: 'string',
+                default: 'valid',
+                validator: [
+                    {
+                        type: 'minLength',
+                        message: 'Target must have at least 3 characters',
+                        validate: (value) =>
+                            typeof value === 'string' && value.length >= 3,
+                    },
+                ],
+                reaction: {
+                    fields: ['source'],
+                    computed: (deps) => deps.source,
+                    action,
+                },
+            },
+        };
+        const model = createModel<Schema>(schema);
+        await model.settled();
+        action.mockClear();
+
+        await model.setField('source', 'no');
+        await model.settled();
+
+        expect(model.getField('target')).toBe('valid');
+        expect(model.getDirtyData()).toHaveProperty('target', 'no');
+        expect(action).not.toHaveBeenCalled();
+        model.dispose();
+    });
+
     test('validateAll fires reactions only for fields that commit a change', async () => {
         const action = jest.fn();
         interface Schema {

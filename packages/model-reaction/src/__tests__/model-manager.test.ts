@@ -167,6 +167,40 @@ describe('ModelManager - Batch Operations (setFields)', () => {
         expect(summary).toContain('age: Must be a number');
         expect(summary).toContain('email: Invalid email format');
     });
+
+    test('validates fields against the merged batch data', async () => {
+        interface Credentials {
+            password: string;
+            confirmPassword: string;
+        }
+        const credentials = createModel<Credentials>({
+            password: { type: 'string', default: 'old-password' },
+            confirmPassword: {
+                type: 'string',
+                default: 'old-password',
+                validator: [
+                    {
+                        type: 'matchesPassword',
+                        message: 'Passwords must match',
+                        validate: (value, data) => value === data?.password,
+                    },
+                ],
+            },
+        });
+
+        const result = await credentials.setFields({
+            password: 'new-password',
+            confirmPassword: 'new-password',
+        });
+
+        expect(result).toBe(true);
+        expect(credentials.data).toEqual({
+            password: 'new-password',
+            confirmPassword: 'new-password',
+        });
+        expect(credentials.validationErrors.confirmPassword).toEqual([]);
+        credentials.dispose();
+    });
 });
 
 describe('ModelManager - validateAll', () => {

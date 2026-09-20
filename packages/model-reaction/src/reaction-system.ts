@@ -137,8 +137,8 @@ export class ReactionSystem {
             }
 
             const computedValue = reaction.computed(dependentValues);
-            await this.callbacks.setValue(field, computedValue, { reactionStack });
-            if (reaction.action) {
+            const committed = await this.callbacks.setValue(field, computedValue, { reactionStack });
+            if (committed && reaction.action) {
                 reaction.action({ ...dependentValues, computed: computedValue });
             }
         } catch (error) {
