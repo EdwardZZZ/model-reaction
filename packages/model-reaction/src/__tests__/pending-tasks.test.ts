@@ -1,4 +1,4 @@
-import { PendingTasks } from '../pending-tasks';
+import { PendingTasks } from '../core/pending-tasks';
 
 describe('PendingTasks', () => {
     let tasks: PendingTasks;

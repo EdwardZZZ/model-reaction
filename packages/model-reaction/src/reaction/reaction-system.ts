@@ -6,9 +6,9 @@ import {
     ModelOptions,
     Reaction,
     ValidationError,
-} from './types';
+} from '../types';
 import { eachReactionEdge } from './reaction-graph';
-import { PendingTasks } from './pending-tasks';
+import { PendingTasks } from '../core/pending-tasks';
 
 /** Internal contract between {@link ReactionSystem} and its owning model. */
 interface ReactionCallbacks {

@@ -1,7 +1,7 @@
-import { eachReactionEdge } from '../reaction-graph';
-import { ReactionSystem } from '../reaction-system';
-import { PendingTasks } from '../pending-tasks';
-import { buildDependencyGraph } from '../devtools-hook';
+import { eachReactionEdge } from '../reaction/reaction-graph';
+import { ReactionSystem } from '../reaction/reaction-system';
+import { PendingTasks } from '../core/pending-tasks';
+import { buildDependencyGraph } from '../devtools/devtools-hook';
 import type { Model } from '../types';
 
 /**

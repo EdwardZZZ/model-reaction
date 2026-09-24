@@ -19,8 +19,8 @@
  *     read the model on demand. Serialization for cross-realm transport is the
  *     DevTools agent's concern, not the library's.
  */
-import type { FieldSchema, Model, ValidationError } from './types';
-import { eachReactionEdge } from './reaction-graph';
+import type { FieldSchema, Model, ValidationError } from '../types';
+import { eachReactionEdge } from '../reaction/reaction-graph';
 
 /** The `globalThis` key the DevTools front-end installs its hook under. */
 export const DEVTOOLS_HOOK_KEY = '__MODEL_REACTION_DEVTOOLS_HOOK__';

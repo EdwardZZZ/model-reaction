@@ -33,7 +33,7 @@ import {
     buildDependencyGraph,
     buildFieldInfo,
     getDevtoolsHook,
-} from './devtools-hook';
+} from './devtools/devtools-hook';
 
 export function createModel<T extends Record<string, any>>(
     schema: Model<T>,

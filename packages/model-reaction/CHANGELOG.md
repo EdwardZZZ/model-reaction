@@ -40,7 +40,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now reflects the computed value from the start.
 
 ### Internal
-- Extracted `eachReactionEdge` (`src/reaction-graph.ts`) as the single
+- Extracted `eachReactionEdge` (`src/reaction/reaction-graph.ts`) as the single
   definition of how a schema's `reaction.fields` are read as dependency edges.
   Both the runtime reaction index (`ReactionSystem.collectReactions`) and the
   DevTools dependency graph consume it, so they cannot diverge; a lock-in test

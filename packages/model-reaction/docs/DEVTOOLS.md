@@ -66,7 +66,7 @@ panel           (React UI: data tree · dependency graph · timeline)
 ```
 
 The opt-in wrapper lives in [src/devtools.ts](../src/devtools.ts) and the hook
-contract it uses in [src/devtools-hook.ts](../src/devtools-hook.ts); the
+contract it uses in [src/devtools/devtools-hook.ts](../src/devtools/devtools-hook.ts); the
 extension lives entirely under [devtools/](../../devtools). The package root
 (`model-reaction`) imports **none** of this, so apps that never opt in ship zero
 DevTools code.
@@ -139,7 +139,7 @@ model only through its public API (`data` / `getDirtyData()` /
 `validationErrors` / `on`) plus the schema it was handed — it needs no
 privileged access to `ModelManager` internals.
 
-The contract (from [src/devtools-hook.ts](../src/devtools-hook.ts)):
+The contract (from [src/devtools/devtools-hook.ts](../src/devtools/devtools-hook.ts)):
 
 ```ts
 interface ModelReactionDevtoolsHook {
@@ -154,7 +154,7 @@ change timeline. The extension's page agent implements this hook; the DevTools
 entry only ever *consumes* it.
 
 The dependency graph is derived from the schema through a shared primitive,
-[`eachReactionEdge`](../src/reaction-graph.ts), which is the single definition of
+[`eachReactionEdge`](../src/reaction/reaction-graph.ts), which is the single definition of
 how `reaction.fields` is read as edges. The core reaction scheduler
 (`collectReactions`) uses the same primitive, and a lock-in test
 ([reaction-graph.test.ts](../src/__tests__/reaction-graph.test.ts)) asserts the

@@ -22,22 +22,13 @@ export function deepEqual(
 ): boolean {
     if (a === b) return true;
 
-    if (
-        a === null ||
-        b === null ||
-        typeof a !== 'object' ||
-        typeof b !== 'object'
-    ) {
+    if (a === null || b === null || typeof a !== 'object' || typeof b !== 'object') {
         return false;
     }
 
     // Date / RegExp are leaves — compare structurally without cycle tracking.
     if (a instanceof Date || b instanceof Date) {
-        return (
-            a instanceof Date &&
-            b instanceof Date &&
-            a.getTime() === b.getTime()
-        );
+        return a instanceof Date && b instanceof Date && a.getTime() === b.getTime();
     }
 
     if (a instanceof RegExp || b instanceof RegExp) {

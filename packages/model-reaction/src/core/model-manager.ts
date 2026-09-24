@@ -8,13 +8,13 @@ import {
     ModelOptions,
     ModelReturn,
     ValidationError,
-} from './types';
-import { validateField } from './validate-field';
-import { cloneDefault } from './clone-default';
-import { deepEqual } from './deep-equal';
+} from '../types';
+import { validateField } from '../validation/validate-field';
+import { cloneDefault } from '../utils/clone-default';
+import { deepEqual } from '../utils/deep-equal';
 import { EventEmitter } from './event-emitter';
 import { PendingTasks } from './pending-tasks';
-import { ReactionSystem } from './reaction-system';
+import { ReactionSystem } from '../reaction/reaction-system';
 
 /**
  * Core class behind `createModel(...)`.

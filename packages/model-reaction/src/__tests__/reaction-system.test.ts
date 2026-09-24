@@ -1,7 +1,7 @@
 import { createModel, Model } from '../index';
-import { ReactionSystem } from '../reaction-system';
-import { ModelManager } from '../model-manager';
-import { PendingTasks } from '../pending-tasks';
+import { ReactionSystem } from '../reaction/reaction-system';
+import { ModelManager } from '../core/model-manager';
+import { PendingTasks } from '../core/pending-tasks';
 
 describe('ReactionSystem - via createModel', () => {
     beforeEach(() => {

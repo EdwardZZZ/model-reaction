@@ -1,4 +1,4 @@
-import type { Model, Reaction } from './types';
+import type { Model, Reaction } from '../types';
 
 /**
  * The single definition of how a schema's `reaction` declarations are read as

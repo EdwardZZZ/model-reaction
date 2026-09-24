@@ -10,7 +10,7 @@ import {
     type DevtoolsChange,
     type DevtoolsModelInstance,
     type ModelReactionDevtoolsHook,
-} from '../devtools-hook';
+} from '../devtools/devtools-hook';
 import type { Model } from '../types';
 
 interface Person {

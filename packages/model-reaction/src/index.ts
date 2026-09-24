@@ -5,7 +5,7 @@ import {
     ModelOptions,
     ModelReturn,
 } from './types';
-import { ModelManager } from './model-manager';
+import { ModelManager } from './core/model-manager';
 
 // Export common types and validation rules
 export type {
@@ -23,11 +23,11 @@ export type {
     InferModelData,
 } from './types';
 export { ModelEvents } from './types';
-export { ValidationRules, Rule } from './rules';
+export { ValidationRules, Rule } from './validation/rules';
 export {
     formatValidationErrors,
     type ValidationErrorFormatter,
-} from './format-validation-errors';
+} from './validation/format-validation-errors';
 
 /**
  * Create a model instance.

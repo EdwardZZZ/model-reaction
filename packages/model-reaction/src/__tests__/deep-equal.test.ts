@@ -1,4 +1,4 @@
-import { deepEqual } from '../deep-equal';
+import { deepEqual } from '../utils/deep-equal';
 
 describe('deepEqual', () => {
     test('should handle primitive types correctly', () => {

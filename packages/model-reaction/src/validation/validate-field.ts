@@ -2,7 +2,7 @@ import {
     FieldSchema,
     ValidationError,
     Validator,
-} from './types';
+} from '../types';
 
 /**
  * Run all validators of a single field.

@@ -1,6 +1,6 @@
-import { validateField } from '../validate-field';
+import { validateField } from '../validation/validate-field';
 import { FieldSchema } from '../types';
-import { Rule, ValidationRules } from '../rules';
+import { Rule, ValidationRules } from '../validation/rules';
 import { createModel, Model } from '../index';
 
 describe('validateField (unit)', () => {

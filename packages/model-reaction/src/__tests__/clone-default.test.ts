@@ -1,4 +1,4 @@
-import { cloneDefault } from '../clone-default';
+import { cloneDefault } from '../utils/clone-default';
 
 describe('cloneDefault', () => {
     // -------------------------------------------------------------------------

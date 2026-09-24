@@ -1,4 +1,4 @@
-import { ModelManager } from '../model-manager';
+import { ModelManager } from '../core/model-manager';
 import {
     createModel,
     formatValidationErrors,

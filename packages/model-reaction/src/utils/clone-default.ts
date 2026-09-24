@@ -7,10 +7,7 @@
  * leaves here, matching how `deepEqual` compares them. Cyclic structures are
  * guarded via a `WeakMap`.
  */
-export function cloneDefault<V>(
-    value: V,
-    seen: WeakMap<object, any> = new WeakMap()
-): V {
+export function cloneDefault<V>(value: V, seen: WeakMap<object, any> = new WeakMap()): V {
     if (value === null || typeof value !== 'object') return value;
     if (value instanceof Date || value instanceof RegExp) return value;
 
@@ -31,10 +28,7 @@ export function cloneDefault<V>(
     const copy: Record<string, unknown> = {};
     seen.set(value as object, copy);
     for (const key of Object.keys(value as Record<string, unknown>)) {
-        copy[key] = cloneDefault(
-            (value as Record<string, unknown>)[key],
-            seen
-        );
+        copy[key] = cloneDefault((value as Record<string, unknown>)[key], seen);
     }
     return copy as unknown as V;
 }

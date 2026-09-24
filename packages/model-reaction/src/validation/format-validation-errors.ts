@@ -1,4 +1,4 @@
-import { ValidationError } from './types';
+import { ValidationError } from '../types';
 
 export type ValidationErrorFormatter = (error: ValidationError) => string;
 

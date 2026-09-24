@@ -6,7 +6,7 @@ import {
     getDevtoolsHook,
     type DevtoolsModelInstance,
     type ModelReactionDevtoolsHook,
-} from '../devtools-hook';
+} from '../devtools/devtools-hook';
 import { Model, ValidationRules } from '../index';
 
 /** Restore the global hook slot after each test, whatever it was. */

@@ -62,7 +62,7 @@ panel           （React UI：数据树 · 依赖关系图 · 时间线）
 ```
 
 按需开启的包装入口见 [src/devtools.ts](../src/devtools.ts)，其使用的 hook 契约见
-[src/devtools-hook.ts](../src/devtools-hook.ts)；扩展整体位于 [devtools/](../../devtools)
+[src/devtools/devtools-hook.ts](../src/devtools/devtools-hook.ts)；扩展整体位于 [devtools/](../../devtools)
 目录下。包根（`model-reaction`）**不引用**其中任何代码，因此从不开启的应用打包里没有任何
 DevTools 代码。
 
@@ -123,7 +123,7 @@ node build.mjs
 的公共 API（`data` / `getDirtyData()` / `validationErrors` / `on`）以及它收到的 schema 来
 读取模型 —— 无需访问 `ModelManager` 的任何内部。
 
-契约定义（见 [src/devtools-hook.ts](../src/devtools-hook.ts)）：
+契约定义（见 [src/devtools/devtools-hook.ts](../src/devtools/devtools-hook.ts)）：
 
 ```ts
 interface ModelReactionDevtoolsHook {
@@ -136,7 +136,7 @@ interface ModelReactionDevtoolsHook {
 外加一个推送式的 `subscribe` 用于变更时间线。扩展的页面 agent 实现该 hook；DevTools 入口
 只负责**消费**它。
 
-依赖图由 schema 经一个共享原语 [`eachReactionEdge`](../src/reaction-graph.ts) 推导，它是
+依赖图由 schema 经一个共享原语 [`eachReactionEdge`](../src/reaction/reaction-graph.ts) 推导，它是
 「如何把 `reaction.fields` 读成边」的唯一定义处。核心的 reaction 调度器（`collectReactions`）
 使用同一个原语，且有一个锁定测试
 （[reaction-graph.test.ts](../src/__tests__/reaction-graph.test.ts)）断言：原语、运行时索引、
