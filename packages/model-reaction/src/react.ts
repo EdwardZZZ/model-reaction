@@ -64,6 +64,46 @@ export function shallow<T>(a: T, b: T): boolean {
 }
 
 /**
+ * Build a render-local snapshot getter while retaining the last committed
+ * selection for equality checks when selector references change.
+ */
+function useSelectionSnapshot<T extends Record<string, any>, R>(
+    model: ModelReturn<T>,
+    selector: (data: Readonly<T>) => R,
+    isEqual: (a: R, b: R) => boolean
+): () => R {
+    const committedSelectionRef = useRef<{ value: R } | null>(null);
+    const getSnapshot = useMemo(() => {
+        let previous: { data: Readonly<T>; value: R } | null = null;
+
+        return (): R => {
+            const data = model.data;
+            if (previous !== null && Object.is(previous.data, data)) {
+                return previous.value;
+            }
+
+            const nextSelection = selector(data);
+            const committed = committedSelectionRef.current;
+            const selection =
+                committed !== null && isEqual(committed.value, nextSelection)
+                    ? committed.value
+                    : nextSelection;
+
+            previous = { data, value: selection };
+            return selection;
+        };
+    }, [model, selector, isEqual]);
+
+    // Only committed renders may update the cross-render equality baseline.
+    // The memoized getter above keeps speculative render state local.
+    useEffect(() => {
+        committedSelectionRef.current = { value: getSnapshot() };
+    });
+
+    return getSnapshot;
+}
+
+/**
  * Subscribe a component to a single field. The component re-renders only
  * when that field's committed value changes.
  */
@@ -86,42 +126,32 @@ export function useModelField<T extends Record<string, any>, K extends keyof T>(
  * Subscribe a component to a derived value. The component re-renders only
  * when `selector(data)` changes (compared via `isEqual`, default Object.is).
  *
- * The selector and isEqual references are captured on first call; if you
- * pass new functions each render, wrap them in `useCallback`.
+ * A new selector reference is evaluated immediately against the current
+ * snapshot. Wrap expensive selectors in `useCallback`; use `useModelComputed`
+ * when you want to pass an inline selector that closes over render values.
  */
 export function useModelSelector<T extends Record<string, any>, R>(
     model: ModelReturn<T>,
-    selector: (data: T) => R,
+    selector: (data: Readonly<T>) => R,
     isEqual: (a: R, b: R) => boolean = Object.is
 ): R {
-    const cacheRef = useRef<R | undefined>(undefined);
-    const initialized = useRef(false);
-    if (!initialized.current) {
-        cacheRef.current = selector(model.data);
-        initialized.current = true;
-    }
+    const getSnapshot = useSelectionSnapshot(model, selector, isEqual);
 
     const subscribe = useCallback(
         (notify: () => void) =>
             model.subscribe(
                 selector,
-                (next) => {
-                    cacheRef.current = next;
-                    notify();
-                },
+                () => notify(),
                 isEqual
             ),
         [model, selector, isEqual]
     );
-    const getSnapshot = useCallback(() => cacheRef.current as R, []);
     return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 }
 
 /**
- * Same shape as {@link useModelSelector}, but with **ref-locked** selector
- * semantics: the `selector` and `isEqual` references are stored in refs
- * that are refreshed on every render, so changing them does **not** tear
- * down and recreate the underlying subscription.
+ * Same shape as {@link useModelSelector}, but the subscription stays stable
+ * while the selector is read from the latest render snapshot.
  *
  * Use this variant when:
  *   - The selector is an inline arrow function and you don't want to pay
@@ -130,20 +160,16 @@ export function useModelSelector<T extends Record<string, any>, R>(
  *     and you want those updates to be reflected without resubscribing.
  *
  * Trade-offs vs. {@link useModelSelector}:
- *   - The selector is re-run on every render (via `getSnapshot`), so keep
- *     it cheap — heavy selectors should still memoise inputs.
+ *   - The selector is re-run when the model snapshot or selector changes, so
+ *     keep it cheap — heavy selectors should still memoise inputs.
  *   - Notifications fire on any field change; the equality check happens
  *     in `getSnapshot` instead of inside the model subscription, so the
  *     model layer can't dedupe before reaching React.
- *   - Ref writes happen during render. This is the same pattern used by
- *     zustand and is concurrent-safe, but keep selectors pure.
  *
- * ⚠️ If the selector returns a **fresh object/array each call**
- * (`(d) => d.items.map(...)`, `(d) => ({...})`), you MUST pass an `isEqual`
- * (e.g. `shallow`). With the default `Object.is`, every render yields a new
- * reference, the per-render cache never hits, and React aborts with
- * "Maximum update depth exceeded". Selectors returning a primitive or a
- * stable reference are fine.
+ * If the selector returns a **fresh object/array** (`(d) => d.items.map(...)`,
+ * `(d) => ({...})`), pass an `isEqual` (e.g. `shallow`) when equivalent
+ * selections should keep the same reference across model updates. With the
+ * default `Object.is`, each changed snapshot produces a new selection.
  *
  * ```tsx
  * function Row({ id }: { id: string }) {
@@ -156,30 +182,10 @@ export function useModelSelector<T extends Record<string, any>, R>(
  */
 export function useModelComputed<T extends Record<string, any>, R>(
     model: ModelReturn<T>,
-    selector: (data: T) => R,
+    selector: (data: Readonly<T>) => R,
     isEqual: (a: R, b: R) => boolean = Object.is
 ): R {
-    // Refresh refs every render so closure-captured variables stay current
-    // without forcing a resubscribe.
-    const selectorRef = useRef(selector);
-    const isEqualRef = useRef(isEqual);
-    selectorRef.current = selector;
-    isEqualRef.current = isEqual;
-
-    // Cache the last returned reference so `useSyncExternalStore` sees a
-    // stable value when the equality check passes. Using a one-slot box
-    // lets us distinguish "uninitialized" from `undefined as R`.
-    const cacheRef = useRef<{ value: R } | null>(null);
-
-    const getSnapshot = useCallback((): R => {
-        const next = selectorRef.current(model.data);
-        const cached = cacheRef.current;
-        if (cached === null || !isEqualRef.current(cached.value, next)) {
-            cacheRef.current = { value: next };
-            return next;
-        }
-        return cached.value;
-    }, [model]);
+    const getSnapshot = useSelectionSnapshot(model, selector, isEqual);
 
     const subscribe = useCallback(
         (notify: () => void) => model.on(ModelEvents.FIELD_CHANGE, notify),
@@ -200,46 +206,23 @@ export function useModelFields<
     T extends Record<string, any>,
     K extends keyof T,
 >(model: ModelReturn<T>, fields: readonly K[]): Pick<T, K> {
-    // Stable key so we can rebuild the cache when the list of fields changes.
-    const key = (fields as readonly (string | number | symbol)[]).join('\u0000');
-
-    const pick = useCallback((data: T): Pick<T, K> => {
+    // JSON encoding handles arbitrary string field names without delimiter
+    // collisions and keeps inline field arrays stable when their contents match.
+    const key = JSON.stringify(fields);
+    const pick = useCallback((data: Readonly<T>): Pick<T, K> => {
         const out = {} as Pick<T, K>;
         for (const f of fields) out[f] = data[f];
         return out;
         // `key` covers `fields` content; intentional dep list.
-    }, [model, key]);
+    }, [key]);
 
-    const cacheRef = useRef<Pick<T, K> | undefined>(undefined);
-    const lastKeyRef = useRef<string | undefined>(undefined);
-    if (lastKeyRef.current !== key) {
-        cacheRef.current = pick(model.data);
-        lastKeyRef.current = key;
-    }
-
-    const subscribe = useCallback(
-        (notify: () => void) =>
-            model.subscribe(
-                pick,
-                (next) => {
-                    cacheRef.current = next;
-                    notify();
-                },
-                shallow
-            ),
-        [model, pick]
-    );
-    const getSnapshot = useCallback(
-        () => cacheRef.current as Pick<T, K>,
-        []
-    );
-    return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+    return useModelSelector(model, pick, shallow);
 }
 
 /** Metadata returned alongside a field value by `useModelFieldState`. */
 export interface FieldMeta {
     /** Validation errors for this field (empty array if none). */
-    errors: ValidationError[];
+    errors: readonly ValidationError[];
     /** First error message, or null. Convenient for inline UI. */
     error: string | null;
     /** True while an async setField is in flight from this hook. */
@@ -278,79 +261,85 @@ export function useModelFieldState<
 ): [T[K], FieldSetter<T[K]>, FieldMeta] {
     const value = useModelField(model, field);
 
-    // Errors: subscribed via the same field-change channel. We bump a counter
-    // whenever this field changes so the snapshot read sees the latest array.
-    const errorsSubscribe = useCallback(
+    const metaSubscribe = useCallback(
         (notify: () => void) => {
-            const handler = (e: { field: string }): void => {
-                if (e.field === field) notify();
-            };
-            const unsubscribeChange = model.on(
-                ModelEvents.FIELD_CHANGE,
-                handler
-            );
-            const validationHandler = (e: { field?: string }): void => {
+            const validationHandler = (e: { field: string }): void => {
                 if (e.field === field) notify();
             };
             const unsubscribeError = model.on(
                 ModelEvents.VALIDATION_ERROR,
                 validationHandler
             );
-            const unsubscribeComplete = model.on(
-                ModelEvents.VALIDATION_COMPLETE,
-                notify
+            const unsubscribeFieldValidation = model.on(
+                ModelEvents.FIELD_VALIDATION_COMPLETE,
+                validationHandler
+            );
+            const unsubscribeDirty = model.on(
+                ModelEvents.DIRTY_DATA_CLEARED,
+                (e) => {
+                    if (e.fields.includes(field as keyof T & string)) notify();
+                }
             );
             return () => {
-                unsubscribeChange();
                 unsubscribeError();
-                unsubscribeComplete();
+                unsubscribeFieldValidation();
+                unsubscribeDirty();
             };
         },
         [model, field]
     );
-    const errorsSnapshot = useCallback(
-        () => model.validationErrors[field as string] ?? EMPTY_ERRORS,
-        [model, field]
-    );
-    const errors = useSyncExternalStore(
-        errorsSubscribe,
-        errorsSnapshot,
-        errorsSnapshot
-    );
+    const metaSnapshot = useMemo(() => {
+        let previous: {
+            errors: readonly ValidationError[];
+            dirty: boolean;
+        } | null = null;
 
-    const dirtySnapshot = useCallback(
-        () => Object.prototype.hasOwnProperty.call(model.getDirtyData(), field),
-        [model, field]
-    );
-    const dirty = useSyncExternalStore(
-        errorsSubscribe,
-        dirtySnapshot,
-        dirtySnapshot
+        return () => {
+            const errors = model.validationErrors[field as string] ?? EMPTY_ERRORS;
+            const dirty = Object.prototype.hasOwnProperty.call(
+                model.getDirtyData(),
+                field
+            );
+            if (
+                previous !== null &&
+                previous.errors === errors &&
+                previous.dirty === dirty
+            ) {
+                return previous;
+            }
+            previous = { errors, dirty };
+            return previous;
+        };
+    }, [model, field]);
+    const { errors, dirty } = useSyncExternalStore(
+        metaSubscribe,
+        metaSnapshot,
+        metaSnapshot
     );
 
     const [validating, setValidating] = useState(false);
+    const validatingCount = useRef(0);
 
     const setter = useCallback<FieldSetter<T[K]>>(
         async (next) => {
+            validatingCount.current++;
             setValidating(true);
             try {
                 return await model.setField(field, next);
             } finally {
-                setValidating(false);
+                validatingCount.current--;
+                setValidating(validatingCount.current > 0);
             }
         },
         [model, field]
     );
 
-    const meta = useMemo<FieldMeta>(
-        () => ({
-            errors,
-            error: errors.length > 0 && errors[0] ? errors[0].message : null,
-            validating,
-            dirty,
-        }),
-        [errors, validating, dirty]
-    );
+    const meta: FieldMeta = {
+        errors,
+        error: errors[0]?.message ?? null,
+        validating,
+        dirty,
+    };
 
     return [value, setter, meta];
 }
@@ -442,7 +431,7 @@ export function useDraftField<
 
     // Seed once on mount: pending dirty value if any, else committed value.
     const [draft, setDraft] = useState(() => {
-        const pending = model.getDirtyData()[field];
+        const pending = (model.getDirtyData() as Partial<T>)[field];
         return display((pending ?? committed) as T[K]);
     });
     const [touched, setTouched] = useState(false);

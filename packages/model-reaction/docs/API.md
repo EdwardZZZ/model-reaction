@@ -49,9 +49,17 @@ createModel<S extends Record<string, FieldSchema>>(
 
 | Method | Description |
 | --- | --- |
-| `getField(field)` | Get a field's current value. |
-| `get data` | Get all field values as an object. |
-| `get validationErrors` | Get all current validation errors keyed by field. |
+| `getField(field)` | Read the current value of one field. |
+| `get data` | Read a stable, shallow-frozen copy of the field map. Fields without defaults may be `undefined`. |
+| `get validationErrors` | Read frozen validation errors grouped by field. |
+
+This library supports shallow model data and tracks field-level replacements.
+Object, array, and mutable built-in
+field values such as `Date` are opaque to the model: mutating them in place is
+not observed and does not trigger validation, reactions, or subscriptions.
+Replace the whole field value with `setField()` or `setFields()` when it changes.
+The outer `data` and dirty-data records are shallow-frozen; field values
+themselves are not frozen.
 
 ### Write
 
@@ -65,7 +73,7 @@ createModel<S extends Record<string, FieldSchema>>(
 | Method | Description |
 | --- | --- |
 | `validateAll(): Promise<boolean>` | Validate every field and return whether all passed. |
-| `getDirtyData(): Partial<T>` | Get values that failed validation. |
+| `getDirtyData(): Partial<T>` | Get a stable, shallow-frozen snapshot of values that failed validation. |
 | `clearDirtyData(): void` | Clear all dirty data records. |
 
 ### Subscription
@@ -114,6 +122,8 @@ Subscribe via `model.on(eventName, handler)`.
 | Event | Triggered when |
 | --- | --- |
 | `field:change` | A field value changes. |
+| `field:validation-complete` | A field validation finishes, including batch operations and reactions, even when its value did not change. Payload includes `field`, `isValid`, and whether the field remains dirty. |
+| `dirty-data:cleared` | `clearDirtyData()` removes one or more dirty values. Payload lists the affected fields. |
 | `validation:complete` | A validation pass finishes. |
 | `validation:error` | A validation rule fails. |
 | `reaction:error` | A reaction throws or rejects. |

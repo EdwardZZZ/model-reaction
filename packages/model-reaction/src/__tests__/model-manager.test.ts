@@ -1110,7 +1110,6 @@ describe('createModel - mutable default isolation', () => {
         const m1 = createModel(schema);
         const m2 = createModel(schema);
 
-        // Mutating one instance's default array must not leak into another.
         m1.getField('tags').push('x');
 
         expect(m1.getField('tags')).toEqual(['x']);

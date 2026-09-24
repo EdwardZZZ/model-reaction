@@ -208,4 +208,24 @@ const m = createModel({
   ok:   { type: 'boolean' as const, default: false },
 });
 // m.data is typed as { name: string; age: number; ok: boolean }
+
+// Without a default, the inferred value also includes undefined.
+const optional = createModel({ note: { type: 'string' as const } });
+// optional.data.note is string | undefined
+
+// `values` gives an enum field a useful inferred union. Runtime validation
+// still comes from the field's validators.
+const status = createModel({
+  state: {
+    type: 'enum' as const,
+    values: ['draft', 'published'] as const,
+    default: 'draft',
+  },
+});
+// status.data.state is 'draft' | 'published'
 ```
+
+Schema inference describes the runtime value, including a mismatched default
+because defaults intentionally bypass validation. Explicit `createModel<T>` is
+an assertion by the caller that the schema initializes that shape. For object
+and array fields without useful defaults, provide an explicit data type.

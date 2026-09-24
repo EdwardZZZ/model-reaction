@@ -47,9 +47,13 @@ createModel<S extends Record<string, FieldSchema>>(
 
 | 方法 | 说明 |
 | --- | --- |
-| `getField(field)` | 获取某个字段的当前值 |
-| `get data` | 获取所有字段值组成的对象 |
-| `get validationErrors` | 获取按字段分组的当前验证错误 |
+| `getField(field)` | 读取某个字段的当前值 |
+| `get data` | 读取字段映射的稳定浅冻结副本；没有默认值的字段可能为 `undefined` |
+| `get validationErrors` | 读取按字段分组的只读验证错误 |
+
+本库只支持浅层数据，按字段替换跟踪变化。对象、数组和 Date 等可变内建对象字段值对模型来说是整体：
+原地修改不会被观察，也不会触发校验、reactions 或订阅。值变化时请用 `setField()`
+或 `setFields()` 整体替换。`data` 和脏数据记录的外层对象会浅冻结，字段值本身不会被冻结。
 
 ### 写入
 
@@ -63,7 +67,7 @@ createModel<S extends Record<string, FieldSchema>>(
 | 方法 | 说明 |
 | --- | --- |
 | `validateAll(): Promise<boolean>` | 验证所有字段，返回是否全部通过 |
-| `getDirtyData(): Partial<T>` | 获取验证失败的脏数据 |
+| `getDirtyData(): Partial<T>` | 获取稳定的浅冻结脏数据快照 |
 | `clearDirtyData(): void` | 清空所有脏数据记录 |
 
 ### 订阅
@@ -107,6 +111,8 @@ createModel<S extends Record<string, FieldSchema>>(
 | 事件 | 触发时机 |
 | --- | --- |
 | `field:change` | 字段值变化时 |
+| `field:validation-complete` | 字段校验完成时触发，包括批量操作和 reactions；即使字段值没有变化也会触发，payload 包含 `field`、`isValid` 和字段是否仍为 dirty |
+| `dirty-data:cleared` | `clearDirtyData()` 清除一个或多个脏值时触发；payload 列出受影响字段 |
 | `validation:complete` | 一轮验证完成时 |
 | `validation:error` | 某条验证规则失败时 |
 | `reaction:error` | 反应执行抛出错误或 Promise 拒绝时 |

@@ -12,7 +12,7 @@
 - **依赖反应** —— 字段在依赖变化时自动重算，可选防抖。
 - **脏数据跟踪** —— 验证失败的值单独保存，便于清理。
 - **类型化事件** —— 订阅字段变化、验证流程和反应错误。
-- **类型安全** —— Schema 完整驱动 `model.data` 类型。
+- **类型安全** —— Schema 字面量推导字段类型；没有默认值的字段包含 `undefined`。
 - **可选 React 适配** —— 细粒度、selector 级订阅；核心入口零 React 依赖。
 
 ### 面向 AI 友好设计
@@ -68,6 +68,10 @@ console.log(ok, user.data); // true { name: 'John', age: 30 }
 
 始终 `await setField(...)`，确保验证完成后再读取 `data`；
 当 model 的 owner 卸载时，始终在 cleanup 路径里调用 `dispose()`。
+模型只支持浅层数据，按字段跟踪变化。`data` 和 `getDirtyData()` 返回稳定的浅冻结快照；
+`getField()` 返回字段值。对于对象、数组或 Date 等可变内建对象字段，请通过
+`setField()` 或 `setFields()` 整体替换；原地修改不会被观察，也不会触发校验或
+reactions。
 
 ## 核心概念
 
@@ -110,6 +114,9 @@ off(); // 停止监听
 ```
 
 完整事件列表见 [docs/API_CN.md](docs/API_CN.md#事件)。
+
+`field:validation-complete` 会报告每个字段的校验结果，包括批量操作和 reactions，
+即使字段值没有变化；`dirty-data:cleared` 会报告 `clearDirtyData()` 清理的字段。
 
 ## React 绑定
 

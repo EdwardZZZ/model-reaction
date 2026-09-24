@@ -39,9 +39,28 @@ export async function validateField(
     if (!schema.validator) return true;
 
     const ctxData = data ?? {};
-    const applicable = schema.validator.filter(
-        (v) => !v.condition || v.condition(ctxData)
-    );
+    const applicable: Validator[] = [];
+    let conditionFailed = false;
+    for (const validator of schema.validator) {
+        try {
+            if (!validator.condition || validator.condition(ctxData)) {
+                applicable.push(validator);
+            }
+        } catch (err) {
+            conditionFailed = true;
+            if (!isCurrent || isCurrent()) {
+                const detail = err instanceof Error ? err.message : String(err);
+                pushValidationError(
+                    field,
+                    'condition_error',
+                    `Validation condition failed: ${detail}`,
+                    errors,
+                    onError
+                );
+            }
+            if (failFast) return false;
+        }
+    }
 
     let isValid = true;
 
@@ -80,7 +99,7 @@ export async function validateField(
         isValid = results.every(Boolean);
     }
 
-    return isValid;
+    return isValid && !conditionFailed;
 }
 
 async function runValidator(
@@ -161,5 +180,5 @@ function pushValidationError(
     if (!errors[field]) errors[field] = [];
     const error = { field, rule, message };
     errors[field].push(error);
-    onError?.(error);
+    onError?.({ ...error });
 }

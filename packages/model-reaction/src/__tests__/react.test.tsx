@@ -73,7 +73,7 @@ function makeOrderModel() {
  */
 function useTracked<T extends Record<string, any>, R>(
     model: ModelReturn<T>,
-    selector: (d: T) => R,
+    selector: (d: Readonly<T>) => R,
     isEqual?: (a: R, b: R) => boolean
 ) {
     const renders = useRef(0);
@@ -121,7 +121,7 @@ describe('useModelSelector', () => {
         cart.dispose();
     });
 
-    it('re-subscribes when the selector reference changes', async () => {
+    it('updates the snapshot when the selector reference changes', async () => {
         const cart = makeCart();
         let subscribeCalls = 0;
         const originalSubscribe = cart.subscribe;
@@ -135,23 +135,25 @@ describe('useModelSelector', () => {
         function Total() {
             const [bump, setBumpState] = useState(0);
             setBump = setBumpState;
-            // Intentionally unstable: a *new* selector each render whose
-            // identity changes whenever `bump` changes.
+            // The selector changes with a render value and produces a new
+            // result immediately as the subscription is rebuilt.
             const selector = useCallback(
-                (d: Cart) => d.qty * d.price + bump * 0,
+                (d: Cart) => d.qty * d.price + bump,
                 [bump],
             );
             const total = useModelSelector(cart, selector);
             return <span>{total}</span>;
         }
 
-        render(<Total />);
+        const { getByText } = render(<Total />);
+        expect(getByText('100')).toBeTruthy();
         const before = subscribeCalls;
         expect(before).toBeGreaterThan(0);
 
         await act(async () => {
             setBump(1);
         });
+        expect(getByText('101')).toBeTruthy();
         expect(subscribeCalls).toBeGreaterThan(before);
 
         cart.dispose();

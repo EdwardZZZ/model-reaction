@@ -93,7 +93,14 @@ export const ValidationRules = {
             (v) => (isString(v) || Array.isArray(v)) && v.length <= max
         ),
     pattern: (regex: RegExp, message = 'Invalid format') =>
-        new Rule('pattern', message, (v) => isString(v) && regex.test(v)),
+        new Rule('pattern', message, (v) => {
+            if (!isString(v)) return false;
+            // Global and sticky regexes mutate lastIndex during test(). Start
+            // from zero on every validation without mutating the schema rule.
+            const stableRegex = new RegExp(regex.source, regex.flags);
+            stableRegex.lastIndex = 0;
+            return stableRegex.test(v);
+        }),
     email: new Rule(
         'email',
         'Invalid email format',

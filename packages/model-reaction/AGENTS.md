@@ -46,7 +46,7 @@ m.dispose();                                  // ALWAYS call this in cleanup
 
 ---
 
-## 3. The 7 Pitfalls You'll Hit
+## 3. The 8 Pitfalls You'll Hit
 
 1. **Forgetting `await`** — `setField` returns `Promise<boolean>` (true = passed validation). If you don't await, validation may still be in-flight.
 
@@ -61,6 +61,7 @@ m.dispose();                                  // ALWAYS call this in cleanup
 6. **Assuming `default` values are validated** — `default`s are written straight into `data` at construction and **bypass validation entirely**. A model can start in an invalid state with an empty `validationErrors`. If initial validity matters (e.g. before reading `data` to submit), call `await validateAll()` first. Note: defaults do **not** bypass reactions — after seeding defaults, the constructor runs one initial reaction pass so derived fields start with a correct computed value (await `settled()` to observe it). Only the *validation* of the seeded defaults is skipped.
 
 7. **Assuming a reaction's `computed` output skips validation** — a reaction writes its result back through the same validate-then-commit path. If the derived field has a `validator` and the computed value fails it, `data` keeps the old value and the computed value lands silently in `dirtyData`. The optional `reaction.action` fires only when that computed value passes validation — a value that lands in `dirtyData` fires neither the field change nor the `action`. Keep derived-field validators loose, or watch `dirtyData` / `reaction:error`.
+8. **Mutating a field value in place** — the model tracks field-level replacement only. The outer `data` and dirty-data records are shallow-frozen, but object/array field values are not observed or frozen. Replace a whole field with `setField()` / `setFields()` to run validation and reactions.
 
 ---
 

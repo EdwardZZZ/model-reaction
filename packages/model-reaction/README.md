@@ -12,7 +12,7 @@ A type-safe data model library for TypeScript: validation, dependency reactions,
 - **Reactions** — fields auto-update when their dependencies change, with optional debouncing.
 - **Dirty data** — failed values are tracked separately and easy to clear.
 - **Typed events** — subscribe to field changes, validation, and reaction errors.
-- **Type-safe** — the schema fully drives `model.data` typing.
+- **Type-safe** — schema literals infer field values; fields without defaults include `undefined`.
 - **Optional React adapter** — fine-grained, selector-level subscriptions; no React in the core.
 
 ### AI-Friendly by Design
@@ -69,6 +69,11 @@ console.log(ok, user.data); // true { name: 'John', age: 30 }
 
 Always `await setField(...)` so validation has settled before you read `data`;
 always call `dispose()` from your cleanup path when the model's owner unmounts.
+The model supports shallow data and tracks changes at the field level. `data` and `getDirtyData()` return
+stable, shallow-frozen snapshots; `getField()` returns the field value. For an
+object, array, or mutable built-in field value such as `Date`, replace the whole
+value with `setField()` or `setFields()`: mutating it in place is not observed
+and does not run validation or reactions.
 
 ## Core Concepts
 
@@ -109,6 +114,10 @@ user.on('validation:error', (e) => console.error(e.field, e.message));
 const off = user.on('field:change', (e) => console.log(e.field, '=', e.value));
 off(); // stop listening
 ```
+
+`field:validation-complete` reports the result of each field validation,
+including batch operations and reactions, even when the committed value did not
+change. `dirty-data:cleared` reports fields removed by `clearDirtyData()`.
 
 See [docs/API.md](docs/API.md#events) for the full event list.
 

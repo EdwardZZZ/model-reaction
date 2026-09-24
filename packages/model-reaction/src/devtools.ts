@@ -59,10 +59,16 @@ export function createModel(
         getFields: () => buildFieldInfo(modelSchema),
         getDependencyGraph: () => buildDependencyGraph(modelSchema),
         getSnapshot: () => ({
-            // Public getters already return shallow copies; safe to hand out.
+            // The data getters return stable shallow snapshots; serialization
+            // in the DevTools agent handles transport formatting and size limits.
             data: model.data,
             dirtyData: model.getDirtyData(),
-            errors: model.validationErrors,
+            errors: Object.fromEntries(
+                Object.entries(model.validationErrors).map(([field, errors]) => [
+                    field,
+                    [...errors],
+                ])
+            ),
         }),
         subscribe: (listener) =>
             model.on(ModelEvents.FIELD_CHANGE, ({ field, value }) =>

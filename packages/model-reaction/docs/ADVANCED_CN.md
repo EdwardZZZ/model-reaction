@@ -205,4 +205,22 @@ const m = createModel({
   ok:   { type: 'boolean' as const, default: false },
 });
 // m.data 类型为 { name: string; age: number; ok: boolean }
+
+// 没有默认值的字段会额外包含 undefined。
+const optional = createModel({ note: { type: 'string' as const } });
+// optional.data.note 类型为 string | undefined
+
+// `values` 为 enum 字段推导出具体联合类型；运行时校验仍由 validator 提供。
+const status = createModel({
+  state: {
+    type: 'enum' as const,
+    values: ['draft', 'published'] as const,
+    default: 'draft',
+  },
+});
+// status.data.state 类型为 'draft' | 'published'
 ```
+
+Schema 推导反映运行时值：默认值会绕过校验，因此与 `type` 不匹配的默认值也会
+包含在推导类型里。显式调用 `createModel<T>` 表示调用方保证 schema 能初始化该类型。
+对象或数组没有可推导的默认值时，建议显式提供数据类型。

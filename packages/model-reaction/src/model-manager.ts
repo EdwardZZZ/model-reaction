@@ -32,6 +32,11 @@ export class ModelManager<
     private errors: Record<string, ValidationError[]> = {};
     /** Last value provided for a field whose validation failed. */
     private dirtyData: Partial<T> = {};
+    private dataSnapshot: Readonly<T> | null = null;
+    private errorsSnapshot:
+        | Readonly<Record<string, readonly ValidationError[]>>
+        | null = null;
+    private dirtyDataSnapshot: Readonly<Partial<T>> | null = null;
 
     private readonly schema: Model<T>;
     private readonly options: ModelOptions;
@@ -62,6 +67,7 @@ export class ModelManager<
                         this.errors[field] = [];
                     }
                     this.errors[field].push(error);
+                    this.errorsSnapshot = null;
                 },
                 reportError: (event, error) =>
                     this.emit(event, error),
@@ -238,13 +244,13 @@ export class ModelManager<
      * changes (compared via `isEqual`, default `Object.is`).
      */
     subscribe = <R>(
-        selector: (data: T) => R,
+        selector: (data: Readonly<T>) => R,
         callback: (value: R, prev: R) => void,
         isEqual: (a: R, b: R) => boolean = Object.is
     ): (() => void) => {
-        let prev = selector(this.modelData);
+        let prev = selector(this.data);
         return this.on(ModelEvents.FIELD_CHANGE, () => {
-            const next = selector(this.modelData);
+            const next = selector(this.data);
             if (!isEqual(next, prev)) {
                 const old = prev;
                 prev = next;
@@ -257,24 +263,44 @@ export class ModelManager<
     // Public read API
     // -------------------------------------------------------------------------
 
-    get data(): T {
-        return { ...this.modelData };
+    get data(): Readonly<T> {
+        if (this.dataSnapshot === null) {
+            this.dataSnapshot = Object.freeze({ ...this.modelData });
+        }
+        return this.dataSnapshot;
     }
 
-    get validationErrors(): Record<string, ValidationError[]> {
-        return { ...this.errors };
+    get validationErrors(): Readonly<Record<string, readonly ValidationError[]>> {
+        if (this.errorsSnapshot === null) {
+            const snapshot: Record<string, readonly ValidationError[]> = {};
+            for (const [field, errors] of Object.entries(this.errors)) {
+                snapshot[field] = Object.freeze(
+                    errors.map((error) => Object.freeze({ ...error }))
+                );
+            }
+            this.errorsSnapshot = Object.freeze(snapshot);
+        }
+        return this.errorsSnapshot;
     }
 
     getField = <K extends keyof T>(field: K): T[K] => {
         return this.modelData[field];
     };
 
-    getDirtyData = (): Partial<T> => {
-        return { ...this.dirtyData };
+    getDirtyData = (): Readonly<Partial<T>> => {
+        if (this.dirtyDataSnapshot === null) {
+            this.dirtyDataSnapshot = Object.freeze({ ...this.dirtyData });
+        }
+        return this.dirtyDataSnapshot;
     };
 
     clearDirtyData = (): void => {
+        const fields = Object.keys(this.dirtyData) as Array<keyof T & string>;
         this.dirtyData = {};
+        this.dirtyDataSnapshot = null;
+        if (fields.length > 0) {
+            this.emit(ModelEvents.DIRTY_DATA_CLEARED, { fields });
+        }
     };
 
     // -------------------------------------------------------------------------
@@ -297,6 +323,9 @@ export class ModelManager<
         this.dirtyData = {};
         this.errors = {};
         this.validationRequestIds = {};
+        this.dataSnapshot = null;
+        this.errorsSnapshot = null;
+        this.dirtyDataSnapshot = null;
     };
 
     // -------------------------------------------------------------------------
@@ -366,6 +395,7 @@ export class ModelManager<
             const requestId = ++this.requestIdCounter;
             this.validationRequestIds[field] = requestId;
             this.errors[field] = [];
+            this.errorsSnapshot = null;
 
             const isValid = await this.runValidators(
                 schema,
@@ -381,7 +411,13 @@ export class ModelManager<
                 this.commitValid(field, value, options);
             } else {
                 this.dirtyData[field as keyof T] = value as T[keyof T];
+                this.dirtyDataSnapshot = null;
             }
+            this.emit(ModelEvents.FIELD_VALIDATION_COMPLETE, {
+                field: field as keyof T & string,
+                isValid,
+                dirty: field in this.dirtyData,
+            });
             return isValid;
         } finally {
             endTask();
@@ -402,9 +438,14 @@ export class ModelManager<
             field,
             timeout: this.asyncValidationTimeout,
             failFast: this.options.failFast ?? false,
-            data: validationData ?? (this.modelData as Record<string, any>),
+            data: {
+                ...(validationData ?? (this.modelData as Record<string, any>)),
+            },
             isCurrent: () => this.validationRequestIds[field] === requestId,
-            onError: (error) => this.emit(ModelEvents.VALIDATION_ERROR, error),
+            onError: (error) => {
+                this.errorsSnapshot = null;
+                this.emit(ModelEvents.VALIDATION_ERROR, error);
+            },
         });
     }
 
@@ -433,16 +474,21 @@ export class ModelManager<
 
         if (dataChanged) {
             this.modelData[fieldKey] = value;
+            this.dataSnapshot = null;
         }
         if (hadDirty) {
             delete this.dirtyData[field];
+            this.dirtyDataSnapshot = null;
         }
 
         if (dataChanged) {
             // Record the real change so a batched caller can trigger reactions
             // for exactly the fields that moved.
             changedFields?.add(field);
-            this.emit(ModelEvents.FIELD_CHANGE, { field, value });
+            this.emit(ModelEvents.FIELD_CHANGE, {
+                field,
+                value,
+            });
             if (!suppressReactions) {
                 this.reactionSystem.triggerReactions(field, reactionStack);
             }

@@ -6,7 +6,7 @@ const defaultFormatter: ValidationErrorFormatter = (error) =>
     `${error.field}: ${error.message}`;
 
 export function formatValidationErrors(
-    errors: Record<string, ValidationError[]>,
+    errors: Readonly<Record<string, readonly ValidationError[]>>,
     formatter: ValidationErrorFormatter = defaultFormatter
 ): string {
     const allErrors = Object.values(errors).flat();

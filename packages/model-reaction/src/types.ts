@@ -5,6 +5,8 @@ export const ModelEvents = {
     FIELD_NOT_FOUND: 'field:not-found',
     FIELD_CHANGE: 'field:change',
     VALIDATION_COMPLETE: 'validation:complete',
+    FIELD_VALIDATION_COMPLETE: 'field:validation-complete',
+    DIRTY_DATA_CLEARED: 'dirty-data:cleared',
 } as const;
 
 export type ModelErrorEvent =
@@ -52,6 +54,12 @@ export interface ModelEventMap<T = Record<string, any>> {
         value: T[keyof T];
     };
     [ModelEvents.VALIDATION_COMPLETE]: { isValid: boolean };
+    [ModelEvents.FIELD_VALIDATION_COMPLETE]: {
+        field: keyof T & string;
+        isValid: boolean;
+        dirty: boolean;
+    };
+    [ModelEvents.DIRTY_DATA_CLEARED]: { fields: Array<keyof T & string> };
 }
 
 export interface Reaction {
@@ -67,7 +75,9 @@ export interface FieldSchema {
     // Validation rules
     validator?: Validator[];
     // Default value
-    default?: any;
+    default?: unknown;
+    // Optional literal set for enum fields; enables useful schema inference.
+    values?: readonly unknown[];
     // Reaction definition
     reaction?: Reaction | Reaction[];
     // Value transformation function
@@ -82,23 +92,43 @@ export type Model<T = Record<string, any>> = {
  * Map a `FieldSchema['type']` literal to its TypeScript value type.
  * Used by `InferModelData` to derive the data shape from a schema.
  */
+type InferArrayItem<S extends FieldSchema> = S extends {
+    default: readonly (infer Item)[];
+}
+    ? [Item] extends [never]
+        ? unknown
+        : Item
+    : unknown;
+
+type InferObjectShape<S extends FieldSchema> = S extends {
+    default: infer Value extends Record<string, unknown>;
+}
+    ? keyof Value extends never
+        ? Record<string, unknown>
+        : Value
+    : Record<string, unknown>;
+
 export type InferFieldType<S extends FieldSchema> =
     S['type'] extends 'string' ? string :
     S['type'] extends 'number' ? number :
     S['type'] extends 'boolean' ? boolean :
     S['type'] extends 'date' ? Date :
-    S['type'] extends 'array' ? any[] :
-    S['type'] extends 'object' ? Record<string, any> :
-    S['type'] extends 'enum' ? any :
-    any;
+    S['type'] extends 'array' ? InferArrayItem<S>[] :
+    S['type'] extends 'object' ? InferObjectShape<S> :
+    S['type'] extends 'enum' ?
+        S extends { values: readonly (infer Value)[] }
+            ? Value
+            : unknown :
+    unknown;
 
 /**
- * Derive the model data shape from a schema literal.
- * Lets `createModel(schema)` infer `T` automatically without an explicit
- * type argument.
+ * Derive the model data shape from a schema literal. Fields without a default
+ * include `undefined`; array/object defaults and enum `values` retain useful
+ * literal-derived value types.
  */
 export type InferModelData<S extends Record<string, FieldSchema>> = {
-    [K in keyof S]: InferFieldType<S[K]>;
+    [K in keyof S]: InferFieldType<S[K]> |
+        (S[K] extends { default: infer Default } ? Default : undefined);
 };
 
 export interface ModelOptions {
@@ -113,8 +143,10 @@ export interface ModelOptions {
 }
 
 export interface ModelReturn<T = Record<string, any>> {
-    data: T;
-    validationErrors: Record<string, ValidationError[]>;
+    /** Stable shallow read-only snapshot of the field map. */
+    data: Readonly<T>;
+    /** Read-only snapshot of current validation errors. */
+    validationErrors: Readonly<Record<string, readonly ValidationError[]>>;
     setField: <K extends keyof T>(field: K, value: T[K]) => Promise<boolean>;
     getField: <K extends keyof T>(field: K) => T[K];
     setFields: (fields: Partial<T>) => Promise<boolean>;
@@ -123,7 +155,8 @@ export interface ModelReturn<T = Record<string, any>> {
         event: E,
         callback: (payload: ModelEventMap<T>[E]) => void
     ) => () => void;
-    getDirtyData: () => Partial<T>;
+    /** Return a stable shallow read-only snapshot of rejected input values. */
+    getDirtyData: () => Readonly<Partial<T>>;
     clearDirtyData: () => void;
     // Wait for all pending reactions and validations to complete
     settled: () => Promise<void>;
@@ -138,7 +171,7 @@ export interface ModelReturn<T = Record<string, any>> {
      * when the selected value changes (compared with `isEqual`, default Object.is).
      */
     subscribe: <R>(
-        selector: (data: T) => R,
+        selector: (data: Readonly<T>) => R,
         callback: (value: R, prev: R) => void,
         isEqual?: (a: R, b: R) => boolean
     ) => () => void;
