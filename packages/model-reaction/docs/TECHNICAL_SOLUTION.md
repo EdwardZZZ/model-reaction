@@ -6,7 +6,7 @@
 
 设计目标：
 
-- **数据可信**：通过 `data` / `dirtyData` 分离，确保业务读取到的始终是已通过校验的数据。
+- **数据可信**：通过 `data` / `dirtyData` 分离，确保运行期写入只有通过校验后才提交；schema 默认值需在提交前显式校验。
 - **逻辑内聚**：广告、创意、投放、审核等规则收敛在模块内，组件只负责交互与展示。
 - **细粒度更新**：React 层通过字段级订阅减少无关渲染。
 - **可扩展**：新增字段、校验规则、派生字段时优先扩展 schema，而不是扩散到组件逻辑。
@@ -49,7 +49,7 @@
 
 | 层级 | 职责 | 不应承担 |
 | --- | --- | --- |
-| 数据层 | 字段定义、类型约束、验证、派生值、订阅 | UI touched 状态、接口请求副作用 |
+| 数据层 | 字段定义、类型元数据、验证、派生值、订阅 | UI touched 状态、接口请求副作用 |
 | 模块层 | 聚合字段写入、业务动作、提交前校验、DTO 转换 | 直接操作 DOM、展示错误样式 |
 | 组件层 | 输入、展示、局部交互状态、调用模块方法 | 复制业务校验、绕过 model 写数据 |
 | Owner 层 | 创建与销毁 model、提供上下文、路由级隔离 | 复用全局 singleton model |
@@ -59,7 +59,7 @@
 `model-reaction` 的核心心智模型如下：
 
 ```text
-schema -> ModelManager -> data       已验证的事实数据
+schema -> ModelManager -> data       已提交的事实数据（默认值需显式校验）
                        -> dirtyData  上次未通过验证的用户输入
                        -> reactions  由依赖字段自动计算的派生值
 ```
@@ -233,7 +233,7 @@ export function createAdDraftModel() {
 
 - 单字段写入使用 `await model.setField(field, value)`，返回 `true` 表示验证通过并提交到 `data`。
 - 多字段写入使用 `await model.setFields(partial)`，用于步骤保存、批量导入、状态迁移等场景，可在一次流程中完成校验并只触发一次反应。
-  - 注意：`setFields` **不是原子事务**。每个字段独立提交——即使某个字段校验失败（返回值为 `false`），其余通过校验的字段仍会写入 `data`，失败字段进入 `dirtyData`。若业务需要"全部通过才提交"，应先 `validateAll()` 或在失败时重建 model。
+  - 注意：`setFields` **不是原子事务**。每个字段独立提交——即使某个字段校验失败（返回值为 `false`），其余通过校验的字段仍会写入 `data`，失败字段进入 `dirtyData`。业务要求"全部通过才提交"时，应先在应用层预检，或用临时候选 model 校验整批数据，再写入正式 model。
 - 验证失败时不要读取 `model.data` 期望得到失败值，失败输入会进入 `model.getDirtyData()`。
 - 提交前使用 `await model.validateAll()` 重新校验完整广告草稿。
 - 测试或复杂异步场景中，使用 `await model.settled()` 等待验证和反应完成。
@@ -340,6 +340,7 @@ export function createAdDraftModule(model: AdDraftModel) {
 
     async submitForAudit() {
       const valid = await model.validateAll();
+      await model.settled();
       if (!valid || !model.getField('audit.ready')) {
         return false;
       }
@@ -381,11 +382,13 @@ export function createAdDraftModule(model: AdDraftModel) {
 
 ## 5. React 集成方案
 
-React 层推荐由页面级 owner 创建 model，并通过 `ModelProvider` 注入子树。组件使用 `useModelFieldState` 绑定单字段输入，使用本地 `touched` 状态控制错误展示。
+React 层推荐由页面级 owner 创建 model，并通过 `ModelProvider` 注入子树。
+宽松同步校验可直接使用 `useModelFieldState`；可能拒绝中间输入或异步返回的文本字段
+使用 `useDraftField`，避免受控输入回弹。
 
 ```tsx
 import { useEffect, useState } from 'react';
-import { Field, ModelProvider, useModel, useModelFieldState } from 'model-reaction/react';
+import { Field, ModelProvider, useDraftField, useModel } from 'model-reaction/react';
 import type { ModelReturn } from 'model-reaction';
 
 function AdDraftOwner() {
@@ -409,19 +412,19 @@ function AdDraftOwner() {
 
 function NameField() {
   const model = useModel<AdDraftData>();
-  const [name, setName, meta] = useModelFieldState(model, 'basic.name');
-  const [touched, setTouched] = useState(false);
+  const { draft, setDraft, onBlur, showError, meta } =
+    useDraftField(model, 'basic.name');
 
   return (
     <label>
       <span>广告名称</span>
       <input
-        value={name}
-        onChange={(event) => setName(event.target.value)}
-        onBlur={() => setTouched(true)}
-        aria-invalid={Boolean(touched && meta.error)}
+        value={draft}
+        onChange={(event) => setDraft(event.target.value)}
+        onBlur={onBlur}
+        aria-invalid={showError}
       />
-      {touched && meta.error && <small role="alert">{meta.error}</small>}
+      {showError && <small role="alert">{meta.error}</small>}
     </label>
   );
 }
@@ -446,7 +449,8 @@ function TitleField() {
 | 场景 | 推荐 API |
 | --- | --- |
 | 单字段展示 | `useModelField(model, field)` |
-| 表单输入、错误、dirty、validating | `useModelFieldState(model, field)` |
+| 宽松同步校验的表单输入 | `useModelFieldState(model, field)` |
+| 严格或异步校验的文本输入 | `useDraftField(model, field)` |
 | 多字段切片 | `useModelFields(model, fields)` |
 | 派生展示值 | `useModelSelector(model, selector)` |
 | 内联 selector 且依赖组件 props | `useModelComputed(model, selector)`（selector 若返回新对象/数组，须传 `isEqual`，如 `shallow`；详见 [REACT_CN.md](./REACT_CN.md#usemodelselector-vs-usemodelcomputed)） |
@@ -513,7 +517,7 @@ AdCreationPage
 
 ### 6.1 校验策略
 
-- **基础类型校验**：由 `FieldSchema.type` 约束字段基础类型。
+- **基础类型校验**：`FieldSchema.type` 只提供类型推导与工具元数据；运行时类型检查需配置 `ValidationRules.number`、`ValidationRules.string` 等 validator。
 - **必填与长度**：优先使用内置 `ValidationRules`，并通过 `withMessage()` 配置业务文案。
 - **枚举与数组**：通过自定义 `Rule` 封装 `oneOf`、`minItems` 等规则。
 - **跨字段校验**：验证器可通过 `data` 参数读取其他字段；复杂规则建议封装为独立函数。

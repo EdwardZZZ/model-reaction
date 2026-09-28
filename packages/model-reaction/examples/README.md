@@ -25,7 +25,13 @@ Demonstrates field correlation, dependency validation, and error handling mechan
 Demonstrates how failed input is diverted to `dirtyData` (retrievable via `getDirtyData()` / clearable via `clearDirtyData()`) instead of polluting `data`, and how `Rule.when(predicate)` makes a rule apply only when a cross-field condition holds.
 
 ### React Bindings Example (react-bindings.tsx)
-Shows how to use the `model-reaction/react` adapter (`useModelField`, `useModelSelector`) for field-level and selector-level component subscriptions, plus schema type inference. Copy-paste-ready into any React 18+ project (not runnable from the CLI).
+Shows field-level and selector-level React subscriptions, provider ownership,
+form metadata, local drafts, and schema type inference. The package script
+renders it through `react-dom/server`.
+
+### Multi-record Deep Dependency Example (multi-record-deep-deps.ts)
+Builds a larger deterministic schema and runs a five-layer reaction chain
+across 100 records.
 
 ### React Best Practices Snippets (react-best-practices/)
 Additional React-focused snippets covering stable selectors, `ModelProvider`,
@@ -35,19 +41,18 @@ patterns rather than CLI-runnable examples.
 
 ## Running Examples
 
-Use the following commands to run the examples:
+From the repository root:
 
 ```bash
-npm run example:basic
-npm run example:reaction
-npm run example:async
-npm run example:event
-npm run example:complex
-npm run example:dirty
+pnpm --filter model-reaction run example:basic
+pnpm --filter model-reaction run example:reaction
+pnpm --filter model-reaction run example:async
+pnpm --filter model-reaction run example:event
+pnpm --filter model-reaction run example:complex
+pnpm --filter model-reaction run example:dirty
+pnpm --filter model-reaction run example:multi-record
+pnpm --filter model-reaction run example:react
 ```
 
-> The React example (`examples/react-bindings.tsx`) is a standalone snippet —
-> import it from a real React app rather than running it via `ts-node`.
->
 > Files under `examples/react-best-practices/` are also reference snippets and
-> should be copied into a real React project as needed.
+> are not standalone CLI programs.

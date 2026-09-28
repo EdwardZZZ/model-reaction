@@ -16,7 +16,7 @@
 | 库 | 定位 |
 |----|------|
 | **Redux (Toolkit)** | 单一全局 store + 不可变更新 + 严格单向数据流的**应用级状态容器** |
-| **zustand** | 极简 hook-based 的**通用状态容器**，可多 store、可变更新 |
+| **zustand** | 极简 hook-based 的**通用状态容器**，提供直接的 `set` / `get` API 与多 store 支持 |
 | **model-reaction** | Schema 驱动的**领域模型/表单层**，自带校验+反应+脏数据+错误体系 |
 
 ---
@@ -25,10 +25,9 @@
 
 | 维度 | Redux Toolkit | zustand | model-reaction |
 |------|---------------|---------|----------------|
-| 包体积 | ~12KB（RTK 完整） | ~1KB | ~6KB |
 | API 复杂度 | 中（store/reducer/action/slice/selector） | 极低（`create`/`set`/`get`） | 中（schema-first，集中声明） |
 | 数据建模 | reducer 命令式 | store 命令式 | **schema 声明式** |
-| 不可变性 | 强制（Immer 内置） | 默认可变 | 内部 `deepEqual` + 替换 |
+| 更新模型 | 不可变 reducer（Immer 内置） | 约定不可变更新，可选 Immer | 字段整体替换 + 浅冻结快照 |
 | 状态范围 | 单一全局 | 多 store / slice | **每模型一份**，按领域切分 |
 | 校验 | ❌ 无 | ❌ 无 | ✅ 同步/异步/条件/跨字段 |
 | 派生值 | reselect | selector + middleware | ✅ **schema 内 reaction** |
@@ -89,14 +88,14 @@ model-reaction:  setField -> [transform] -> [validate] -> commit -> [reaction] -
 **优势**
 - **Schema-first**：字段类型 / 校验 / 默认值 / 反应 / 转换集中声明，一目了然。
 - **校验内置**：同步 / 异步 / 条件 / 跨字段，附 `dirtyData` + `validationErrors` + `formatValidationErrors`。
-- **Reaction 内置**：`fields → computed → action`，依赖图自动管理，循环依赖检测。
-- **字段级订阅**：`subscribeField` / `useModelField` 比 selector + memo 更精确。
+- **Reaction 内置**：`fields → computed → action`，按声明的依赖自动调度并检测循环依赖。
+- **字段级订阅**：`subscribeField` / `useModelField` 提供无需编写 selector 的单字段路径。
 - **异步协调**：`settled()` 一行等齐所有 reaction + validation。
 - **错误分类**：类型化模型错误事件，比 reducer 里 try-catch 整洁。
 
 **劣势**
 - **不是通用 store**：不适合管 UI 状态 / 路由 / 全局共享。
-- **生态薄**：无 DevTools、无 persist、无中间件。
+- **生态薄**：已有专用 DevTools 扩展，但没有持久化或中间件生态。
 - **多 store 协调弱**：跨 model 联动需自行编排（`subscribeField` 手动串）。
   注意这指的是**多个独立 model 之间**的联动，不等于「大型表单要拆 model」——
   大型表单的正确姿势是**单个 model + schema 片段解构组合**（`{ ...baseSchema, ...contactSchema }`），

@@ -17,18 +17,18 @@ live data tree, the field dependency graph, and a timeline of changes.
 - [Using the panel](#using-the-panel)
 - [The DevTools hook contract](#the-devtools-hook-contract)
 - [Zero overhead when absent](#zero-overhead-when-absent)
-- [Limitations (TBD)](#limitations-tbd)
+- [Known limitations](#known-limitations)
 
 ---
 
 ## What you get
 
-Once the extension is installed and its panel is open, any page that creates a
-model with `createModel(...)` shows up under a **Model Reaction** tab in the
-browser DevTools, with three views:
+Once the extension is installed and its panel is open, models created through
+the opt-in `model-reaction/devtools` entry show up under a **Model Reaction**
+tab in the browser DevTools, with three views:
 
 1. **Data Tree** — the three layers of the model, each collapsible:
-   - `data` — the validated source of truth
+   - `data` — the committed source of truth (schema defaults are seeded without validation)
    - `dirtyData` — the last input that failed validation, per field
    - `errors` — current validation errors, per field
 2. **Dependencies** — the reaction dependency graph. Each node is a field;
@@ -65,11 +65,11 @@ background.js   (MV3 service worker, routes by tab)
 panel           (React UI: data tree · dependency graph · timeline)
 ```
 
-The opt-in wrapper lives in [src/devtools.ts](../src/devtools.ts) and the hook
-contract it uses in [src/devtools/devtools-hook.ts](../src/devtools/devtools-hook.ts); the
-extension lives entirely under [devtools/](../../devtools). The package root
-(`model-reaction`) imports **none** of this, so apps that never opt in ship zero
-DevTools code.
+The opt-in wrapper lives in [src/devtools.ts](../src/devtools.ts), and its hook
+contract lives in
+[src/devtools/devtools-hook.ts](../src/devtools/devtools-hook.ts). The extension
+lives under [packages/devtools](../../devtools). The package root
+(`model-reaction`) imports none of the integration code.
 
 ## Enabling it in your app
 
@@ -85,34 +85,29 @@ import { createModel } from 'model-reaction/devtools';
 const model = createModel(schema); // now visible in the panel
 ```
 
-When no extension is installed, the wrapper does a single property read and
-hands back the untouched model — no registration, no subscriptions. It is common
-to gate the swap on your build so production never uses it:
-
-```ts
-import { createModel } from
-  process.env.NODE_ENV === 'development' ? 'model-reaction/devtools' : 'model-reaction';
-```
+When no extension is installed, the wrapper performs one hook lookup and
+returns the model without registering or subscribing. Applications that want
+the integration removed from production bundles can alias
+`model-reaction/devtools` to `model-reaction` in their production bundler
+configuration.
 
 ## Building the extension
 
-The extension is a self-contained sub-package under `devtools/`; it does not
-affect the library's own build.
+From the repository root:
 
 ```bash
-cd devtools
-node build.mjs
+pnpm --filter model-reaction-devtools run build
 ```
 
 This bundles all four extension contexts (page agent, content relay, background
-worker, React panel) into `devtools/dist/`, alongside the copied static assets
-(`manifest.json`, `devtools.html`, `panel.html`, `panel.css`).
+worker, React panel) into `packages/devtools/dist/`, alongside the copied static
+assets (`manifest.json`, `devtools.html`, `panel.html`, `panel.css`).
 
 ## Loading it in Chrome
 
 1. Open `chrome://extensions`.
 2. Enable **Developer mode** (top right).
-3. Click **Load unpacked** and select the `devtools/dist` directory.
+3. Click **Load unpacked** and select `packages/devtools/dist`.
 4. Open DevTools on any page that uses `model-reaction` and select the
    **Model Reaction** tab.
 
@@ -166,21 +161,16 @@ can never show a dependency graph that disagrees with runtime behaviour.
 If you import from the package root (`model-reaction`), none of this code is
 even bundled. If you opt in via `model-reaction/devtools` but no hook is
 installed (e.g. production without the extension), `createModel` performs a
-single property read (`globalThis.__MODEL_REACTION_DEVTOOLS_HOOK__`), finds
-nothing, and hands back the untouched model — no instance object, no
-subscriptions. The DevTools integration is effectively free unless you are
-actively debugging.
+constant-time lookup of `globalThis.__MODEL_REACTION_DEVTOOLS_HOOK__` and
+returns without building an instance descriptor or adding subscriptions.
 
-## Limitations (TBD)
-
-These are intentionally deferred and marked TBD:
+## Known limitations
 
 - **Write-back time-travel.** The Timeline is **read-only**. Replaying an old
   value back into the model would re-trigger reactions and could poison
   `dirtyData` (the library intentionally has no `resetDirty` — see AGENTS.md
-  §5), so "restore this value" is not implemented yet.
+  §5), so the extension does not offer a restore action.
 - **Configurable limits.** The timeline ring-buffer size and the value
-  serialization depth / breadth / string caps use fixed defaults; exposing them
-  as user settings is deferred.
+  serialization depth / breadth / string caps currently use fixed defaults.
 - **Multi-frame / cross-origin iframes.** The agent is injected into the top
   frame only.

@@ -10,7 +10,7 @@
  * Design constraints:
  *   - **Zero overhead when absent.** If no hook is installed (the normal
  *     production case), {@link getDevtoolsHook} returns `undefined` after a
- *     single property read and the library allocates nothing further.
+ *     constant-time hook check and allocates no integration state.
  *   - **Not a public introspection API.** Nothing here is re-exported from the
  *     package entry point (`index.ts`). The hook is a private, dev-time channel
  *     for tooling, not a method surface on `ModelReturn`. This keeps the
@@ -56,7 +56,7 @@ export interface DevtoolsDependencyGraph {
 
 /** Point-in-time view of a model's three-layer state. */
 export interface DevtoolsSnapshot {
-    /** Validated source of truth. */
+    /** Committed source of truth; schema defaults may be unvalidated. */
     data: Record<string, unknown>;
     /** Last user input that failed validation, indexed by field. */
     dirtyData: Record<string, unknown>;
@@ -103,8 +103,7 @@ export interface ModelReactionDevtoolsHook {
 /**
  * Return the installed DevTools hook, or `undefined` if none is present or the
  * object under {@link DEVTOOLS_HOOK_KEY} does not satisfy the contract. This is
- * the single hot-path guard: in production (no extension) it returns after one
- * property read.
+ * the single hot-path guard for production builds without the extension.
  */
 export function getDevtoolsHook(): ModelReactionDevtoolsHook | undefined {
     const candidate = (globalThis as Record<string, unknown>)[DEVTOOLS_HOOK_KEY];

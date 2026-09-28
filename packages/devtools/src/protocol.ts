@@ -18,7 +18,7 @@
 export const AGENT_SOURCE = 'model-reaction-devtools-agent';
 export const PANEL_SOURCE = 'model-reaction-devtools-panel';
 
-/** Default cap on the per-instance change timeline (see README — tunable, TBD). */
+/** Fixed cap on the per-instance change timeline. */
 export const DEFAULT_TIMELINE_LIMIT = 100;
 
 // -----------------------------------------------------------------------------

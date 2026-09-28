@@ -11,8 +11,7 @@
  *   2. **Unbounded depth** → capped by `maxDepth`.
  *   3. **Unbounded breadth** → object keys / array items capped by `maxItems`.
  *
- * Depth / breadth limits are conservative defaults; surfacing them as user
- * settings is deferred (TBD, see README).
+ * Depth / breadth limits use conservative fixed defaults.
  */
 import type { SerializedValue } from './protocol';
 

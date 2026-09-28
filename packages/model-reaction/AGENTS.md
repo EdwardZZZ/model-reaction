@@ -9,14 +9,15 @@
 ## 1. Mental Model
 
 ```
-schema  ─►  ModelManager  ─►  data            (validated, source of truth)
+schema  ─►  ModelManager  ─►  data            (committed source of truth)
                           ├─►  dirtyData      (unvalidated user input)
                           └─►  reactions      (auto-derived fields)
 ```
 
 Three layers, nothing else:
 
-1. `data` — only fields that **passed** validation live here.
+1. `data` — committed values live here. Writes must pass validation; schema
+   defaults are the documented exception and are seeded directly.
 2. `dirtyData` — last user input that **failed** validation, indexed by field.
 3. `reactions` — derived values recomputed when their declared `fields`
    change. They write back into `data`.
@@ -54,7 +55,9 @@ m.dispose();                                  // ALWAYS call this in cleanup
 
 3. **Side effects inside `reaction.computed`** — `computed` MUST be pure. Put side effects in `reaction.action` instead.
 
-4. **Not calling `dispose()`** — leaks reactions, event listeners and pending validation timers. Always wire it to your cleanup path (React effect, test `afterEach`, server shutdown).
+4. **Not calling `dispose()`** — leaves reaction timers, listeners, and pending
+   work active for as long as the model remains reachable. Wire disposal to the
+   owner's cleanup path (React effect, test `afterEach`, server shutdown).
 
 5. **Sharing one model across React trees without dispose** — see [docs/REACT.md](docs/REACT.md). Use `useEffect` cleanup or instantiate per route.
 
@@ -168,7 +171,7 @@ These are **deliberate omissions**. Don't add them; don't fake them.
 | `commitDirty(field)` / `resetDirty(field)` | Computed fields that depend on a dirty field could be poisoned. Reset by recreating the model. |
 | Arbitrary side-effect from validators | Validators are pure boolean tests. Use reactions for side-effects. |
 | Synchronous batching across `setField` calls | Each `setField` is its own validation cycle. Use `setFields({ ... })` to batch validation + a single reaction pass — its cross-field validators also see the merged batch, so co-dependent fields can be set together. |
-| True all-or-nothing transactional writes | `setFields` is **not atomic**: each field commits independently; valid fields land in `data` even if a sibling fails (return value is the AND of all fields). Validate first, or reset by recreating the model, if you need all-or-nothing. |
+| True all-or-nothing transactional writes | `setFields` is **not atomic**: each field commits independently; valid fields land in `data` even if a sibling fails (return value is the AND of all fields). Use an application-level preflight or a disposable candidate model before mutating the live model when all-or-nothing behavior is required. |
 | Plugin / middleware system | Compose at the schema level (factory functions returning `FieldSchema`). |
 | `model.describe()` schema introspection | The schema literal is already a plain object; iterate it directly (see §4.5). |
 
@@ -182,7 +185,7 @@ root, run **all three** before submitting:
 ```bash
 pnpm --filter model-reaction run lint
 pnpm --filter model-reaction run typecheck        # source + test types (CI gate)
-pnpm --filter model-reaction exec jest --silent    # 200+ tests including doc scenarios
+pnpm --filter model-reaction exec jest --silent    # full suite, including doc scenarios
 ```
 
 (Or `cd packages/model-reaction` and use the equivalent `npm run lint` /
@@ -216,10 +219,10 @@ pnpm --filter model-reaction-devtools run test
 
 | Term | Meaning |
 | --- | --- |
-| `data` | Validated source of truth. Read via `m.data` or `getField`. |
+| `data` | Committed source of truth. Writes are validated; defaults are seeded directly. Read via `m.data` or `getField`. |
 | `dirtyData` | Last user input whose validation **failed**, indexed by field. Cleared by `clearDirtyData()` or by next successful `setField` of that field. |
 | `reaction.computed` | Pure function: `deps -> derived value`. |
-| `reaction.action` | Optional side-effect callback fired after computed returns. |
+| `reaction.action` | Optional side-effect callback fired after the computed value validates and commits. |
 | `settled()` | Promise that resolves when all in-flight reactions and validations finish. Use it in tests. |
 | `verify-then-commit` | Set-field protocol: validate first, write to `data` only on pass; otherwise write to `dirtyData`. |
 | `commitValid` | Internal: when `validateAll` finds the dirty value now passes, promote it from `dirtyData` to `data`. |

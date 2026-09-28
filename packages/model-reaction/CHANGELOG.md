@@ -21,11 +21,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   change timeline. Registration is opt-in via a new `model-reaction/devtools`
   entry — swap `import { createModel } from 'model-reaction'` for
   `'model-reaction/devtools'` and each model registers with the global DevTools
-  hook when one is installed (a single property read, no allocation, when it is
-  absent). The package root imports none of this, so apps that never opt in
-  ship zero DevTools code. The hook is a private dev-time channel — not part of
-  the public `ModelReturn` API. See `docs/DEVTOOLS.md` / `docs/DEVTOOLS_CN.md`
-  and the `devtools/` sub-package.
+  hook when one is installed (a constant-time hook check with no integration
+  allocation when it is absent). The package root imports none of this, so apps
+  that never opt in ship zero DevTools code. The hook is a private dev-time
+  channel — not part of the public `ModelReturn` API. See `docs/DEVTOOLS.md` /
+  `docs/DEVTOOLS_CN.md`
+  and the `packages/devtools/` workspace package.
 
 ### Changed
 - **Reactions now run an initial pass at construction.** Previously a derived

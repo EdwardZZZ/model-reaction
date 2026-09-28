@@ -34,7 +34,6 @@ function makeFakeInstance(id: number) {
                 listener = null;
             };
         },
-        // test helper
         emitChange(field: string, value: unknown) {
             data[field] = value;
             listener?.({ field, value, timestamp: Date.now() });

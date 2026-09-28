@@ -97,7 +97,5 @@ export function Field<
         );
     }
     const [value, setValue, meta] = useModelFieldState(model, props.name);
-    // Render the children render-prop directly. Returning ReactNode is fine
-    // here — React accepts any node where ReactElement is expected.
     return props.children({ value, setValue, meta }) as ReactElement;
 }

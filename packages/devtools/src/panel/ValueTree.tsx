@@ -3,7 +3,7 @@
  * collapsible; leaves are rendered with a type-appropriate CSS class so the
  * panel stylesheet can color them.
  *
- * Pure and self-contained: it takes a already-serialized value (never a live
+ * Pure and self-contained: it takes an already-serialized value (never a live
  * model value), so it can be unit-tested with plain data.
  */
 import { useState, type ReactElement } from 'react';

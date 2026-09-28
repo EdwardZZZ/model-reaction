@@ -26,7 +26,7 @@ only when its watched slice actually changes.
 | --- | --- | --- |
 | `useModelField(model, field)` | hook | Subscribe to a single field. |
 | `useModelSelector(model, selector, isEqual?)` | hook | Subscribe to a derived value (selector reference is **part of the subscription** — wrap it in `useCallback`). |
-| `useModelComputed(model, selector, isEqual?)` | hook | Same shape as `useModelSelector`, but selector / `isEqual` are stored in refs and refreshed every render — inline arrows and per-render closure variables (`id`, `index`, …) work without `useCallback`. |
+| `useModelComputed(model, selector, isEqual?)` | hook | Same shape as `useModelSelector`, but the subscription does not depend on selector identity. The current render's selector can close over `id`, `index`, and other props without `useCallback`. |
 | `useModelFields(model, fields)` | hook | Subscribe to several fields at once (shallow-compared). |
 | `useModelFieldState(model, field)` | hook | `[value, setValue, meta]` form-style binding with `error / dirty / validating`. |
 | `useDraftField(model, field, options?)` | hook | **Optional** controlled-input binding: local draft + `touched`/error gating on top of `useModelFieldState`. For strict/async validators. |
@@ -262,12 +262,10 @@ handles internally (nullish/non-finite collapse) plus the optional `format`:
 
 ## Model Lifecycle in React
 
-A `model` instance owns reactions, internal event listeners and pending
-validation timers. None of those are tracked by the JavaScript GC, so a
-forgotten `dispose()` keeps the model — and every value it holds in
-closures — alive forever. In React, the bug usually shows up as **a
-module-level model that is shared across routes / tests / browser tabs
-and never gets cleaned up**.
+A `model` instance owns reaction timers, subscriptions, and pending validation
+work. `dispose()` cancels or releases those resources deterministically. In
+React, the common ownership bug is a **module-level model shared across routes
+or tests with no matching cleanup**.
 
 ### Bad: module-level singleton
 
@@ -282,8 +280,8 @@ export const userModel = createModel({ /* ... */ });
 
 Symptoms:
 - Tests bleed state into each other (jest workers see stale `data`).
-- Hot-reload doubles up reaction handlers.
-- Multi-tab apps observe ghost updates from previously closed views.
+- Multiple mounted editors unexpectedly share state.
+- Pending debounced work outlives the view that scheduled it.
 
 ### Fix A: Provider with owner-managed dispose
 
@@ -359,7 +357,7 @@ own different models.
 | Cross-route sharing | Yes (accidentally) | Yes (intentional, scoped to subtree) | No |
 | `dispose()` trigger | Never | Owner unmount | Route unmount |
 | Test isolation | Broken | OK (re-mount per test) | OK (re-mount per test) |
-| Multi-tab safety | Leaks across tabs in dev | Each tab owns its tree | Each tab owns its tree |
+| Concurrent editors | Share one instance | Share only within the owner subtree | Own separate instances |
 | Complexity | Lowest | Low | Low |
 | Best for | — (avoid) | App-wide / feature-wide state | Route- or modal-scoped state |
 
@@ -455,18 +453,15 @@ changes between renders.
    │          React scheduling at all)
    └── No  → continue ↓
 
-4. Will the selector be reused across components, or do you want it
-   observable by middleware / devtools?
+4. Will the selector be reused across components?
    ├── Yes → useModelSelector
-   │         (selector identity lives at the model layer and can be
-   │          instrumented; useModelComputed selectors only exist
-   │          inside React render and cannot be observed)
+   │         (hoist a stable selector and share it)
    └── No  → continue ↓
 
 5. Are you willing to wrap the selector in useCallback?
    ├── Yes → useModelSelector
    └── No  → useModelComputed
-             (convenience: ref-locked semantics, no useCallback needed)
+             (convenience: stable subscription, no useCallback needed)
 ```
 
 ## Performance Hot-spots
@@ -478,10 +473,9 @@ changes between renders.
 | High-frequency field (animation, mouse, debounce) feeding unrelated subscribers | Model-level `isEqual` keeps unrelated changes out of React scheduling | `useModelSelector` |
 | Selector closes over `id` / `index` / per-render variables | `useModelSelector` would either go stale or resubscribe every render | `useModelComputed` |
 | One-off prototype / short-lived component, light selector | The ceremony of `useCallback` outweighs the per-render `getSnapshot` cost | `useModelComputed` |
-| Selector must stay observable by middleware / devtools | Identity must live at the model layer | `useModelSelector` |
-| Selector with side effects or impurity (`console.log`, counters, dev-only logs) | `useSyncExternalStore` requires `getSnapshot` to be pure | `useModelSelector` |
+| Selector reused across components | A hoisted selector avoids repeated closures and keeps one definition | `useModelSelector` |
 
 > One-liner: `useModelSelector` is the performance ceiling
 > (model-layer dedup, runs per **commit**); `useModelComputed` is the
 > convenience floor (render-layer dedup, runs per **render**). They are
-> **not** interchangeable — keep both.
+> **not** interchangeable. Selectors passed to either hook must remain pure.

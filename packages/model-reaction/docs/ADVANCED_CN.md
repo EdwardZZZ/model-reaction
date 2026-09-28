@@ -198,22 +198,22 @@ console.log(model.getField('target')); // 'HELLO'
 // 1. 显式传入类型参数（复杂模型推荐）：
 const user = createModel<User>(userSchema);
 
-// 2. 从 schema 字面量推导（每个 type 加 `as const`）：
+// 2. 从 schema 字面量推导：
 const m = createModel({
-  name: { type: 'string'  as const, default: '' },
-  age:  { type: 'number'  as const, default: 0 },
-  ok:   { type: 'boolean' as const, default: false },
+  name: { type: 'string', default: '' },
+  age:  { type: 'number', default: 0 },
+  ok:   { type: 'boolean', default: false },
 });
 // m.data 类型为 { name: string; age: number; ok: boolean }
 
 // 没有默认值的字段会额外包含 undefined。
-const optional = createModel({ note: { type: 'string' as const } });
+const optional = createModel({ note: { type: 'string' } });
 // optional.data.note 类型为 string | undefined
 
 // `values` 为 enum 字段推导出具体联合类型；运行时校验仍由 validator 提供。
 const status = createModel({
   state: {
-    type: 'enum' as const,
+    type: 'enum',
     values: ['draft', 'published'] as const,
     default: 'draft',
   },

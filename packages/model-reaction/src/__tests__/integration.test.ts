@@ -124,7 +124,7 @@ describe('Integration Tests — Full Documentation Scenarios', () => {
             expect(errorCb.mock.calls[0][0].rule).toBe('required');
         });
 
-        test('should emit field:not-found when accessing non-existent field', async () => {
+        test('should emit field:not-found when setting a non-existent field', async () => {
             const notFoundCb = jest.fn();
             userModel.on('field:not-found', notFoundCb);
 

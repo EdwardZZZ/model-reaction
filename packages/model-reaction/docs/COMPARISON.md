@@ -19,7 +19,7 @@ you pick the right tool.
 | Library | Positioning |
 |---------|-------------|
 | **Redux (Toolkit)** | Single global store + immutable updates + strict unidirectional flow → an **application-level state container** |
-| **zustand** | Minimal hook-based **general-purpose state container**, multi-store, mutable updates allowed |
+| **zustand** | Minimal hook-based **general-purpose state container** with direct `set` / `get` APIs and multi-store support |
 | **model-reaction** | Schema-driven **domain model / form layer** with built-in validation, reactions, dirty-data, and unified error handling |
 
 ---
@@ -28,10 +28,9 @@ you pick the right tool.
 
 | Dimension | Redux Toolkit | zustand | model-reaction |
 |-----------|---------------|---------|----------------|
-| Bundle size | ~12KB (full RTK) | ~1KB | ~6KB |
 | API surface | Medium (store/reducer/action/slice/selector) | Minimal (`create`/`set`/`get`) | Medium (schema-first, centralized) |
 | Modeling style | Imperative reducers | Imperative store | **Declarative schema** |
-| Immutability | Enforced (Immer built-in) | Mutable by default | Internal `deepEqual` + replace |
+| Update model | Immutable reducers (Immer built-in) | Immutable updates by convention; Immer optional | Field replacement + shallow-frozen snapshots |
 | Scope | Single global | Multi-store / slice | **One model per domain** |
 | Validation | ❌ none | ❌ none | ✅ sync / async / conditional / cross-field |
 | Derived values | reselect | selectors + middleware | ✅ **schema-level reactions** |
@@ -102,9 +101,9 @@ model-reaction:  setField -> [transform] -> [validate] -> commit -> [reaction] -
 - **Validation built-in**: sync / async / conditional / cross-field, plus
   `dirtyData` + `validationErrors` + `formatValidationErrors`.
 - **Reactions built-in**: `fields → computed → action`, with automatic
-  dependency tracking and circular-dependency detection.
-- **Field-level subscriptions**: `subscribeField` / `useModelField` are
-  more precise than selectors + memoization.
+  scheduling from declared dependencies and circular-dependency detection.
+- **Field-level subscriptions**: `subscribeField` / `useModelField` provide a
+  direct single-field path without writing selectors.
 - **Async coordination**: `settled()` waits for *all* pending reactions
   and validations in one line.
 - **Error classification**: typed model error events — cleaner
@@ -113,7 +112,8 @@ model-reaction:  setField -> [transform] -> [validate] -> commit -> [reaction] -
 **Cons**
 - **Not a general-purpose store**: not designed for UI / routing / global
   shared state.
-- **Thin ecosystem**: no DevTools, no persist, no middleware story yet.
+- **Thin ecosystem**: a dedicated DevTools extension exists, but there is no
+  persistence or middleware ecosystem.
 - **Weak multi-store coordination**: cross-model orchestration is manual
   (wired by hand via `subscribeField`). Note this refers to linking
   **multiple independent models**, not "large forms must be split into

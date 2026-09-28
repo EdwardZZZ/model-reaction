@@ -86,19 +86,11 @@ export class ModelManager<
      * Seed `data` from each field's `default`, then run one initial reaction
      * pass so derived fields start with a correct value.
      *
-     * Only **non-derived** seeded fields (those without their own `reaction`)
-     * are triggered. A derived field's `default` is just a placeholder that its
-     * reaction is about to overwrite, so triggering off it is wrong twice over:
-     * it would compute downstream reactions against the stale placeholder, and
-     * it would poison the reaction stack so the real cascade (once the field
-     * commits) is misread as a circular dependency and skipped. Feeding only the
-     * input fields lets the cascade compute derived fields in dependency order.
-     *
-     * Defaults are still written straight into `data` and **bypass validation**
-     * (see AGENTS.md §3 pitfall #6 — that half is intentional and preserved).
-     * The pass goes through the same batched path as `setFields`, so it is
-     * tracked by `settled()`, and a derived field's own validator still applies
-     * to the computed value (pitfall #7 unchanged).
+     * Only non-derived defaults are reaction inputs. Treating a derived
+     * field's placeholder default as a change can run downstream work with a
+     * stale value and create a false cycle when the real value commits.
+     * Defaults bypass validation, but computed values use the normal validated
+     * commit path and the initial pass is tracked by `settled()`.
      */
     private initializeDefaults(): void {
         const seededInputs: string[] = [];

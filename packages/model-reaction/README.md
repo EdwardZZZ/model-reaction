@@ -98,7 +98,8 @@ const m = createModel({
 
 ### Dirty Data
 
-Values that fail validation are recorded as "dirty" and kept separate from the clean state.
+Values that fail validation are recorded as "dirty" and kept separate from the
+committed state.
 
 ```typescript
 user.getDirtyData();   // values that failed validation

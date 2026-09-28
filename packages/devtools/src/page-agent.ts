@@ -181,7 +181,6 @@ function handlePanelMessage(
         });
         return;
     }
-    // get-snapshot
     const entry = tracked.get(msg.id);
     if (entry) {
         post({

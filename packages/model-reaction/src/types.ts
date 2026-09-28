@@ -14,12 +14,12 @@ export type ModelErrorEvent =
     | typeof ModelEvents.DEPENDENCY_ERROR
     | typeof ModelEvents.FIELD_NOT_FOUND;
 
-// Enhanced validator interface
+/** Runtime validation rule. */
 export interface Validator {
     type: string;
     message: string;
     validate: (value: any, data?: Record<string, any>) => boolean | Promise<boolean>;
-    // Optional conditional validation
+    /** Skip this validator when the predicate returns false. */
     condition?: (data: Record<string, any>) => boolean;
 }
 
@@ -27,7 +27,7 @@ export interface ValidationError {
     field: string;
     message: string;
     rule?: string;
-    // Add error code to support internationalization
+    /** Application-defined localization or classification key. */
     code?: string;
 }
 
@@ -68,22 +68,20 @@ export interface Reaction {
     action?: (data: Record<string, any>) => void | PromiseLike<void>;
 }
 
-// Enhanced field schema interface
 export interface FieldSchema {
-    // Field type - added date and enum types
+    /** Type metadata used for inference and tooling; not runtime validation. */
     type: 'string' | 'number' | 'boolean' | 'object' | 'array' | 'date' | 'enum';
-    // Validation rules
     validator?: Validator[];
-    // Default value
+    /** Initial value, seeded without validation. */
     default?: unknown;
-    // Optional literal set for enum fields; enables useful schema inference.
+    /** Literal set used to infer enum values; validators enforce membership. */
     values?: readonly unknown[];
     /**
      * Reaction definition. When an array is used, matching reactions are
      * scheduled in declaration order for each changed dependency field.
      */
     reaction?: Reaction | Reaction[];
-    // Value transformation function
+    /** Transform input before validation. */
     transform?: (value: any) => any;
 }
 
@@ -135,13 +133,13 @@ export type InferModelData<S extends Record<string, FieldSchema>> = {
 };
 
 export interface ModelOptions {
-    // Async validation timeout in milliseconds
+    /** Async validation timeout in milliseconds. */
     asyncValidationTimeout?: number;
-    // Debounce time for reaction triggers in milliseconds
+    /** Debounce window for reactions in milliseconds. */
     debounceReactions?: number;
-    // Strict mode (unknown fields will throw errors)
+    /** Throw when a write targets a field absent from the schema. */
     strictMode?: boolean;
-    // Validation strategy: if true, stop validating a field after the first error
+    /** Stop validating a field after its first error. */
     failFast?: boolean;
 }
 
@@ -161,7 +159,7 @@ export interface ModelReturn<T = Record<string, any>> {
     /** Return a stable shallow read-only snapshot of rejected input values. */
     getDirtyData: () => Readonly<Partial<T>>;
     clearDirtyData: () => void;
-    // Wait for all pending reactions and validations to complete
+    /** Wait for pending reactions and validations to complete. */
     settled: () => Promise<void>;
     dispose: () => void;
     /** Subscribe to a single field; returns an unsubscribe function. */

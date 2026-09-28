@@ -5,13 +5,13 @@
 ## 1. 性能优化
 
 ### 大型表单处理
-- 使用 `debounceReactions` 选项减少频繁触发的反应
-- 考虑使用虚拟滚动处理大型列表数据
+- 快速写入会重复触发昂贵派生计算时，使用 `debounceReactions`。
+- 无关表单使用独立 model，隔离订阅与生命周期。
 
 ### 异步验证优化
-- 实现验证结果缓存，避免重复验证相同值
-- 使用 `asyncValidationTimeout` 控制验证超时
-- 对用户输入使用防抖处理，减少验证请求次数
+- 可安全复用结果时，在服务边界缓存远程校验结果。
+- 按后端服务特征设置 `asyncValidationTimeout`。
+- 远程 validator 不应在每次按键时执行时，先对输入做防抖，再调用 `setField`。
 
 ## 2. 错误处理
 
@@ -26,57 +26,57 @@ unsubscribe();
 ```
 
 ### 字段级错误处理
-- 使用 `validationErrors` 对象获取特定字段的错误
-- 结合 UI 显示每个字段的错误信息
-- 使用 `formatValidationErrors(model.validationErrors)` 获取错误摘要
+- 从 `validationErrors[field]` 读取字段错误。
+- 使用 `formatValidationErrors(model.validationErrors)` 生成提交错误摘要。
 
 ## 3. 复杂业务规则
 
 ### 反应系统设计
-- 保持 `computed` 函数纯净，只用于计算值
-- 在 `action` 中处理副作用
-- 使用依赖图优化复杂反应链
+- 保持 `computed` 为纯函数，把副作用放在 `action`。
+- `computed` 读取的每个值都必须声明在 `reaction.fields` 中。
+- 优先用一个包含完整依赖的 reaction，避免多个 reaction 竞争写入同一目标。
 
 ### 条件验证
-- 使用自定义 `Rule` 实现复杂条件验证
-- 利用验证器的 `data` 参数访问其他字段值
-- 对于复杂逻辑，考虑封装为独立验证服务
+- 条件规则使用 `Rule.when(...)`。
+- 通过 validator 的 `data` 参数读取其他字段。
+- 将共享领域检查提取为具名规则或验证服务。
 
 ## 4. 测试策略
 
 ### 单元测试
-- 测试每个字段的验证规则
-- 测试反应系统的正确性
-- 测试错误处理流程
+- 测试规则边界、transform 与自定义错误文案。
+- 测试 reaction 链、循环与派生值校验失败。
+- 测试非法写入只更新 `dirtyData`，不改变 `data`。
 
 ### 集成测试
-- 测试完整表单提交流程
-- 测试异步验证集成
-- 测试与 UI 组件的交互
+- 使用 `validateAll()` 与 `settled()` 测试完整提交流程。
+- 测试过期异步校验结果与防抖 reaction。
+- 测试字段级 React 更新与 owner 清理。
 
 ## 5. 代码组织
 
 ### 大型应用结构
-- 按功能模块组织模型定义
-- 将通用验证规则提取为共享库
-- 使用组合而非继承扩展模型功能
+- 每个领域模型使用独立模块。
+- 大型 schema 由职责单一的片段组合。
+- 将复用的校验规则提取到独立模块。
 
 ### 可维护性建议
-- 为每个模型添加清晰的文档注释
-- 保持模型定义简洁，避免过度复杂
-- 定期重构和优化反应系统
+- 保持模型定义声明式，将编排逻辑放进具名领域函数。
+- 只注释不明显的约束与取舍，不复述 schema 已表达的字段含义。
 
 ## 6. 类型安全
 
 ### 定义接口
-- 始终为您的数据模型定义 TypeScript 接口。
-- 使用 `createModel<Interface>(...)` 来强制进行 Schema 验证。
-- 这可以防止因缺少字段或类型错误而导致的运行时错误。
+- 领域已有明确数据契约时使用 `createModel<Interface>(...)`；小型局部模型可直接
+  使用 schema 推导。
+- TypeScript 会在编译期检查 schema 字段和 setter 的值类型。
+- `FieldSchema.type` 不负责运行时校验；来自无类型边界的值仍需配置内置或自定义
+  validator。
 
 ### 严格的 Schema 匹配
-- 库强制要求您的 Schema 与您的 Interface 完全匹配。
-- Interface 中的所有必填字段都必须存在于 Schema 中。
-- 不允许在 Schema 中出现 Interface 中未定义的额外字段。
+- 内联 schema 使用 `createModel<Interface>(...)` 时，TypeScript 会报告缺失的必填
+  字段和多余字段。
+- 运行时校验与这份编译期契约应分别处理。
 
 ## 7. React 集成
 
@@ -87,13 +87,17 @@ unsubscribe();
 
 | 需求 | 用 |
 | --- | --- |
-| 单个字段的受控输入 | `useModelField` 或 `useModelFieldState` |
-| 派生值（求和、格式化等） | `useModelSelector` |
+| 展示单个字段 | `useModelField` |
+| 需要值 / 错误 / pending 状态的受控字段 | `useModelFieldState` |
+| 带严格或异步校验的文本输入 | `useDraftField` |
+| 稳定的派生 selector | `useModelSelector` |
+| 闭包当前 props 的 selector | `useModelComputed` |
 | 一次订阅多个字段 | `useModelFields(model, ['a', 'b'])` |
-| 含 error / dirty / validating 的表单绑定 | `useModelFieldState` |
 
 优先选择最具体的 hook：`useModelField` 比 `useModelSelector` 更轻量，
-而 `useModelFields` 比手写一个返回新对象的 selector 更高效。
+而 `useModelFields` 比手写一个返回新对象的 selector 更高效。把已校验的文本输入
+直接绑定到已提交数据之前，请先阅读
+[REACT_CN.md](REACT_CN.md#严格--异步校验下的受控输入)。
 
 ### 7.2 selector 引用要稳定
 
@@ -191,8 +195,8 @@ async function onSubmit() {
 }
 ```
 
-当反应或异步校验有防抖时，`settled()` 才是读取 `model.data` 前模型已稳定
-的唯一保证。
+当 reaction 带防抖或校验会触发级联异步工作时，`settled()` 可保证读取
+`model.data` 前模型已经稳定。
 
 ### 7.7 一个逻辑表单一个 model
 
@@ -235,7 +239,8 @@ function UserRoute({ children }: { children: ReactNode }) {
 }
 ```
 
-切勿对仍有挂载订阅者的 model 调用 `dispose`，否则下一次读取会抛错。
+应由卸载订阅者的同一个 owner 调用 `dispose()`。被释放的 model 已清空内部状态
+和监听器，后续写入会抛错。
 
 ### 7.9 SSR 与并发渲染
 
@@ -272,25 +277,20 @@ const useUI = create<{ drawerOpen: boolean; toggle: () => void }>((set) => ({
     toggle: () => set((s) => ({ drawerOpen: !s.drawerOpen })),
 }));
 
-// 业务表单 —— model-reaction
-const userModel = createModel<User>({
-    name: { type: 'string', default: '', validator: [ValidationRules.required] },
-    email: { type: 'string', default: '', validator: [ValidationRules.email] },
-});
-
 function UserDrawer() {
     const open = useUI((s) => s.drawerOpen);
     if (!open) return null;
     return (
-        <ModelProvider model={userModel}>
+        <UserRoute>
             <UserForm />
-        </ModelProvider>
+        </UserRoute>
     );
 }
 ```
 
 经验法则：zustand 管**应用状态**（开/关、当前用户 id、主题）；
 `model-reaction` 管**实体状态**（正在编辑的用户记录及其规则）。
+`UserRoute` 沿用 §7.8 的生命周期模式，在抽屉关闭时释放 model。
 
 #### 7.10.3 与 Redux Toolkit 组合
 
@@ -314,7 +314,7 @@ function EditUserPage() {
         const owned = createModel<User>(userSchema);
         setModel(owned);
         return () => owned.dispose();
-    }, []);
+    }, [userId]);
 
     if (!model) return null;
 

@@ -201,23 +201,23 @@ console.log(model.getField('target')); // 'HELLO'
 // 1. Explicit type argument (recommended for complex models):
 const user = createModel<User>(userSchema);
 
-// 2. Inferred from a schema literal (use `as const` on each `type`):
+// 2. Inferred from a schema literal:
 const m = createModel({
-  name: { type: 'string'  as const, default: '' },
-  age:  { type: 'number'  as const, default: 0 },
-  ok:   { type: 'boolean' as const, default: false },
+  name: { type: 'string', default: '' },
+  age:  { type: 'number', default: 0 },
+  ok:   { type: 'boolean', default: false },
 });
 // m.data is typed as { name: string; age: number; ok: boolean }
 
 // Without a default, the inferred value also includes undefined.
-const optional = createModel({ note: { type: 'string' as const } });
+const optional = createModel({ note: { type: 'string' } });
 // optional.data.note is string | undefined
 
 // `values` gives an enum field a useful inferred union. Runtime validation
 // still comes from the field's validators.
 const status = createModel({
   state: {
-    type: 'enum' as const,
+    type: 'enum',
     values: ['draft', 'published'] as const,
     default: 'draft',
   },

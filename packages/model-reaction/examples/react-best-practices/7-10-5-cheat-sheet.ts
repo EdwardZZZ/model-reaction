@@ -12,9 +12,7 @@
  *   npm install @reduxjs/toolkit zustand
  */
 
-// eslint-disable-next-line import/no-unresolved
 import { createSlice } from '@reduxjs/toolkit';
-// eslint-disable-next-line import/no-unresolved
 import { create } from 'zustand';
 
 import { createModel, ValidationRules } from '../../src/index';

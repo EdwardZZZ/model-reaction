@@ -50,8 +50,7 @@ export function createModel(
     const model = baseCreateModel(schema as Model<Record<string, any>>, options);
 
     const hook = getDevtoolsHook();
-    // No front-end listening → hand back the untouched model. This mirrors the
-    // core's zero-overhead guarantee: a single property read, nothing built.
+    // Avoid building integration state when no front-end is listening.
     if (!hook) return model;
 
     const modelSchema = schema as Model;

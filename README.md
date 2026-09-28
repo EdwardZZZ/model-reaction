@@ -20,9 +20,11 @@ Start with the library's own README — [English](packages/model-reaction/README
 # Requires Node >=18 and pnpm.
 pnpm install
 
-# Run everything (recursive across packages):
-pnpm -r run test
-pnpm -r run build
+# Run repository checks:
+pnpm run lint
+pnpm run typecheck
+pnpm run test
+pnpm run build
 
 # Or target one package:
 pnpm --filter model-reaction run test        # library
@@ -39,9 +41,7 @@ pnpm --filter model-reaction-demo run dev     # demo dev server
 │   ├── devtools/         # browser extension
 │   └── demo/             # Vite + React demo
 ├── pnpm-workspace.yaml
-├── tsconfig.base.json    # shared compiler options (each package extends it)
-└── docs/
-    └── MONOREPO_MIGRATION.md   # how this repo became a monorepo
+└── tsconfig.base.json    # shared compiler options (each package extends it)
 ```
 
 ## License

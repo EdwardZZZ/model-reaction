@@ -24,7 +24,7 @@
 | --- | --- | --- |
 | `useModelField(model, field)` | hook | 订阅单个字段 |
 | `useModelSelector(model, selector, isEqual?)` | hook | 订阅派生值（selector 引用是订阅的一部分，请用 `useCallback` 锁定） |
-| `useModelComputed(model, selector, isEqual?)` | hook | 与 `useModelSelector` 形参相同，但 selector / `isEqual` 通过 ref 每次渲染刷新——内联箭头函数与渲染期闭包变量（`id`、`index` 等）无需 `useCallback` |
+| `useModelComputed(model, selector, isEqual?)` | hook | 与 `useModelSelector` 形参相同，但订阅不依赖 selector 引用；当前 render 的 selector 可直接闭包 `id`、`index` 等 props，无需 `useCallback` |
 | `useModelFields(model, fields)` | hook | 一次订阅多个字段（浅比较） |
 | `useModelFieldState(model, field)` | hook | `[value, setValue, meta]` 一体化表单绑定，含 `error / dirty / validating` |
 | `useDraftField(model, field, options?)` | hook | **可选** 受控输入绑定：在 `useModelFieldState` 之上加本地 draft + `touched`/错误门控。用于严格/异步校验 |
@@ -245,11 +245,9 @@ value→text（回填）方向上有两个边界情况，`useDraftField` 内部�
 
 ## React 中的 Model 生命周期
 
-一个 `model` 实例会持有 reactions、内部事件监听器和未完成的验证定时器。
-这些资源不会因为 JavaScript GC 自动知道该清理什么；如果忘记调用
-`dispose()`，model 以及它闭包里引用的值都会继续存活。在 React 里，
-最常见的问题是：**把 model 写成模块级 singleton，并在多个路由 / 测试 /
-浏览器 tab 之间共享，却没有任何地方负责清理**。
+一个 `model` 实例会持有 reaction 定时器、订阅和未完成的验证任务；
+`dispose()` 用于确定性地取消或释放这些资源。在 React 中，常见的所有权问题是：
+**把 model 写成模块级 singleton，在多个路由或测试之间共享，却没有对应的清理**。
 
 ### 反例：模块级 singleton
 
@@ -263,8 +261,8 @@ export const userModel = createModel({ /* ... */ });
 
 典型症状：
 - 测试之间互相污染状态（jest worker 读到旧的 `data`）。
-- 热更新后 reaction handler 被重复注册。
-- 多 tab 应用里看到已经关闭视图留下的幽灵更新。
+- 同时挂载的多个编辑器意外共享状态。
+- 带防抖的异步任务在发起它的视图卸载后继续执行。
 
 ### 修复 A：Provider owner 管理 dispose
 
@@ -334,7 +332,7 @@ function EditUserRoute({ userId }: { userId: string }) {
 | 跨路由共享 | 是（意外共享） | 是（限定在子树内的有意共享） | 否 |
 | `dispose()` 触发点 | 永不触发 | owner 卸载 | 路由卸载 |
 | 测试隔离 | 破坏 | 正常（每个测试重新挂载） | 正常（每个测试重新挂载） |
-| 多 tab 安全性 | dev 下容易泄漏 | 每个 tab 拥有自己的树 | 每个 tab 拥有自己的树 |
+| 并行编辑器 | 共享同一实例 | 仅在 owner 子树内共享 | 各自拥有独立实例 |
 | 复杂度 | 最低 | 低 | 低 |
 | 推荐场景 | 不推荐 | 应用级 / 功能级共享状态 | 路由或弹窗内的局部状态 |
 
@@ -417,11 +415,9 @@ function Row({ id }: { id: string }) {
    │        （模型层 isEqual 直接挡住变更，不进 React 调度）
    └── 否 → 继续 ↓
 
-4. selector 是否需要跨组件复用，或希望被中间件 / devtools 观测？
+4. selector 是否需要跨组件复用？
    ├── 是 → useModelSelector
-   │        （selector 身份位于模型层，可被插桩；
-   │         useModelComputed 的 selector 只活在 React 渲染中，
-   │         无法被库捕获）
+   │        （提升为稳定 selector 并复用）
    └── 否 → 继续 ↓
 
 5. 你愿意为 selector 写 useCallback 吗？
@@ -439,7 +435,8 @@ function Row({ id }: { id: string }) {
 | 高频字段（动画、鼠标、防抖）扇出到不相关订阅者 | 模型层 `isEqual` 能直接挡掉无关变更，不进 React 调度 | `useModelSelector` |
 | selector 闭包了 `id` / `index` 等渲染期变量 | `useModelSelector` 要么读到旧值，要么每次 render 都重订阅 | `useModelComputed` |
 | 一次性原型 / 短生命周期组件，selector 很轻 | `useCallback` 的纪律成本超过每次 render 跑一次 selector 的开销 | `useModelComputed` |
-| selector 需要被中间件 / devtools 观测 | 身份必须存在于模型层 | `useModelSelector` |
-| selector 包含副作用或非纯逻辑（`console.log`、计数、调试日志） | `useSyncExternalStore` 要求 `getSnapshot` 必须纯 | `useModelSelector` |
+| selector 会跨组件复用 | 提升后的稳定 selector 可避免重复闭包并保留单一定义 | `useModelSelector` |
 
-> 一句话总结：`useModelSelector` 是 **性能上限**（模型层去重，**每次 commit** 跑一次）；`useModelComputed` 是 **便利下限**（组件层去重，**每次 render** 跑一次）。二者**不可互相替代**，请同时保留并按场景选用。
+> 一句话总结：`useModelSelector` 是 **性能上限**（模型层去重，**每次 commit**
+> 跑一次）；`useModelComputed` 是 **便利下限**（组件层去重，**每次 render**
+> 跑一次）。二者**不可互相替代**；传给两者的 selector 都必须保持纯函数。

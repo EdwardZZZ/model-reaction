@@ -6,7 +6,7 @@
  *
  * This is deliberately **read-only**: replaying a value back into the model
  * (true time-travel) is out of scope for now because it would re-trigger
- * reactions and could poison `dirtyData` — see the README "Limitations (TBD)".
+ * reactions and could poison `dirtyData`.
  */
 import { useState, type ReactElement } from 'react';
 import type { ChangeEntry, InstanceState } from '../protocol';
@@ -24,7 +24,6 @@ export function TimelineView({ instance }: TimelineViewProps): ReactElement {
         return <div className="mrd-empty">No changes recorded yet — edit a field to see it here.</div>;
     }
 
-    // Newest first for display.
     const ordered = [...timeline].sort((a, b) => b.seq - a.seq);
     const selected =
         selectedSeq === null ? null : timeline.find((c) => c.seq === selectedSeq) ?? null;

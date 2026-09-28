@@ -15,7 +15,6 @@ import * as React from 'react';
 import { useEffect, useState } from 'react';
 void React;
 
-// eslint-disable-next-line import/no-unresolved
 import { useDispatch, useSelector } from 'react-redux';
 
 import { createModel, type ModelReturn } from '../../src/index';
@@ -36,7 +35,6 @@ function UserForm({ onSubmit }: { onSubmit: () => void }) {
 }
 
 export function EditUserPage() {
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const userId = useSelector(selectCurrentUserId);
     const dispatch = useDispatch();
     const [model, setModel] = useState<ModelReturn<User> | null>(null);
@@ -44,7 +42,7 @@ export function EditUserPage() {
         const owned = createModel<User>(userSchema);
         setModel(owned);
         return () => owned.dispose();
-    }, []);
+    }, [userId]);
 
     if (!model) return null;
 

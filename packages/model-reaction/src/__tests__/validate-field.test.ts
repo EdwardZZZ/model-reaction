@@ -584,7 +584,6 @@ describe('validateField race-condition (H8): stale async errors are guarded', ()
         firstResolve!(false);
         expect(await p1).toBe(false);
 
-        // current errors should still be clean for f
         expect(model.validationErrors.f || []).toEqual([]);
         expect(model.getField('f')).toBe('new');
         model.dispose();

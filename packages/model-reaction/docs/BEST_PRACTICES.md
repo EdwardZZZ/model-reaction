@@ -5,13 +5,17 @@
 ## 1. Performance Optimization
 
 ### Large Form Handling
-- Use the `debounceReactions` option to reduce frequently triggered reactions
-- Consider using virtual scrolling for large list data
+- Use `debounceReactions` when rapid writes would repeatedly run expensive
+  derived work.
+- Keep unrelated forms in separate models so their subscriptions and
+  lifecycles remain independent.
 
 ### Asynchronous Validation Optimization
-- Implement validation result caching to avoid re-validating the same values
-- Use `asyncValidationTimeout` to control validation timeouts
-- Apply debouncing to user input to reduce the number of validation requests
+- Cache remote validation results at the service boundary when requests are
+  safe to reuse.
+- Set `asyncValidationTimeout` to a value appropriate for the backing service.
+- Debounce input before calling `setField` when a remote validator should not
+  run on every keystroke.
 
 ## 2. Error Handling
 
@@ -26,57 +30,61 @@ unsubscribe();
 ```
 
 ### Field-Level Error Handling
-- Use the `validationErrors` object to get errors for specific fields
-- Display error messages for each field in the UI
-- Use `formatValidationErrors(model.validationErrors)` for an error summary
+- Read field errors from `validationErrors[field]`.
+- Use `formatValidationErrors(model.validationErrors)` for a submission
+  summary.
 
 ## 3. Complex Business Rules
 
 ### Reaction System Design
-- Keep `computed` functions pure, only for calculating values
-- Handle side effects in `action`
-- Use dependency graphs to optimize complex reaction chains
+- Keep `computed` functions pure and put side effects in `action`.
+- Declare every value read by `computed` in `reaction.fields`.
+- Prefer one reaction with all required dependencies over competing reactions
+  that write the same target.
 
 ### Conditional Validation
-- Implement complex conditional validation using custom `Rule`
-- Access other field values using the validator's `data` parameter
-- For complex logic, consider encapsulating it as a separate validation service
+- Use `Rule.when(...)` for conditional rules.
+- Read other fields through the validator's `data` parameter.
+- Extract shared domain checks into named rules or validation services.
 
 ## 4. Testing Strategy
 
 ### Unit Testing
-- Test validation rules for each field
-- Test the correctness of the reaction system
-- Test error handling flow
+- Test rule boundaries, transforms, and custom messages.
+- Test reaction chains, cycles, and rejected computed values.
+- Test that invalid writes update `dirtyData` without changing `data`.
 
 ### Integration Testing
-- Test complete form submission flow
-- Test asynchronous validation integration
-- Test interaction with UI components
+- Test complete submission flows with `validateAll()` and `settled()`.
+- Test stale async validation results and debounced reactions.
+- Test field-level React updates and owner cleanup.
 
 ## 5. Code Organization
 
 ### Large Application Structure
-- Organize model definitions by functional modules
-- Extract common validation rules into shared libraries
-- Use composition instead of inheritance to extend model functionality
+- Keep each domain model in its own module.
+- Compose large schemas from focused fragments.
+- Extract reusable validation rules into dedicated modules.
 
 ### Maintainability Recommendations
-- Add clear documentation comments for each model
-- Keep model definitions concise, avoiding excessive complexity
-- Regularly refactor and optimize the reaction system
+- Keep model definitions declarative and move orchestration into named domain
+  functions.
+- Comment non-obvious invariants and trade-offs, not field names already
+  expressed by the schema.
 
 ## 6. Type Safety
 
 ### Define Interfaces
-- Always define a TypeScript interface for your data model.
-- Use `createModel<Interface>(...)` to enforce schema validation.
-- This prevents runtime errors caused by missing fields or incorrect types.
+- Use `createModel<Interface>(...)` when a domain already has an explicit
+  contract; use schema inference for smaller local models.
+- TypeScript checks schema keys and setter values at compile time.
+- `FieldSchema.type` does not validate runtime input. Add built-in or custom
+  validators for values that cross an untyped boundary.
 
 ### Strict Schema Matching
-- The library enforces that your Schema matches your Interface exactly.
-- All required fields in the Interface must be present in the Schema.
-- Extra fields not in the Interface are not allowed in the Schema.
+- With an inline schema, TypeScript reports missing required fields and excess
+  fields when using `createModel<Interface>(...)`.
+- Keep runtime validation separate from this compile-time contract.
 
 ## 7. React Integration
 
@@ -88,14 +96,18 @@ get the most out of them.
 
 | Need | Use |
 | --- | --- |
-| One field, controlled input | `useModelField` or `useModelFieldState` |
-| Derived value (sum, formatting, etc.) | `useModelSelector` |
+| Display one field | `useModelField` |
+| Controlled field with value / errors / pending state | `useModelFieldState` |
+| Text input with strict or async validation | `useDraftField` |
+| Stable derived selector | `useModelSelector` |
+| Selector that closes over current props | `useModelComputed` |
 | Several fields together | `useModelFields(model, ['a', 'b'])` |
-| Form-style binding with error / dirty / validating | `useModelFieldState` |
 
 Prefer the most specific hook. `useModelField` is cheaper than
 `useModelSelector`, and `useModelFields` is cheaper than a hand-written
-selector that returns a fresh object every render.
+selector that returns a fresh object every render. See
+[REACT.md](REACT.md#controlled-inputs-under-strict--async-validation) before
+binding a text input with validation directly to committed model data.
 
 ### 7.2 Stable selector references
 
@@ -198,8 +210,8 @@ async function onSubmit() {
 }
 ```
 
-If reactions or async validators are debounced, `settled()` is what
-guarantees a quiet model before reading `model.data`.
+If reactions are debounced or async work cascades from validation,
+`settled()` guarantees a quiet model before reading `model.data`.
 
 ### 7.7 One model per logical form
 
@@ -242,8 +254,9 @@ function UserRoute({ children }: { children: ReactNode }) {
 }
 ```
 
-Do not dispose a model that still has mounted subscribers — they will
-throw on next read.
+Dispose the model from the same owner that unmounts its subscribers. Mutating a
+disposed model throws, while its internal state and listeners have already been
+cleared.
 
 ### 7.9 SSR and concurrent rendering
 
@@ -281,26 +294,21 @@ const useUI = create<{ drawerOpen: boolean; toggle: () => void }>((set) => ({
     toggle: () => set((s) => ({ drawerOpen: !s.drawerOpen })),
 }));
 
-// Domain form — model-reaction
-const userModel = createModel<User>({
-    name: { type: 'string', default: '', validator: [ValidationRules.required] },
-    email: { type: 'string', default: '', validator: [ValidationRules.email] },
-});
-
 function UserDrawer() {
     const open = useUI((s) => s.drawerOpen);
     if (!open) return null;
     return (
-        <ModelProvider model={userModel}>
+        <UserRoute>
             <UserForm />
-        </ModelProvider>
+        </UserRoute>
     );
 }
 ```
 
 Rule of thumb: zustand owns *application* state (open / closed, current
 user id, theme); `model-reaction` owns *entity* state (the user record
-being edited, including its rules).
+being edited, including its rules). `UserRoute` follows the lifecycle
+pattern from §7.8 and disposes the model when the drawer closes.
 
 #### 7.10.3 Combine with Redux Toolkit
 
@@ -325,7 +333,7 @@ function EditUserPage() {
         const owned = createModel<User>(userSchema);
         setModel(owned);
         return () => owned.dispose();
-    }, []);
+    }, [userId]);
 
     if (!model) return null;
 

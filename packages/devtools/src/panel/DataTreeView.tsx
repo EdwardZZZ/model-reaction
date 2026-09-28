@@ -1,5 +1,5 @@
 /**
- * Data-tree view: renders a model instance's three layers — validated `data`,
+ * Data-tree view: renders a model instance's three layers — committed `data`,
  * failed `dirtyData`, and `errors` — each as a collapsible section. This maps
  * directly to the library's mental model (see AGENTS.md §1).
  */
@@ -18,7 +18,7 @@ export function DataTreeView({ instance }: DataTreeViewProps): ReactElement {
 
     return (
         <div className="mrd-datatree">
-            <Section title="data" subtitle="validated source of truth" count={Object.keys(data).length}>
+            <Section title="data" subtitle="committed source of truth" count={Object.keys(data).length}>
                 <RecordTree record={data} />
             </Section>
 

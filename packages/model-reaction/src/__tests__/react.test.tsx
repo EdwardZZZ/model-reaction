@@ -3,8 +3,8 @@
  *
  * Tests for the React adapter (`src/react.ts`):
  * - `useModelSelector`: selector + custom `isEqual` re-render suppression
- * - `useModelComputed`: ref-locked variant that does not resubscribe on
- *   selector identity changes
+ * - `useModelComputed`: stable-subscription variant that accepts changing
+ *   selector identities.
  */
 import * as React from 'react';
 import { useCallback, useRef, useState } from 'react';
@@ -382,8 +382,7 @@ describe('useModelComputed', () => {
         render(<Row initialId="a" />);
         expect(lastName).toBe('A');
 
-        // Closure variable `id` updates between renders. Without ref-locked
-        // semantics we'd be stuck on 'A'.
+        // The selector must read the latest `id` without resubscribing.
         await act(async () => {
             setId('b');
         });

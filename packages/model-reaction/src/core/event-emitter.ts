@@ -1,4 +1,3 @@
-// Event emitter class
 export class EventEmitter<
     Events extends Record<string, any> = Record<string, any>,
 > {
@@ -6,7 +5,6 @@ export class EventEmitter<
         [E in keyof Events]: Array<(data: Events[E]) => void>;
     }> = {};
 
-    // Subscribe to event
     on<E extends keyof Events>(
         event: E,
         callback: (data: Events[E]) => void
@@ -17,7 +15,6 @@ export class EventEmitter<
         this.events[event]!.push(callback);
     }
 
-    // Unsubscribe from event
     off<E extends keyof Events>(
         event: E,
         callback?: (data: Events[E]) => void
@@ -33,7 +30,6 @@ export class EventEmitter<
         }
     }
 
-    // Trigger event
     emit<E extends keyof Events>(event: E, data: Events[E]): void {
         if (this.events[event]) {
             // Snapshot listeners so on/off during dispatch don't affect this iteration
@@ -53,7 +49,6 @@ export class EventEmitter<
         }
     }
 
-    // Clear all events
     clear(): void {
         this.events = {};
     }

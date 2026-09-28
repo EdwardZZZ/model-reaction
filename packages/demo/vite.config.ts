@@ -8,8 +8,8 @@ const lib = (p: string) => resolve(here, '../model-reaction/src', p);
 
 // Alias the workspace dependency to the library *source* (not built dist), so
 // editing the library is reflected instantly in `dev` and the demo build never
-// depends on the library being built first. Mirrors the devtools package's
-// jest/tsconfig source-mapping (see docs/MONOREPO_MIGRATION.md).
+// depends on the library being built first. The DevTools tests use the same
+// source-mapping approach.
 export default defineConfig({
     plugins: [react()],
     resolve: {

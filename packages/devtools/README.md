@@ -34,13 +34,15 @@ devtools/
 
 ## Build
 
+From the repository root:
+
 ```bash
-node build.mjs          # → dist/  (load unpacked in chrome://extensions)
+pnpm --filter model-reaction-devtools run build
 ```
 
 ## Test & typecheck
 
-Run via pnpm workspace filters (from anywhere in the repo):
+From the repository root:
 
 ```bash
 pnpm --filter model-reaction-devtools run test

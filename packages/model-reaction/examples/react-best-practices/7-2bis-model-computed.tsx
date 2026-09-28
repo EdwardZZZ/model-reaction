@@ -1,9 +1,8 @@
 /**
- * BEST_PRACTICES §7.2bis — `useModelComputed` (ref-locked selector)
+ * BEST_PRACTICES §7.2bis — `useModelComputed`
  *
- * Variant of `useModelSelector` that stores `selector` / `isEqual` in
- * refs refreshed on every render. The underlying subscription is **not**
- * recreated when the selector reference changes, so:
+ * Variant of `useModelSelector` whose subscription does not depend on selector
+ * identity. The current render's selector is used for snapshots, so:
  *   - inline arrow functions are fine (no `useCallback` needed);
  *   - per-render closure variables (e.g. `id`) always reflect the latest
  *     render without resubscribing.

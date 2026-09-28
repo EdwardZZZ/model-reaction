@@ -25,7 +25,11 @@
 展示校验失败的输入如何被转存到 `dirtyData`（可通过 `getDirtyData()` 取回、`clearDirtyData()` 清空）而不污染 `data`，以及 `Rule.when(predicate)` 如何让规则仅在满足跨字段条件时才生效。
 
 ### React 绑定示例 (react-bindings.tsx)
-展示如何使用 `model-reaction/react` 适配层（`useModelField`、`useModelSelector`）实现字段级与 selector 级的组件订阅，以及 Schema 类型推导。可直接拷贝到 React 18+ 项目中使用（不能通过 CLI 直接运行）。
+展示字段级与 selector 级 React 订阅、Provider 所有权、表单元数据、本地 draft
+与 Schema 类型推导。包脚本会通过 `react-dom/server` 渲染该示例。
+
+### 多记录深层依赖示例 (multi-record-deep-deps.ts)
+构造较大的确定性 schema，并对 100 条记录运行五层 reaction 链。
 
 ### React 最佳实践片段 (react-best-practices/)
 补充了一组面向 React 的片段示例，覆盖稳定 selector、`ModelProvider`、
@@ -34,19 +38,17 @@ Redux 的对比。这些文件更适合作为参考模板，而不是通过 CLI 
 
 ## 运行示例
 
-使用以下命令运行示例：
+在仓库根目录执行：
 
 ```bash
-npm run example:basic
-npm run example:reaction
-npm run example:async
-npm run example:event
-npm run example:complex
-npm run example:dirty
+pnpm --filter model-reaction run example:basic
+pnpm --filter model-reaction run example:reaction
+pnpm --filter model-reaction run example:async
+pnpm --filter model-reaction run example:event
+pnpm --filter model-reaction run example:complex
+pnpm --filter model-reaction run example:dirty
+pnpm --filter model-reaction run example:multi-record
+pnpm --filter model-reaction run example:react
 ```
 
-> React 示例（`examples/react-bindings.tsx`）是独立片段，请在真实的 React
-> 应用中 import，不要用 `ts-node` 直接执行。
->
-> `examples/react-best-practices/` 目录下的文件也属于参考片段，建议按需拷贝到
-> 实际 React 项目中使用。
+> `examples/react-best-practices/` 下的文件属于参考片段，不是独立 CLI 程序。

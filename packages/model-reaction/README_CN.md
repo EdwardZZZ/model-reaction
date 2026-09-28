@@ -96,7 +96,7 @@ const m = createModel({
 
 ### 脏数据
 
-验证失败的值会被记录为"脏数据"，与正常状态隔离保存。
+验证失败的值会被记录为"脏数据"，与已提交状态隔离保存。
 
 ```typescript
 user.getDirtyData();   // 验证失败的值

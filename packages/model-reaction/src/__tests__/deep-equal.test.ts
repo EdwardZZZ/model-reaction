@@ -28,7 +28,6 @@ describe('deepEqual', () => {
         expect(deepEqual({ a: 1 }, { b: 1 })).toBe(false);
         expect(deepEqual({ a: 1 }, { a: 1, b: 2 })).toBe(false);
 
-        // Nested objects
         expect(deepEqual({ a: { b: 1 } }, { a: { b: 1 } })).toBe(true);
         expect(deepEqual({ a: { b: 1 } }, { a: { b: 2 } })).toBe(false);
     });

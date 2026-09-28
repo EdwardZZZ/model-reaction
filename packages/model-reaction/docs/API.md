@@ -36,6 +36,10 @@ createModel<S extends Record<string, FieldSchema>>(
 > can therefore start in an invalid state while `validationErrors` is empty.
 > Call `await validateAll()` before trusting initial `data`.
 >
+> **`FieldSchema.type` is metadata, not a runtime validator.** It drives
+> TypeScript inference and tooling. Add an appropriate `ValidationRules` entry
+> or custom `Rule` when values must be checked at runtime.
+>
 > **Reaction output is validated.** A field's `reaction.computed` result is
 > committed through the same validate-then-commit path as `setField`. If the
 > derived field declares a `validator` and the computed value fails it, `data`
@@ -161,7 +165,7 @@ Subscribe via `model.on(eventName, handler)`.
 | `validation:error` | A validation rule fails. |
 | `reaction:error` | A reaction throws or rejects. |
 | `dependency:error` | A reaction dependency is misconfigured. |
-| `field:not-found` | A non-existent field is accessed. |
+| `field:not-found` | `setField` or `setFields` attempts to write a field absent from the schema. |
 
 ## ModelOptions
 

@@ -1,9 +1,8 @@
 /**
  * BEST_PRACTICES §7.8 — Lifecycle and cleanup
  *
- * In long-lived SPAs, dispose models when their owning route unmounts.
- * Do NOT dispose a model that still has mounted subscribers — they will
- * throw on next read.
+ * Create a model after the owner commits, then dispose that same instance when
+ * the owner and its subscribers unmount.
  */
 import * as React from 'react';
 import { useEffect, useState } from 'react';

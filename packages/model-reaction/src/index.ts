@@ -7,7 +7,6 @@ import {
 } from './types';
 import { ModelManager } from './core/model-manager';
 
-// Export common types and validation rules
 export type {
     Model,
     ModelOptions,

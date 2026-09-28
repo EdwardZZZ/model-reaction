@@ -16,17 +16,17 @@
 - [使用面板](#使用面板)
 - [DevTools Hook 契约](#devtools-hook-契约)
 - [不存在时零开销](#不存在时零开销)
-- [已知限制（TBD）](#已知限制tbd)
+- [已知限制](#已知限制)
 
 ---
 
 ## 能得到什么
 
-安装扩展并打开其面板后，任何调用 `createModel(...)` 创建模型的页面都会在浏览器
-DevTools 中出现一个 **Model Reaction** 标签页，包含三个视图：
+安装扩展并打开其面板后，通过 `model-reaction/devtools` 入口创建的模型会出现在
+浏览器 DevTools 的 **Model Reaction** 标签页中，面板包含三个视图：
 
 1. **数据树（Data Tree）** —— 模型的三个层次，均可折叠：
-   - `data` —— 已通过校验的数据源（source of truth）
+   - `data` —— 已提交的数据源（schema 默认值会未经校验直接写入）
    - `dirtyData` —— 每个字段最近一次校验失败的输入
    - `errors` —— 每个字段当前的校验错误
 2. **依赖关系（Dependencies）** —— reaction 依赖关系图。每个节点是一个字段；每条箭头
@@ -61,10 +61,10 @@ background.js   （MV3 service worker，按 tab 路由）
 panel           （React UI：数据树 · 依赖关系图 · 时间线）
 ```
 
-按需开启的包装入口见 [src/devtools.ts](../src/devtools.ts)，其使用的 hook 契约见
-[src/devtools/devtools-hook.ts](../src/devtools/devtools-hook.ts)；扩展整体位于 [devtools/](../../devtools)
-目录下。包根（`model-reaction`）**不引用**其中任何代码，因此从不开启的应用打包里没有任何
-DevTools 代码。
+按需开启的包装入口见 [src/devtools.ts](../src/devtools.ts)，其 hook 契约见
+[src/devtools/devtools-hook.ts](../src/devtools/devtools-hook.ts)；扩展位于
+[packages/devtools](../../devtools)。包根（`model-reaction`）不引用 DevTools
+集成代码。
 
 ## 在应用中启用
 
@@ -78,32 +78,27 @@ import { createModel } from 'model-reaction/devtools';
 const model = createModel(schema); // 现在会出现在面板中
 ```
 
-未安装扩展时，包装层只做一次属性读取便原样返回模型 —— 不注册、不订阅。常见做法是按构建
-环境切换，让生产环境永不使用它：
-
-```ts
-import { createModel } from
-  process.env.NODE_ENV === 'development' ? 'model-reaction/devtools' : 'model-reaction';
-```
+未安装扩展时，包装层只查询一次全局 hook，然后返回未注册、未订阅的模型。若希望生产包
+完全移除集成代码，可在生产构建配置中把 `model-reaction/devtools` alias 到
+`model-reaction`。
 
 ## 构建扩展
 
-扩展是 `devtools/` 下一个自包含的子包，不影响库自身的构建。
+在仓库根目录执行：
 
 ```bash
-cd devtools
-node build.mjs
+pnpm --filter model-reaction-devtools run build
 ```
 
 该命令会把四个扩展执行环境（页面 agent、content 中继、background worker、React 面板）
-打包进 `devtools/dist/`，并连同静态资源（`manifest.json`、`devtools.html`、
+打包进 `packages/devtools/dist/`，并连同静态资源（`manifest.json`、`devtools.html`、
 `panel.html`、`panel.css`）一起复制过去。
 
 ## 在 Chrome 中加载
 
 1. 打开 `chrome://extensions`。
 2. 打开右上角的 **开发者模式（Developer mode）**。
-3. 点击 **加载已解压的扩展程序（Load unpacked）**，选择 `devtools/dist` 目录。
+3. 点击 **加载已解压的扩展程序（Load unpacked）**，选择 `packages/devtools/dist`。
 4. 在任意使用 `model-reaction` 的页面打开 DevTools，选择 **Model Reaction** 标签页。
 
 > 面板在打开时会主动拉取当前状态，因此即使模型在面板打开之前就已创建，也能正常显示。
@@ -145,17 +140,14 @@ DevTools 图三者一致 —— 因此面板永远不会显示与运行时行为
 ## 不存在时零开销
 
 若从包根（`model-reaction`）导入，这些代码根本不会被打包。若通过 `model-reaction/devtools`
-开启但未安装 hook（例如生产环境没装扩展），`createModel` 只做一次属性读取
-（`globalThis.__MODEL_REACTION_DEVTOOLS_HOOK__`），发现为空后原样返回模型 —— 不创建实例
-对象，不建立订阅。除非你正在主动调试，否则 DevTools 集成几乎零成本。
+开启但未安装 hook（例如生产环境没装扩展），`createModel` 只会常量时间查询
+`globalThis.__MODEL_REACTION_DEVTOOLS_HOOK__`，随后直接返回，不创建实例描述，也不建立订阅。
 
-## 已知限制（TBD）
-
-以下为刻意推迟、标注为 TBD 的项：
+## 已知限制
 
 - **写回式时间旅行（write-back time-travel）**。时间线为**只读**。把旧值回放进模型会
   重新触发 reaction，并可能污染 `dirtyData`（库刻意不提供 `resetDirty` —— 见
-  AGENTS.md §5），因此暂未实现「恢复此值」。
+  AGENTS.md §5），因此扩展不提供恢复操作。
 - **可配置的上限**。时间线环形缓冲区大小，以及值序列化的深度 / 宽度 / 字符串上限均使用
-  固定默认值；将它们暴露为用户设置的能力暂缓。
+  固定默认值。
 - **多帧 / 跨域 iframe**。agent 仅注入到顶层帧。

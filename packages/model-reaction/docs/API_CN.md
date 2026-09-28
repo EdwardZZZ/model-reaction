@@ -36,6 +36,10 @@ createModel<S extends Record<string, FieldSchema>>(
 > `validationErrors` 却是空的。在信任初始 `data` 之前，请先
 > `await validateAll()`。
 >
+> **`FieldSchema.type` 是元数据，不是运行时校验器。** 它用于 TypeScript
+> 类型推导和工具展示；需要在运行时检查值类型时，请添加对应的
+> `ValidationRules` 或自定义 `Rule`。
+>
 > **反应产物会经过校验。** 字段的 `reaction.computed` 结果会走与 `setField`
 > 相同的"先校验再提交"流程。若该派生字段声明了 `validator` 且计算结果未通过，
 > `data` 会保留旧值，计算结果被存入 `dirtyData`。反应的可选 `action`
@@ -145,7 +149,7 @@ reaction 决定；如果它校验失败，结果会进入 `dirtyData`，不会�
 | `validation:error` | 某条验证规则失败时 |
 | `reaction:error` | 反应执行抛出错误或 Promise 拒绝时 |
 | `dependency:error` | reaction 依赖配置错误时 |
-| `field:not-found` | 访问未声明的字段时 |
+| `field:not-found` | `setField` 或 `setFields` 尝试写入 schema 中不存在的字段时 |
 
 ## ModelOptions
 
