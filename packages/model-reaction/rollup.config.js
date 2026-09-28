@@ -27,7 +27,7 @@ export default [
   {
     input: 'src/index.ts',
     output: [
-      { file: 'dist/index.esm.js', format: 'esm', sourcemap: true },
+      { file: 'dist/index.mjs', format: 'esm', sourcemap: true },
       { file: 'dist/index.cjs.js', format: 'cjs', sourcemap: true },
       {
         file: 'dist/index.js',
@@ -44,7 +44,7 @@ export default [
     input: 'src/react.ts',
     external: ['react'],
     output: [
-      { file: 'dist/react.esm.js', format: 'esm', sourcemap: true },
+      { file: 'dist/react.mjs', format: 'esm', sourcemap: true },
       { file: 'dist/react.cjs.js', format: 'cjs', sourcemap: true },
     ],
     plugins: sharedPlugins('dist/types'),
@@ -53,7 +53,7 @@ export default [
   {
     input: 'src/devtools.ts',
     output: [
-      { file: 'dist/devtools.esm.js', format: 'esm', sourcemap: true },
+      { file: 'dist/devtools.mjs', format: 'esm', sourcemap: true },
       { file: 'dist/devtools.cjs.js', format: 'cjs', sourcemap: true },
     ],
     plugins: sharedPlugins('dist/types'),

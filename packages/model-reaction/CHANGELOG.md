@@ -40,6 +40,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   derived field staying at its literal `default` until first interaction, it
   now reflects the computed value from the start.
 
+### Fixed
+- Published ESM entry points now use `.mjs`, so Node 16+ loads
+  `model-reaction`, `model-reaction/react`, and `model-reaction/devtools`
+  through the `import` condition without parsing them as CommonJS.
+
 ### Internal
 - Extracted `eachReactionEdge` (`src/reaction/reaction-graph.ts`) as the single
   definition of how a schema's `reaction.fields` are read as dependency edges.

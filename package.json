@@ -2,6 +2,7 @@
   "name": "model-reaction-monorepo",
   "version": "0.0.0",
   "private": true,
+  "packageManager": "pnpm@10.30.2",
   "description": "Monorepo for model-reaction: the core library, its DevTools extension, and a demo app.",
   "engines": {
     "node": ">=18"
