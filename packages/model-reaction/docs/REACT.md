@@ -120,10 +120,15 @@ function CouponInput() {
     );
 }
 
-// 5. Provider owner — children share one model; cleanup disposes it.
+// 5. Provider owner — create after commit; cleanup disposes the same instance.
 function CartModelOwner({ children }: { children: ReactNode }) {
-    const [cart] = useState(createCartModel);
-    useEffect(() => () => cart.dispose(), [cart]);
+    const [cart, setCart] = useState<ReturnType<typeof createCartModel> | null>(null);
+    useEffect(() => {
+        const owned = createCartModel();
+        setCart(owned);
+        return () => owned.dispose();
+    }, []);
+    if (!cart) return null;
     return <ModelProvider model={cart}>{children}</ModelProvider>;
 }
 
@@ -282,17 +287,31 @@ Symptoms:
 
 ### Fix A: Provider with owner-managed dispose
 
-Hold the model in the component that *owns* its lifetime, dispose it
-from a `useEffect` cleanup, and pass it down through context.
+Create the model in an effect owned by the component, dispose that same
+instance in the cleanup, and pass it down through context. This also handles
+StrictMode's extra development setup/cleanup cycle: each setup gets a fresh
+model, and its matching cleanup disposes it.
+This owner pattern is for client-rendered UI; for SSR, use a request-scoped
+model as described in [SSR and concurrent rendering](#79-ssr-and-concurrent-rendering),
+because effects do not run during server rendering.
 
 ```tsx
 import { useEffect, useState, type ReactNode } from 'react';
 import { ModelProvider } from 'model-reaction/react';
-import { createModel } from 'model-reaction';
+import { createModel, type ModelReturn } from 'model-reaction';
+
+interface User {
+    name: string;
+}
 
 function UserModelOwner({ children }: { children: ReactNode }) {
-    const [model] = useState(() => createModel({ /* ... */ }));
-    useEffect(() => () => model.dispose(), [model]);
+    const [model, setModel] = useState<ModelReturn<User> | null>(null);
+    useEffect(() => {
+        const owned = createModel<User>({ /* ... */ });
+        setModel(owned);
+        return () => owned.dispose();
+    }, []);
+    if (!model) return null;
     return <ModelProvider model={model}>{children}</ModelProvider>;
 }
 
@@ -308,11 +327,10 @@ function App() {
 ```
 
 Why this works:
-- `useState(() => createModel(...))` runs the factory **exactly once**
-  per owner mount, so children that read via `useModel()` share the
-  same instance.
-- The `useEffect` cleanup fires on unmount (and on owner remount during
-  hot-reload), guaranteeing `dispose()` runs once per lifetime.
+- Model creation happens after React commits the owner, so a render React
+  abandons cannot leak a model.
+- Each effect setup creates one model and its cleanup disposes that same
+  instance. Children mount only after the model is ready.
 - See [`src/__tests__/react.test.tsx`](../src/__tests__/react.test.tsx)
   → "Provider-owned model dispose lifecycle" for the unit tests that
   pin this behaviour.
@@ -324,24 +342,15 @@ modal), create it inside the route component itself.
 
 ```tsx
 function EditUserRoute({ userId }: { userId: string }) {
-    const [model] = useState(() => createModel({ /* ... */ }));
-
-    useEffect(() => {
-        // Optional: hydrate from the server on mount.
-        model.setFields(loadUser(userId));
-        return () => model.dispose();
-    }, [model, userId]);
-
-    return (
-        <ModelProvider model={model}>
-            <EditForm />
-        </ModelProvider>
-    );
+    // A new route identity gets a new owner and model lifetime.
+    return <UserModelOwner key={userId}><EditForm userId={userId} /></UserModelOwner>;
 }
 ```
 
-Each navigation to `/users/:id/edit` builds a fresh model and tears it
-down on exit, so two tabs editing different users never collide.
+Keying the owner by `userId` gives each route identity a fresh model
+lifecycle and disposes the previous one on exit. Load route data from the
+form after the provider mounts. Two tabs editing different users therefore
+own different models.
 
 ### Pattern comparison
 

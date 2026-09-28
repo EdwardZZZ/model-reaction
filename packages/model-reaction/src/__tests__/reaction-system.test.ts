@@ -1,4 +1,4 @@
-import { createModel, Model } from '../index';
+import { createModel, Model, Reaction } from '../index';
 import { ReactionSystem } from '../reaction/reaction-system';
 import { ModelManager } from '../core/model-manager';
 import { PendingTasks } from '../core/pending-tasks';
@@ -37,6 +37,36 @@ describe('ReactionSystem - via createModel', () => {
         await model.setField('lastName', 'Doe');
         await model.settled();
         expect(model.getField('fullName')).toBe('John Doe');
+        model.dispose();
+    });
+
+    test('runs a shared reaction definition once for each target field', async () => {
+        const sharedReaction: Reaction = {
+            fields: ['source'],
+            computed: (values) => values.source * 2,
+        };
+        const model = createModel(
+            {
+                source: { type: 'number' as const, default: 1 },
+                left: {
+                    type: 'number' as const,
+                    default: 0,
+                    reaction: sharedReaction,
+                },
+                right: {
+                    type: 'number' as const,
+                    default: 0,
+                    reaction: sharedReaction,
+                },
+            },
+            { debounceReactions: 5 }
+        );
+
+        await model.setField('source', 3);
+        await model.settled();
+
+        expect(model.getField('left')).toBe(6);
+        expect(model.getField('right')).toBe(6);
         model.dispose();
     });
 
@@ -622,30 +652,173 @@ describe('ReactionSystem - settled() waits for chained async reactions', () => {
         model.dispose();
     });
 
+    test('awaits an async computed value before committing it', async () => {
+        const model = createModel({
+            source: { type: 'number' as const },
+            target: {
+                type: 'number' as const,
+                default: 0,
+                reaction: {
+                    fields: ['source'],
+                    computed: async (deps) => {
+                        await Promise.resolve();
+                        return deps.source * 2;
+                    },
+                },
+            },
+        });
+
+        await model.setField('source', 5);
+        await model.settled();
+
+        expect(model.getField('target')).toBe(10);
+        expect(model.getField('target')).not.toBeInstanceOf(Promise);
+        model.dispose();
+    });
+
+    test('preserves declaration order for async reactions on one target', async () => {
+        let releaseFirst!: () => void;
+        const model = createModel({
+            source: { type: 'string' as const },
+            target: {
+                type: 'string' as const,
+                default: '',
+                reaction: [
+                    {
+                        fields: ['source'],
+                        computed: async (deps) => {
+                            const source = deps.source;
+                            await new Promise<void>((resolve) => {
+                                releaseFirst = resolve;
+                            });
+                            return `first:${source}`;
+                        },
+                    },
+                    {
+                        fields: ['source'],
+                        computed: async (deps) => `second:${deps.source}`,
+                    },
+                ],
+            },
+        });
+
+        await model.setField('source', 'value');
+        await Promise.resolve();
+        releaseFirst();
+        await model.settled();
+
+        expect(model.getField('target')).toBe('second:value');
+        model.dispose();
+    });
+
+    test('applies the latest dependency value after an async reaction finishes', async () => {
+        let releaseFirst!: () => void;
+        const model = createModel({
+            source: { type: 'number' as const },
+            target: {
+                type: 'number' as const,
+                default: 0,
+                reaction: {
+                    fields: ['source'],
+                    computed: async (deps) => {
+                        const source = deps.source;
+                        if (source === 1) {
+                            await new Promise<void>((resolve) => {
+                                releaseFirst = resolve;
+                            });
+                        }
+                        return source;
+                    },
+                },
+            },
+        });
+
+        await model.setField('source', 1);
+        await model.setField('source', 2);
+        releaseFirst();
+        await model.settled();
+
+        expect(model.getField('target')).toBe(2);
+        model.dispose();
+    });
+
     test('settled() resolves only after async reaction.action microtasks finish', async () => {
-        const trace: string[] = [];
+        let releaseAction!: () => void;
+        let actionFinished = false;
         interface S {
             a: number;
             b: number;
         }
         const schema: Model<S> = {
-            a: { type: 'number', default: 0 },
+            a: { type: 'number' },
             b: {
                 type: 'number',
                 default: 0,
                 reaction: {
                     fields: ['a'],
                     computed: (deps) => deps.a * 2,
-                    action: (vals) => {
-                        trace.push(`b=${vals.computed}`);
+                    action: async () => {
+                        await new Promise<void>((resolve) => {
+                            releaseAction = resolve;
+                        });
+                        actionFinished = true;
                     },
                 },
             },
         };
         const model = createModel<S>(schema);
         await model.setField('a', 5);
+
+        let settled = false;
+        const settledPromise = model.settled().then(() => {
+            settled = true;
+        });
+        await Promise.resolve();
+        await Promise.resolve();
+
+        expect(settled).toBe(false);
+        expect(actionFinished).toBe(false);
+
+        releaseAction();
+        await settledPromise;
+        expect(actionFinished).toBe(true);
+        model.dispose();
+    });
+
+    test('reports an async action rejection before settled resolves', async () => {
+        interface S {
+            source: number;
+            target: number;
+        }
+        const model = createModel<S>({
+            source: { type: 'number' },
+            target: {
+                type: 'number',
+                default: 0,
+                reaction: {
+                    fields: ['source'],
+                    computed: (deps) => deps.source * 2,
+                    action: async () => {
+                        await Promise.resolve();
+                        throw new Error('async action failed');
+                    },
+                },
+            },
+        });
+        const errors: string[] = [];
+        model.on('reaction:error', (error) => errors.push(error.message));
+
+        await model.setField('source', 4);
         await model.settled();
-        expect(trace).toContain('b=10');
+
+        expect(model.getField('target')).toBe(8);
+        expect(errors).toEqual(['async action failed']);
+        expect(model.validationErrors.target?.[0]).toEqual(
+            expect.objectContaining({
+                rule: 'reaction_error',
+                message: 'async action failed',
+            })
+        );
         model.dispose();
     });
 
@@ -851,8 +1024,9 @@ describe('ReactionSystem - direct unit tests', () => {
         );
 
         const anySystem = system as any;
-        anySystem.scheduleReaction('output', reaction, 0);
-        anySystem.processReaction('output', reaction);
+        const job = { field: 'output', reaction };
+        anySystem.scheduleReaction(job, 0);
+        anySystem.processReaction(job);
     });
 
     test('dispose on ModelManager clears scheduled reactions', async () => {

@@ -20,7 +20,7 @@ import * as React from 'react';
 import { useCallback, useEffect, useState } from 'react';
 // `React` is required for the JSX runtime even if not directly referenced.
 void React;
-import { createModel, ValidationRules } from '../src/index';
+import { createModel, ValidationRules, type ModelReturn } from '../src/index';
 import {
     Field,
     ModelProvider,
@@ -120,12 +120,15 @@ function ValidationSummary() {
     return errorCount > 0 ? <span style={{ color: 'red' }}>Invalid name</span> : null;
 }
 
-// 7. Top-level app — the owner creates exactly one model per mount and
-//    disposes it from cleanup. Use this pattern for app-wide / feature-wide
-//    React state instead of exporting a module-level singleton.
+// 7. Top-level app — create after commit and dispose that instance in cleanup.
 function CartModelOwner({ children }: { children: React.ReactNode }) {
-    const [cart] = useState(createCartModel);
-    useEffect(() => () => cart.dispose(), [cart]);
+    const [cart, setCart] = useState<ModelReturn<Cart> | null>(null);
+    useEffect(() => {
+        const owned = createCartModel();
+        setCart(owned);
+        return () => owned.dispose();
+    }, []);
+    if (!cart) return null;
     return <ModelProvider model={cart}>{children}</ModelProvider>;
 }
 

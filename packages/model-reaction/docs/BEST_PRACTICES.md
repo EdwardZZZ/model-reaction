@@ -214,13 +214,32 @@ reuse a provider; nest providers instead.
 
 ### 7.8 Lifecycle and cleanup
 
-`createModel` keeps internal listeners; in long-lived SPAs, dispose models
-when their owning route unmounts:
+`createModel` keeps internal listeners; in long-lived SPAs, create a model
+inside the owning effect and dispose that same instance when the route unmounts:
 
 ```tsx
-useEffect(() => {
-    return () => model.dispose();
-}, [model]);
+import { useEffect, useState, type ReactNode } from 'react';
+import { ModelProvider } from 'model-reaction/react';
+import { createModel, type ModelReturn } from 'model-reaction';
+
+interface User {
+    name: string;
+}
+
+function createUserModel() {
+    return createModel<User>({ name: { type: 'string', default: '' } });
+}
+
+function UserRoute({ children }: { children: ReactNode }) {
+    const [model, setModel] = useState<ModelReturn<User> | null>(null);
+    useEffect(() => {
+        const owned = createUserModel();
+        setModel(owned);
+        return () => owned.dispose();
+    }, []);
+    if (!model) return null;
+    return <ModelProvider model={model}>{children}</ModelProvider>;
+}
 ```
 
 Do not dispose a model that still has mounted subscribers — they will
@@ -290,12 +309,25 @@ In Redux apps, keep RTK as the application skeleton and drop a
 for an editor / wizard / form:
 
 ```tsx
+import { useEffect, useState } from 'react';
+import { createModel, type ModelReturn } from 'model-reaction';
+
+interface User {
+    id: string;
+    name: string;
+}
+
 function EditUserPage() {
+    const [model, setModel] = useState<ModelReturn<User> | null>(null);
     const userId = useSelector(selectCurrentUserId);
     const dispatch = useDispatch();
-    const model = useMemo(() => createModel<User>(userSchema), []);
+    useEffect(() => {
+        const owned = createModel<User>(userSchema);
+        setModel(owned);
+        return () => owned.dispose();
+    }, []);
 
-    useEffect(() => () => model.dispose(), [model]);
+    if (!model) return null;
 
     async function onSave() {
         if (!(await model.validateAll())) return;

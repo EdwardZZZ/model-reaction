@@ -12,7 +12,7 @@
  * placeholders — replace them with your real implementations.
  */
 import * as React from 'react';
-import { useEffect, useMemo } from 'react';
+import { useEffect, useState } from 'react';
 void React;
 
 // eslint-disable-next-line import/no-unresolved
@@ -39,9 +39,14 @@ export function EditUserPage() {
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const userId = useSelector(selectCurrentUserId);
     const dispatch = useDispatch();
-    const model: ModelReturn<User> = useMemo(() => createModel<User>(userSchema), []);
+    const [model, setModel] = useState<ModelReturn<User> | null>(null);
+    useEffect(() => {
+        const owned = createModel<User>(userSchema);
+        setModel(owned);
+        return () => owned.dispose();
+    }, []);
 
-    useEffect(() => () => model.dispose(), [model]);
+    if (!model) return null;
 
     async function onSave() {
         if (!(await model.validateAll())) return;

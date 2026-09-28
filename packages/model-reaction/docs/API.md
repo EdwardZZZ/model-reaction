@@ -10,6 +10,7 @@ Reference for the public `model-reaction` API surface.
 
 - [createModel](#createmodel)
 - [Model Methods](#model-methods)
+- [Reactions](#reactions)
 - [Events](#events)
 - [ModelOptions](#modeloptions)
 - [Validation Rules](#validation-rules)
@@ -67,6 +68,38 @@ themselves are not frozen.
 | --- | --- |
 | `setField(field, value): Promise<boolean>` | Set a single field; returns its validation result. |
 | `setFields(fields): Promise<boolean>` | Batch set multiple fields in one validation + reaction pass; returns the AND of every field's result. Cross-field validators see the **merged batch** — each field validates against `data` with all fields in the same call already applied, so co-dependent fields (e.g. `password` / `confirmPassword`) can be set together in one call. **Not atomic** — valid fields commit to `data` even if a sibling field fails validation. |
+
+### Reactions
+
+A field can have one reaction or an array of reactions. Each reaction runs when
+one of the fields in its `fields` list changes. For an array, matching
+reactions are scheduled in declaration order:
+
+```ts
+total: {
+    type: 'number',
+    reaction: [
+        { fields: ['price'], computed: ({ price }) => price * 1.1 },
+        { fields: ['price'], computed: ({ price }) => price * 1.2 },
+    ],
+}
+```
+
+Both `computed` and `action` may be asynchronous. Their promises are tracked by
+`settled()`: the computed value is awaited before validation and commit, and an
+action rejection is reported through `reaction:error`.
+
+When several reactions write the same target for the same changed dependency,
+the last scheduled write is authoritative; earlier writes are superseded. Thus,
+in the example, the second reaction determines `total` if its result passes
+validation. If it fails validation, the result goes to `dirtyData`; an earlier
+reaction's value is not used as a fallback. An `action` runs only when that
+reaction's own write commits successfully.
+
+For a `setFields()` batch that changes multiple dependencies, the order in
+which changed fields are processed also affects scheduling. If one result
+depends on several inputs, prefer one reaction listing all of them rather than
+using multiple reactions to compete for the same target.
 
 ### Validation
 

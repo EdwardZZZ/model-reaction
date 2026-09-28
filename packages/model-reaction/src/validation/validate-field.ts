@@ -116,12 +116,7 @@ async function runValidator(
 
     try {
         const result = validator.validate(value, data);
-
-        // Only async results race a timeout; sync results resolve immediately.
-        const ok =
-            result instanceof Promise
-                ? await raceTimeout(result, field, timeout)
-                : result;
+        const ok = await raceTimeout(Promise.resolve(result), field, timeout);
 
         if (ok) return true;
 

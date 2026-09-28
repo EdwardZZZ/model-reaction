@@ -10,6 +10,7 @@
 
 - [createModel](#createmodel)
 - [Model 方法](#model-方法)
+- [反应](#反应)
 - [事件](#事件)
 - [ModelOptions](#modeloptions)
 - [验证规则](#验证规则)
@@ -61,6 +62,33 @@ createModel<S extends Record<string, FieldSchema>>(
 | --- | --- |
 | `setField(field, value): Promise<boolean>` | 设置单个字段；返回该字段的验证结果 |
 | `setFields(fields): Promise<boolean>` | 在一次校验 + 反应流程中批量设置多个字段；返回所有字段结果的逻辑与。跨字段校验看到的是**合并后的批次数据**——每个字段针对已叠加了本次调用全部字段的 `data` 进行校验，因此相互依赖的字段（如 `password` / `confirmPassword`）可在一次调用中一起设置。**非原子**——即使某个字段校验失败，其余通过校验的字段仍会提交到 `data`。 |
+
+### 反应
+
+字段可以配置一个 reaction，也可以配置 reaction 数组。`fields` 中任意依赖字段变化时，
+对应 reaction 会运行。数组中的匹配项按声明顺序调度：
+
+```ts
+total: {
+    type: 'number',
+    reaction: [
+        { fields: ['price'], computed: ({ price }) => price * 1.1 },
+        { fields: ['price'], computed: ({ price }) => price * 1.2 },
+    ],
+}
+```
+
+`computed` 和 `action` 都可以是异步函数，其 Promise 会纳入 `settled()`：
+计算结果会在校验和提交前被等待，action 拒绝则通过 `reaction:error` 上报。
+
+多个 reaction 因同一个依赖字段变化而写入同一目标时，最后调度的写入具有最终效力，
+之前的写入会被更新的写入覆盖。因此上例中，如果第二个结果通过校验，`total` 由第二个
+reaction 决定；如果它校验失败，结果会进入 `dirtyData`，不会回退采用前一个 reaction
+的值。只有该 reaction 的写入成功提交后，才会执行它自己的 `action`。
+
+`setFields()` 批量修改多个依赖字段时，变更字段的处理顺序也会影响调度顺序。如果一个
+结果依赖多个输入，建议用一个包含这些依赖字段的 reaction 计算，避免多个 reaction 竞争
+写入同一目标。
 
 ### 验证
 

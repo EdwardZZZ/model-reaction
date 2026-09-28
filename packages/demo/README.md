@@ -34,14 +34,11 @@ mirroring the source-mapping used by the devtools package's tests.
 
 ## Model lifecycle under StrictMode
 
-The app runs inside `<StrictMode>`, whose dev-only mount→unmount→remount would
-break the usual `useMemo(() => createModel(...), [])` +
-`useEffect(() => () => model.dispose(), [model])` pattern: the simulated unmount
-disposes the memoized model, and the remount reuses that disposed instance, so
-the next `setField` throws "ModelManager has been disposed". Each scenario
-therefore owns its model via [`useOwnedModel`](src/useOwnedModel.ts), which
-recreates the model if a prior instance was torn down. In production it behaves
-identically to the naive pattern (create once, dispose on real unmount).
+The app runs inside `<StrictMode>`. Each scenario creates its model in an
+effect and disposes that exact instance in the effect cleanup via
+[`useOwnedModel`](src/useOwnedModel.ts). The UI mounts after the model is ready;
+this also lets StrictMode's extra development setup/cleanup cycle dispose its
+first instance before creating the active one.
 
 Text inputs keep their draft in local component state (see
 [`TextField`](src/TextField.tsx), which uses `useDraftField` from

@@ -384,18 +384,25 @@ export function createAdDraftModule(model: AdDraftModel) {
 React 层推荐由页面级 owner 创建 model，并通过 `ModelProvider` 注入子树。组件使用 `useModelFieldState` 绑定单字段输入，使用本地 `touched` 状态控制错误展示。
 
 ```tsx
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Field, ModelProvider, useModel, useModelFieldState } from 'model-reaction/react';
+import type { ModelReturn } from 'model-reaction';
 
 function AdDraftOwner() {
-  const model = useMemo(() => createAdDraftModel(), []);
-  const module = useMemo(() => createAdDraftModule(model), [model]);
-
-  useEffect(() => () => model.dispose(), [model]);
-
+  const [owned, setOwned] = useState<{
+    model: ModelReturn<AdDraftData>;
+    module: ReturnType<typeof createAdDraftModule>;
+  } | null>(null);
+  useEffect(() => {
+    const model = createAdDraftModel();
+    const module = createAdDraftModule(model);
+    setOwned({ model, module });
+    return () => model.dispose();
+  }, []);
+  if (!owned) return null;
   return (
-    <ModelProvider model={model}>
-      <AdCreationForm module={module} />
+    <ModelProvider model={owned.model}>
+      <AdCreationForm module={owned.module} />
     </ModelProvider>
   );
 }
@@ -641,14 +648,13 @@ function toServerFieldErrors(issues: FieldIssue[] = []): ServerFieldErrors {
 
 ```tsx
 function AdEditorRoute() {
-  const [model] = useState(() => createAdDraftModel());
-
+  const [model, setModel] = useState<ModelReturn<AdDraftData> | null>(null);
   useEffect(() => {
-    return () => {
-      model.dispose();
-    };
-  }, [model]);
-
+    const owned = createAdDraftModel();
+    setModel(owned);
+    return () => owned.dispose();
+  }, []);
+  if (!model) return null;
   return <ModelProvider model={model}>{/* editor */}</ModelProvider>;
 }
 ```

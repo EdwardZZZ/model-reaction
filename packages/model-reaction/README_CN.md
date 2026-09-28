@@ -121,8 +121,8 @@ off(); // 停止监听
 ## React 绑定
 
 ```tsx
-import { useEffect, useState } from 'react';
-import { createModel, ValidationRules } from 'model-reaction';
+import { useEffect, useState, type ReactNode } from 'react';
+import { createModel, ValidationRules, type ModelReturn } from 'model-reaction';
 import { ModelProvider, useModel, useModelField, useModelFieldState } from 'model-reaction/react';
 
 function NameInput() {
@@ -142,13 +142,22 @@ function AgeInput() {
   );
 }
 
-function UserModelOwner() {
-  const [user] = useState(() => createModel<User>({
-    name: { type: 'string', default: '', validator: [ValidationRules.required] },
-    age:  { type: 'number', default: 18, validator: [ValidationRules.min(18)] },
-  }));
-  useEffect(() => () => user.dispose(), [user]);
-  return <ModelProvider model={user}><NameInput /><AgeInput /></ModelProvider>;
+function UserModelOwner({ children }: { children: ReactNode }) {
+  const [user, setUser] = useState<ModelReturn<User> | null>(null);
+  useEffect(() => {
+    const owned = createModel<User>({
+      name: { type: 'string', default: '', validator: [ValidationRules.required] },
+      age:  { type: 'number', default: 18, validator: [ValidationRules.min(18)] },
+    });
+    setUser(owned);
+    return () => owned.dispose();
+  }, []);
+  if (!user) return null;
+  return <ModelProvider model={user}>{children}</ModelProvider>;
+}
+
+function App() {
+  return <UserModelOwner><NameInput /><AgeInput /></UserModelOwner>;
 }
 ```
 

@@ -116,10 +116,15 @@ function CouponInput() {
     );
 }
 
-// 5. Provider owner —— 子组件共享同一个 model；cleanup 负责 dispose
+// 5. Provider owner —— commit 后创建，cleanup 释放同一个实例
 function CartModelOwner({ children }: { children: ReactNode }) {
-    const [cart] = useState(createCartModel);
-    useEffect(() => () => cart.dispose(), [cart]);
+    const [cart, setCart] = useState<ReturnType<typeof createCartModel> | null>(null);
+    useEffect(() => {
+        const owned = createCartModel();
+        setCart(owned);
+        return () => owned.dispose();
+    }, []);
+    if (!cart) return null;
     return <ModelProvider model={cart}>{children}</ModelProvider>;
 }
 
@@ -263,17 +268,29 @@ export const userModel = createModel({ /* ... */ });
 
 ### 修复 A：Provider owner 管理 dispose
 
-在真正拥有生命周期的组件里创建 model，通过 `useEffect` cleanup 调用
-`dispose()`，再用 context 向下传递。
+在真正拥有生命周期的组件的 effect 中创建 model，并在 cleanup 中释放同一个
+实例，再用 context 向下传递。这也能正确处理 StrictMode 在开发环境增加的
+setup/cleanup 周期：每次 setup 创建新 model，对应 cleanup 释放该实例。
+这个 owner 模式用于客户端渲染；SSR 请按[SSR 与并发渲染](#79-ssr-与并发渲染)
+创建请求作用域的 model，因为服务端渲染不会运行 effect。
 
 ```tsx
 import { useEffect, useState, type ReactNode } from 'react';
 import { ModelProvider } from 'model-reaction/react';
-import { createModel } from 'model-reaction';
+import { createModel, type ModelReturn } from 'model-reaction';
+
+interface User {
+    name: string;
+}
 
 function UserModelOwner({ children }: { children: ReactNode }) {
-    const [model] = useState(() => createModel({ /* ... */ }));
-    useEffect(() => () => model.dispose(), [model]);
+    const [model, setModel] = useState<ModelReturn<User> | null>(null);
+    useEffect(() => {
+        const owned = createModel<User>({ /* ... */ });
+        setModel(owned);
+        return () => owned.dispose();
+    }, []);
+    if (!model) return null;
     return <ModelProvider model={model}>{children}</ModelProvider>;
 }
 
@@ -289,10 +306,9 @@ function App() {
 ```
 
 为什么有效：
-- `useState(() => createModel(...))` 在每次 owner 挂载期间只运行一次，
-  所以通过 `useModel()` 读取的子组件共享同一个实例。
-- `useEffect` cleanup 会在卸载时触发（热更新导致 owner 重挂载时也会触发），
-  保证每个生命周期只调用一次 `dispose()`。
+- React commit 后才创建 model，因此被 React 放弃的 render 不会遗留 model。
+- 每次 effect setup 创建一个 model，对应 cleanup 释放同一个实例；model
+  就绪后子组件才会挂载。
 - 相关单测见 [`src/__tests__/react.test.tsx`](../src/__tests__/react.test.tsx)
   中的 "Provider-owned model dispose lifecycle"。
 
@@ -302,24 +318,14 @@ function App() {
 
 ```tsx
 function EditUserRoute({ userId }: { userId: string }) {
-    const [model] = useState(() => createModel({ /* ... */ }));
-
-    useEffect(() => {
-        // 可选：挂载时从服务端回填数据。
-        model.setFields(loadUser(userId));
-        return () => model.dispose();
-    }, [model, userId]);
-
-    return (
-        <ModelProvider model={model}>
-            <EditForm />
-        </ModelProvider>
-    );
+    // 路由标识变化时，创建新的 owner 和 model 生命周期。
+    return <UserModelOwner key={userId}><EditForm userId={userId} /></UserModelOwner>;
 }
 ```
 
-每次进入 `/users/:id/edit` 都会创建新 model，离开路由时销毁；两个 tab
-编辑不同用户时也不会互相影响。
+按 `userId` 给 owner 设置 key 后，每个路由标识都会拥有独立的 model 生命周期，
+离开时销毁旧实例；在 Provider 挂载后由表单加载路由数据。两个 tab 编辑不同用户时
+也会使用不同 model。
 
 ### 模式对比
 

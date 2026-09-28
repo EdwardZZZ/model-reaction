@@ -213,11 +213,16 @@ export class ModelManager<
         this.ensureNotDisposed();
         const fields = Object.keys(this.schema);
         const changedFields = new Set<string>();
+        const validationData = {
+            ...(this.modelData as Record<string, any>),
+            ...(this.dirtyData as Record<string, any>),
+        };
         const results = await Promise.all(
             fields.map((field) =>
                 this.revalidateField(field, {
                     suppressReactions: true,
                     changedFields,
+                    validationData,
                 })
             )
         );

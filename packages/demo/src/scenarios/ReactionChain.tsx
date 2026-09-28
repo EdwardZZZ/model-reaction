@@ -1,6 +1,7 @@
 import { createModel } from 'model-reaction/devtools';
 import { ValidationRules } from 'model-reaction';
 import { useModelField } from 'model-reaction/react';
+import type { ModelReturn } from 'model-reaction';
 import { TextField } from '../TextField';
 import { useOwnedModel } from '../useOwnedModel';
 
@@ -50,6 +51,11 @@ export function ReactionChain() {
         })
     );
 
+    if (!model) return null;
+    return <ReactionChainView model={model} />;
+}
+
+function ReactionChainView({ model }: { model: ModelReturn<NameForm> }) {
     const fullName = useModelField(model, 'fullName');
     const greeting = useModelField(model, 'greeting');
 

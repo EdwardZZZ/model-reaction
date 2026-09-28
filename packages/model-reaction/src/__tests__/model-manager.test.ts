@@ -335,6 +335,46 @@ describe('ModelManager - validateAll', () => {
         expect(local.getDirtyData()).toEqual({});
         local.dispose();
     });
+
+    test('validates mutually dependent dirty fields against one candidate snapshot', async () => {
+        interface Pair {
+            a: string;
+            b: string;
+        }
+        const local = createModel<Pair>({
+            a: {
+                type: 'string',
+                default: 'old',
+                validator: [
+                    {
+                        type: 'matches-b',
+                        message: 'a must match b',
+                        validate: (value, data) => value === data?.b,
+                    },
+                ],
+            },
+            b: {
+                type: 'string',
+                default: 'old',
+                validator: [
+                    {
+                        type: 'matches-a',
+                        message: 'b must match a',
+                        validate: (value, data) => value === data?.a,
+                    },
+                ],
+            },
+        });
+
+        expect(await local.setField('a', 'new')).toBe(false);
+        expect(await local.setField('b', 'new')).toBe(false);
+        expect(local.getDirtyData()).toEqual({ a: 'new', b: 'new' });
+
+        expect(await local.validateAll()).toBe(true);
+        expect(local.data).toEqual({ a: 'new', b: 'new' });
+        expect(local.getDirtyData()).toEqual({});
+        local.dispose();
+    });
 });
 
 describe('ModelManager - Dirty Data Management', () => {

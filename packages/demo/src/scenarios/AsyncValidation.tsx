@@ -49,6 +49,8 @@ export function AsyncValidation() {
         })
     );
 
+    if (!model) return null;
+
     return (
         <section className="scenario">
             <h2>Async validation</h2>

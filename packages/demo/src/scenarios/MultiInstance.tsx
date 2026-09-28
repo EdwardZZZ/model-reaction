@@ -64,6 +64,8 @@ export function MultiInstance() {
     const coffee = useOwnedModel<PriceForm>(() => makeLineItem('Coffee', 350, 2));
     const bagel = useOwnedModel<PriceForm>(() => makeLineItem('Bagel', 275, 1));
 
+    if (!coffee || !bagel) return null;
+
     return (
         <section className="scenario">
             <h2>Multiple instances</h2>

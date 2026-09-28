@@ -65,7 +65,7 @@ export interface ModelEventMap<T = Record<string, any>> {
 export interface Reaction {
     fields: string[];
     computed: (values: Record<string, any>) => any;
-    action?: (data: Record<string, any>) => void;
+    action?: (data: Record<string, any>) => void | PromiseLike<void>;
 }
 
 // Enhanced field schema interface
@@ -78,7 +78,10 @@ export interface FieldSchema {
     default?: unknown;
     // Optional literal set for enum fields; enables useful schema inference.
     values?: readonly unknown[];
-    // Reaction definition
+    /**
+     * Reaction definition. When an array is used, matching reactions are
+     * scheduled in declaration order for each changed dependency field.
+     */
     reaction?: Reaction | Reaction[];
     // Value transformation function
     transform?: (value: any) => any;

@@ -6,10 +6,10 @@
  * throw on next read.
  */
 import * as React from 'react';
-import { useEffect, useMemo } from 'react';
+import { useEffect, useState } from 'react';
 void React;
 
-import { createModel, ValidationRules } from '../../src/index';
+import { createModel, ValidationRules, type ModelReturn } from '../../src/index';
 import { ModelProvider } from '../../src/react';
 
 interface User {
@@ -17,21 +17,20 @@ interface User {
 }
 
 export function UserRoute() {
-    const model = useMemo(
-        () =>
-            createModel<User>({
-                name: {
-                    type: 'string',
-                    default: '',
-                    validator: [ValidationRules.required],
-                },
-            }),
-        [],
-    );
-
+    const [model, setModel] = useState<ModelReturn<User> | null>(null);
     useEffect(() => {
-        return () => model.dispose();
-    }, [model]);
+        const owned = createModel<User>({
+            name: {
+                type: 'string',
+                default: '',
+                validator: [ValidationRules.required],
+            },
+        });
+        setModel(owned);
+        return () => owned.dispose();
+    }, []);
+
+    if (!model) return null;
 
     return (
         <ModelProvider model={model}>

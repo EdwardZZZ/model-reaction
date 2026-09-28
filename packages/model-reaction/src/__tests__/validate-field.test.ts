@@ -2,6 +2,7 @@ import { validateField } from '../validation/validate-field';
 import { FieldSchema } from '../types';
 import { Rule, ValidationRules } from '../validation/rules';
 import { createModel, Model } from '../index';
+import { runInNewContext } from 'vm';
 
 describe('validateField (unit)', () => {
     beforeEach(() => {
@@ -137,6 +138,40 @@ describe('validateField (unit)', () => {
         expect(errors.testField?.[0]?.message).toContain(
             'Validation failed: async string'
         );
+    });
+
+    test('awaits a Promise returned from another realm', async () => {
+        const errors: Record<string, any[]> = {};
+        const crossRealmResult = runInNewContext(
+            'Promise.resolve(false)'
+        ) as Promise<boolean>;
+        const schema: FieldSchema = {
+            type: 'string',
+            validator: [
+                {
+                    type: 'cross-realm',
+                    message: 'cross-realm failure',
+                    validate: () => crossRealmResult,
+                },
+            ],
+        };
+
+        const result = await validateField({
+            schema,
+            value: 'value',
+            errors,
+            field: 'testField',
+            timeout: 1000,
+        });
+
+        expect(result).toBe(false);
+        expect(errors.testField).toEqual([
+            {
+                field: 'testField',
+                rule: 'cross-realm',
+                message: 'cross-realm failure',
+            },
+        ]);
     });
 
     test('reuses existing error array for validation failures', async () => {

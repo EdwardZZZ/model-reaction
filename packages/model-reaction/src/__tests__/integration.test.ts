@@ -1596,7 +1596,8 @@ describe('Integration Tests — Full Documentation Scenarios', () => {
             for (const doc of [reactDoc, reactDocCn]) {
                 expect(doc).toContain('function createCartModel()');
                 expect(doc).toContain('function CartModelOwner');
-                expect(doc).toContain('useEffect(() => () => cart.dispose(), [cart])');
+                expect(doc).toContain('const owned = createCartModel()');
+                expect(doc).toContain('return () => owned.dispose()');
                 expect(doc).toContain('await cart.setField');
                 expect(doc).not.toContain('const cart = createModel<Cart>({');
             }
@@ -1622,8 +1623,9 @@ describe('Integration Tests — Full Documentation Scenarios', () => {
             expect(example).toContain('Provider-owned model lifecycle');
             expect(example).toContain('function createCartModel()');
             expect(example).toContain('function CartModelOwner');
-            expect(example).toContain('const [cart] = useState(createCartModel)');
-            expect(example).toContain('useEffect(() => () => cart.dispose(), [cart])');
+            expect(example).toContain('const [cart, setCart] = useState<ModelReturn<Cart> | null>(null)');
+            expect(example).toContain('const owned = createCartModel()');
+            expect(example).toContain('return () => owned.dispose()');
             expect(example).toContain('await cart.setField');
             expect(example).toContain('cart.dispose();');
             expect(example).toContain('inferred.dispose();');

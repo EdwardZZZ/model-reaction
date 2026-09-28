@@ -21,12 +21,18 @@ interface ReactionCallbacks {
     ) => void;
 }
 
+interface ReactionJob {
+    field: string;
+    reaction: Reaction;
+}
+
 export class ReactionSystem {
-    private reactionDeps: Map<string, Array<{ field: string; reaction: Reaction }>> = new Map();
+    private reactionDeps: Map<string, ReactionJob[]> = new Map();
     private reactionTimeouts: Map<
-        Reaction,
+        ReactionJob,
         { timeoutId: ReturnType<typeof setTimeout>; endTask: () => void }
     > = new Map();
+    private reactionQueues: Map<string, Promise<void>> = new Map();
     private schema: Model;
     private options: ModelOptions;
     private callbacks: ReactionCallbacks;
@@ -49,11 +55,22 @@ export class ReactionSystem {
         // The "reaction.fields → edge" reading lives in eachReactionEdge, so
         // this index and the DevTools graph never diverge on how dependencies
         // are interpreted.
+        const jobsByField = new Map<string, Map<Reaction, ReactionJob>>();
         eachReactionEdge(this.schema, (field, depField, reaction) => {
+            let fieldJobs = jobsByField.get(field);
+            if (!fieldJobs) {
+                fieldJobs = new Map();
+                jobsByField.set(field, fieldJobs);
+            }
+            let job = fieldJobs.get(reaction);
+            if (!job) {
+                job = { field, reaction };
+                fieldJobs.set(reaction, job);
+            }
             if (!this.reactionDeps.has(depField)) {
                 this.reactionDeps.set(depField, []);
             }
-            this.reactionDeps.get(depField)!.push({ field, reaction });
+            this.reactionDeps.get(depField)!.push(job);
         });
     }
 
@@ -66,28 +83,23 @@ export class ReactionSystem {
         reactionStack: string[] = []
     ): void {
         const debounceTime = this.options.debounceReactions ?? 0;
-        const reactionsToTrigger = new Map<
-            Reaction,
-            { field: string; changedField: string }
-        >();
+        const jobsToTrigger = new Map<ReactionJob, string>();
 
         changedFields.forEach((changedField) => {
             const deps = this.reactionDeps.get(changedField);
             if (deps) {
-                deps.forEach((d) => {
-                    if (!reactionsToTrigger.has(d.reaction)) {
-                        reactionsToTrigger.set(d.reaction, {
-                            field: d.field,
-                            changedField,
-                        });
+                deps.forEach((job) => {
+                    if (!jobsToTrigger.has(job)) {
+                        jobsToTrigger.set(job, changedField);
                     }
                 });
             }
         });
 
-        if (reactionsToTrigger.size === 0) return;
+        if (jobsToTrigger.size === 0) return;
 
-        reactionsToTrigger.forEach(({ field, changedField }, reaction) => {
+        jobsToTrigger.forEach((changedField, job) => {
+            const { field } = job;
             if (reactionStack.includes(field)) {
                 this.callbacks.reportError(ModelEvents.REACTION_ERROR, {
                     code: 'circular_dependency',
@@ -97,18 +109,22 @@ export class ReactionSystem {
                 return;
             }
 
-            this.scheduleReaction(field, reaction, debounceTime, [
+            this.scheduleReaction(job, debounceTime, [
                 ...reactionStack,
                 changedField,
             ]);
         });
     }
 
-    private scheduleReaction(field: string, reaction: Reaction, debounceTime: number, reactionStack: string[] = []): void {
+    private scheduleReaction(
+        job: ReactionJob,
+        debounceTime: number,
+        reactionStack: string[] = []
+    ): void {
         // Register the replacement before releasing the old task so settled()
         // never observes a false idle state during debounce rescheduling.
         const endTask = this.pendingTasks.begin();
-        const scheduled = this.reactionTimeouts.get(reaction);
+        const scheduled = this.reactionTimeouts.get(job);
         if (scheduled) {
             clearTimeout(scheduled.timeoutId);
             scheduled.endTask();
@@ -116,27 +132,40 @@ export class ReactionSystem {
 
         if (debounceTime > 0) {
             const timeoutId = setTimeout(() => {
-                this.reactionTimeouts.delete(reaction);
-                this.runReaction(field, reaction, reactionStack, endTask);
+                this.reactionTimeouts.delete(job);
+                this.runReaction(job, reactionStack, endTask);
             }, debounceTime);
-            this.reactionTimeouts.set(reaction, { timeoutId, endTask });
+            this.reactionTimeouts.set(job, { timeoutId, endTask });
         } else {
-            this.runReaction(field, reaction, reactionStack, endTask);
+            this.runReaction(job, reactionStack, endTask);
         }
     }
 
     private runReaction(
-        field: string,
-        reaction: Reaction,
+        job: ReactionJob,
         reactionStack: string[],
         endTask: () => void
     ): void {
-        this.processReaction(field, reaction, reactionStack).finally(() => {
-            endTask();
-        });
+        const previous = this.reactionQueues.get(job.field);
+        const work = previous
+            ? previous.then(() => this.processReaction(job, reactionStack))
+            : this.processReaction(job, reactionStack);
+        const queued = work.finally(endTask);
+        this.reactionQueues.set(job.field, queued);
+
+        const cleanup = (): void => {
+            if (this.reactionQueues.get(job.field) === queued) {
+                this.reactionQueues.delete(job.field);
+            }
+        };
+        void queued.then(cleanup, cleanup);
     }
 
-    private async processReaction(field: string, reaction: Reaction, reactionStack: string[] = []): Promise<void> {
+    private async processReaction(
+        job: ReactionJob,
+        reactionStack: string[] = []
+    ): Promise<void> {
+        const { field, reaction } = job;
         try {
             const dependentValues: Record<string, any> = {};
             for (const f of reaction.fields) {
@@ -152,10 +181,13 @@ export class ReactionSystem {
                 dependentValues[f] = this.callbacks.getValue(f);
             }
 
-            const computedValue = reaction.computed(dependentValues);
+            const computedValue = await reaction.computed(dependentValues);
             const committed = await this.callbacks.setValue(field, computedValue, { reactionStack });
             if (committed && reaction.action) {
-                reaction.action({ ...dependentValues, computed: computedValue });
+                await reaction.action({
+                    ...dependentValues,
+                    computed: computedValue,
+                });
             }
         } catch (error) {
             this.handleReactionError(field, error as Error);
@@ -185,6 +217,7 @@ export class ReactionSystem {
             endTask();
         });
         this.reactionTimeouts.clear();
+        this.reactionQueues.clear();
         this.reactionDeps.clear();
         // The shared PendingTasks is owned and disposed by ModelManager.
     }
