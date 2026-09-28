@@ -1,11 +1,12 @@
 /**
  * Build the DevTools extension with esbuild.
  *
- * Four independent bundles, one per extension execution context:
+ * Five independent bundles, one per extension entry point:
  *   - page-agent  : injected into the page MAIN world (installs the hook)
  *   - content     : ISOLATED-world relay between page and background
  *   - background  : MV3 service worker, routes messages per tab
  *   - panel       : the React DevTools panel UI
+ *   - devtools    : registers the panel with the browser DevTools API
  *
  * Static assets (manifest, panel HTML, devtools loader) are copied to dist/.
  */

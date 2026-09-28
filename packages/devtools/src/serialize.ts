@@ -70,7 +70,10 @@ function serialize(
 
     // From here on `value` is a non-null object.
     if (value instanceof Date) {
-        return { t: 'date', v: value.toISOString() };
+        return {
+            t: 'date',
+            v: Number.isNaN(value.getTime()) ? 'Invalid Date' : value.toISOString(),
+        };
     }
 
     if (seen.has(value as object)) return { t: 'circular' };

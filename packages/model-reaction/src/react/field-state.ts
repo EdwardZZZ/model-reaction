@@ -71,11 +71,15 @@ export function useModelFieldState<
 
     const metaSubscribe = useCallback(
         (notify: () => void) => {
-            const validationHandler = (e: { field: string }): void => {
+            const validationHandler = (e: { field?: string }): void => {
                 if (e.field === field) notify();
             };
             const unsubscribeError = model.on(
                 ModelEvents.VALIDATION_ERROR,
+                validationHandler
+            );
+            const unsubscribeReactionError = model.on(
+                ModelEvents.REACTION_ERROR,
                 validationHandler
             );
             const unsubscribeFieldValidation = model.on(
@@ -90,6 +94,7 @@ export function useModelFieldState<
             );
             return () => {
                 unsubscribeError();
+                unsubscribeReactionError();
                 unsubscribeFieldValidation();
                 unsubscribeDirty();
             };

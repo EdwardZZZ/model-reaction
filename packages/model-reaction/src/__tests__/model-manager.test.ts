@@ -201,6 +201,56 @@ describe('ModelManager - Batch Operations (setFields)', () => {
         expect(credentials.validationErrors.confirmPassword).toEqual([]);
         credentials.dispose();
     });
+
+    test('strictMode waits for valid fields and triggers their reactions before rejecting', async () => {
+        interface Schema {
+            source: number;
+            derived: number;
+        }
+        const strictModel = createModel<Schema>(
+            {
+                source: {
+                    type: 'number',
+                    default: 1,
+                    validator: [
+                        {
+                            type: 'delayed',
+                            message: 'Source is invalid',
+                            validate: async () => {
+                                await new Promise((resolve) =>
+                                    setTimeout(resolve, 10)
+                                );
+                                return true;
+                            },
+                        },
+                    ],
+                },
+                derived: {
+                    type: 'number',
+                    default: 0,
+                    reaction: {
+                        fields: ['source'],
+                        computed: ({ source }) => source * 2,
+                    },
+                },
+            },
+            { strictMode: true }
+        );
+        await strictModel.settled();
+
+        await expect(
+            strictModel.setFields({
+                source: 2,
+                // @ts-expect-error intentional unknown field
+                ghost: 1,
+            })
+        ).rejects.toThrow(/does not exist in the model schema/);
+        await strictModel.settled();
+
+        expect(strictModel.getField('source')).toBe(2);
+        expect(strictModel.getField('derived')).toBe(4);
+        strictModel.dispose();
+    });
 });
 
 describe('ModelManager - validateAll', () => {

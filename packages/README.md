@@ -7,5 +7,5 @@ This directory holds the monorepo's packages (see
 - `devtools/` — the browser DevTools extension
 - `demo/` — a React app demonstrating both
 
-Populated across migration stages B–D; this placeholder keeps the directory
-tracked in stage A.
+The migration is complete. Each package contains its own scripts and
+package-specific documentation.

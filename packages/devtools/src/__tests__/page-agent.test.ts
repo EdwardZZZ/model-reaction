@@ -121,6 +121,7 @@ describe('page agent', () => {
         getHook().register(inst);
         inst.emitChange('firstName', 'Ada');
         await flush();
+        await flush();
 
         const change = received.find(
             (m): m is Extract<AgentMessage, { kind: 'change' }> => m.kind === 'change'
@@ -132,6 +133,45 @@ describe('page agent', () => {
             (m): m is Extract<AgentMessage, { kind: 'snapshot' }> => m.kind === 'snapshot'
         );
         expect(snap?.snapshot.data.firstName).toEqual({ t: 'primitive', v: 'Ada' });
+    });
+
+    test('coalesces synchronous changes into one snapshot with the latest state', async () => {
+        const received = collectAgentMessages();
+        dispose = installAgent(window);
+        const inst = makeFakeInstance(5);
+        getHook().register(inst);
+
+        inst.emitChange('firstName', 'Ada');
+        inst.emitChange('firstName', 'Grace');
+        await flush();
+        await flush();
+
+        expect(received.filter((message) => message.kind === 'change')).toHaveLength(2);
+        const snapshots = received.filter(
+            (message): message is Extract<AgentMessage, { kind: 'snapshot' }> =>
+                message.kind === 'snapshot'
+        );
+        expect(snapshots).toHaveLength(1);
+        expect(snapshots[0]?.snapshot.data.firstName).toEqual({
+            t: 'primitive',
+            v: 'Grace',
+        });
+    });
+
+    test('does not send a queued snapshot after the instance is unregistered', async () => {
+        const received = collectAgentMessages();
+        dispose = installAgent(window);
+        const inst = makeFakeInstance(6);
+        getHook().register(inst);
+
+        inst.emitChange('firstName', 'Ada');
+        getHook().unregister(6);
+        await flush();
+        await flush();
+
+        expect(received.some((message) => message.kind === 'change')).toBe(true);
+        expect(received.some((message) => message.kind === 'instance-removed')).toBe(true);
+        expect(received.some((message) => message.kind === 'snapshot')).toBe(false);
     });
 
     test('timeline ring buffer respects the cap', async () => {

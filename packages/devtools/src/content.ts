@@ -1,13 +1,9 @@
 /**
  * Content script — runs in the ISOLATED world at `document_start`.
  *
- * Two jobs:
- *   1. Inject the page agent into the page's MAIN world so the global hook is
- *      installed before the app's first `createModel`. MV3 lets us do this
- *      declaratively via `world: 'MAIN'` in the manifest, but injecting from
- *      here as well is a robust fallback and keeps the wiring explicit.
- *   2. Relay messages between the page (`window.postMessage`) and the extension
- *      (a long-lived `chrome.runtime` port to the background worker).
+ * Relays messages between the page (`window.postMessage`) and the extension
+ * (a long-lived `chrome.runtime` port to the background worker). The page agent
+ * is injected separately into the MAIN world by the manifest.
  *
  * The content script is the only layer that can see both the page's `window`
  * and the extension's messaging APIs, so all cross-boundary traffic funnels

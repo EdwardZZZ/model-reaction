@@ -61,20 +61,33 @@ export class ReactionSystem {
         this.triggerReactionsForFields([changedField], reactionStack);
     }
 
-    public triggerReactionsForFields(changedFields: string[], reactionStack: string[] = []): void {
+    public triggerReactionsForFields(
+        changedFields: string[],
+        reactionStack: string[] = []
+    ): void {
         const debounceTime = this.options.debounceReactions ?? 0;
-        const reactionsToTrigger = new Map<Reaction, string>();
+        const reactionsToTrigger = new Map<
+            Reaction,
+            { field: string; changedField: string }
+        >();
 
-        changedFields.forEach(changedField => {
+        changedFields.forEach((changedField) => {
             const deps = this.reactionDeps.get(changedField);
             if (deps) {
-                deps.forEach(d => reactionsToTrigger.set(d.reaction, d.field));
+                deps.forEach((d) => {
+                    if (!reactionsToTrigger.has(d.reaction)) {
+                        reactionsToTrigger.set(d.reaction, {
+                            field: d.field,
+                            changedField,
+                        });
+                    }
+                });
             }
         });
-        
+
         if (reactionsToTrigger.size === 0) return;
 
-        reactionsToTrigger.forEach((field, reaction) => {
+        reactionsToTrigger.forEach(({ field, changedField }, reaction) => {
             if (reactionStack.includes(field)) {
                 this.callbacks.reportError(ModelEvents.REACTION_ERROR, {
                     code: 'circular_dependency',
@@ -84,7 +97,10 @@ export class ReactionSystem {
                 return;
             }
 
-            this.scheduleReaction(field, reaction, debounceTime, [...reactionStack, ...changedFields]);
+            this.scheduleReaction(field, reaction, debounceTime, [
+                ...reactionStack,
+                changedField,
+            ]);
         });
     }
 
@@ -153,15 +169,14 @@ export class ReactionSystem {
             message: error.message,
             originalError: error,
         };
-        this.callbacks.reportError(ModelEvents.REACTION_ERROR, modelError);
-
         // Record the failure under the field the reaction computes, so it is
-        // reachable via `validationErrors[field]` rather than a hidden key.
+        // visible before subscribers receive the reaction error event.
         this.callbacks.setError(field, {
             field,
             rule: 'reaction_error',
-            message: modelError.message
+            message: modelError.message,
         });
+        this.callbacks.reportError(ModelEvents.REACTION_ERROR, modelError);
     }
 
     public dispose(): void {

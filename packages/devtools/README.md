@@ -12,7 +12,7 @@ See the user-facing guide in
 
 ```
 devtools/
-├── build.mjs              # esbuild bundler (4 extension entry points)
+├── build.mjs              # esbuild bundler (5 extension entry points)
 ├── public/                # static assets copied verbatim into dist/
 │   ├── manifest.json      # MV3 manifest
 │   ├── devtools.html      # loads the devtools page (registers the panel)

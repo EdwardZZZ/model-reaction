@@ -181,7 +181,7 @@ export class ModelManager<
         // batched reaction pass mirrors the single-field path (which fires a
         // reaction only on a real change) instead of firing for every input.
         const changedFields = new Set<string>();
-        const results = await Promise.all(
+        const results = await Promise.allSettled(
             prepared.map(({ field, schema, value }) =>
                 schema
                     ? this.validateAndCommit(field, schema, value, {
@@ -198,7 +198,15 @@ export class ModelManager<
         );
         // Single batched reaction trigger after all fields settle.
         this.reactionSystem.triggerReactionsForFields([...changedFields]);
-        return results.every(Boolean);
+        const rejection = results.find(
+            (result): result is PromiseRejectedResult =>
+                result.status === 'rejected'
+        );
+        if (rejection) throw rejection.reason;
+
+        return results.every(
+            (result) => result.status === 'fulfilled' && result.value
+        );
     };
 
     validateAll = async (): Promise<boolean> => {

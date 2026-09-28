@@ -181,12 +181,12 @@ root, run **all three** before submitting:
 
 ```bash
 pnpm --filter model-reaction run lint
-pnpm --filter model-reaction run typecheck:test   # types of test files (CI gate)
+pnpm --filter model-reaction run typecheck        # source + test types (CI gate)
 pnpm --filter model-reaction exec jest --silent    # 200+ tests including doc scenarios
 ```
 
-(Or `cd packages/model-reaction` and use `npm run lint` / `npm run typecheck:test`
-/ `npx jest --silent` — the package scripts are unchanged.)
+(Or `cd packages/model-reaction` and use the equivalent `npm run lint` /
+`npm run typecheck` / `npx jest --silent` commands.)
 
 Then verify the README scenarios still work end-to-end:
 

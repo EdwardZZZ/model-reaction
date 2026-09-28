@@ -35,14 +35,8 @@ jobs:
       - name: Lint (library)
         run: pnpm --filter model-reaction run lint
 
-      - name: Typecheck (library test sources)
-        run: pnpm --filter model-reaction run typecheck:test
-
-      - name: Typecheck (devtools)
-        run: pnpm --filter model-reaction-devtools run typecheck
-
-      - name: Typecheck (demo)
-        run: pnpm --filter model-reaction-demo run typecheck
+      - name: Typecheck (all packages)
+        run: pnpm run typecheck
 
       - name: Test (all packages)
         run: pnpm -r run test

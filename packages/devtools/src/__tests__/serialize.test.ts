@@ -38,6 +38,13 @@ describe('serializeValue', () => {
         });
     });
 
+    test('invalid date serializes to an explicit marker', () => {
+        expect(serializeValue(new Date(Number.NaN))).toEqual({
+            t: 'date',
+            v: 'Invalid Date',
+        });
+    });
+
     test('nested object and array', () => {
         const result = serializeValue({ a: [1, 'x'], b: { c: true } });
         expect(result).toEqual({

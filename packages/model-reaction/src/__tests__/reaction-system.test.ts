@@ -393,6 +393,41 @@ describe('ReactionSystem - via createModel', () => {
         model.dispose();
     });
 
+    test('setFields tracks only the real dependency path for cascaded reactions', async () => {
+        interface Schema {
+            a: number;
+            b: number;
+            c: number;
+        }
+        const model = createModel<Schema>({
+            a: { type: 'number', default: 0 },
+            b: {
+                type: 'number',
+                default: 0,
+                reaction: {
+                    fields: ['a'],
+                    computed: ({ a }) => a + 1,
+                },
+            },
+            c: {
+                type: 'number',
+                default: 0,
+                reaction: {
+                    fields: ['b'],
+                    computed: ({ b }) => b * 2,
+                },
+            },
+        });
+        await model.settled();
+
+        await model.setFields({ a: 2, c: 99 });
+        await model.settled();
+
+        expect(model.getField('b')).toBe(3);
+        expect(model.getField('c')).toBe(6);
+        model.dispose();
+    });
+
     test('setFields fires reactions only for fields that actually changed', async () => {
         const aReaction = jest.fn((deps: Record<string, any>) => deps.a);
         const bAction = jest.fn();
@@ -680,8 +715,9 @@ describe('ReactionSystem - direct unit tests', () => {
             .spyOn(console, 'error')
             .mockImplementation(() => {});
 
-        const setError = jest.fn();
-        const reportError = jest.fn();
+        const callOrder: string[] = [];
+        const setError = jest.fn(() => callOrder.push('setError'));
+        const reportError = jest.fn(() => callOrder.push('reportError'));
         const system = new ReactionSystem(
             {
                 a: { type: 'string', default: '' },
@@ -720,6 +756,7 @@ describe('ReactionSystem - direct unit tests', () => {
                 message: 'getValue failed',
             })
         );
+        expect(callOrder).toEqual(['setError', 'reportError']);
 
         errorSpy.mockRestore();
     });

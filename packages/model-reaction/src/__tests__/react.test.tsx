@@ -838,6 +838,44 @@ describe('useModelFieldState', () => {
 
         model.dispose();
     });
+
+    it('surfaces reaction errors for the computed field', async () => {
+        interface Schema {
+            source: number;
+            derived: string;
+        }
+        const model = createModel<Schema>({
+            source: { type: 'number', default: 0 },
+            derived: {
+                type: 'string',
+                default: '',
+                reaction: {
+                    fields: ['source'],
+                    computed: ({ source }) => {
+                        if (source === 1) {
+                            throw new Error('Reaction failed');
+                        }
+                        return String(source);
+                    },
+                },
+            },
+        });
+        await model.settled();
+        const { result } = renderHook(() =>
+            useModelFieldState(model, 'derived')
+        );
+
+        await act(async () => {
+            await model.setField('source', 1);
+            await model.settled();
+        });
+
+        expect(result.current[2].error).toBe('Reaction failed');
+        expect(result.current[2].errors).toEqual([
+            expect.objectContaining({ rule: 'reaction_error' }),
+        ]);
+        model.dispose();
+    });
 });
 
 // ---------------------------------------------------------------------------

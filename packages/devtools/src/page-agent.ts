@@ -48,6 +48,7 @@ interface TrackedInstance {
     timeline: ChangeEntry[];
     unsubscribe: () => void;
     seq: number;
+    snapshotQueued: boolean;
 }
 
 /**
@@ -85,6 +86,21 @@ export function installAgent(
         timeline: entry.timeline.slice(),
     });
 
+    const scheduleSnapshot = (entry: TrackedInstance): void => {
+        if (entry.snapshotQueued) return;
+        entry.snapshotQueued = true;
+        queueMicrotask(() => {
+            entry.snapshotQueued = false;
+            if (tracked.get(entry.instance.id) !== entry) return;
+            post({
+                source: AGENT_SOURCE,
+                kind: 'snapshot',
+                id: entry.instance.id,
+                snapshot: takeSnapshot(entry.instance),
+            });
+        });
+    };
+
     const hook = {
         register(instance: HookModelInstance): void {
             const entry: TrackedInstance = {
@@ -92,6 +108,7 @@ export function installAgent(
                 timeline: [],
                 unsubscribe: () => {},
                 seq: 0,
+                snapshotQueued: false,
             };
             entry.unsubscribe = instance.subscribe((change) => {
                 const record: ChangeEntry = {
@@ -107,13 +124,8 @@ export function installAgent(
                 }
                 post({ source: AGENT_SOURCE, kind: 'change', id: instance.id, change: record });
                 // A committed change may also move other fields (reactions), so
-                // refresh the snapshot for the whole instance.
-                post({
-                    source: AGENT_SOURCE,
-                    kind: 'snapshot',
-                    id: instance.id,
-                    snapshot: takeSnapshot(instance),
-                });
+                // refresh the whole instance once at the end of this microtask.
+                scheduleSnapshot(entry);
             });
             tracked.set(instance.id, entry);
             post({ source: AGENT_SOURCE, kind: 'instance-added', instance: toState(entry) });
