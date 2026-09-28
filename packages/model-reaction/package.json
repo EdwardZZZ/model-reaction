@@ -38,7 +38,7 @@
   "scripts": {
     "build": "rimraf dist && rollup -c",
     "test": "jest",
-    "typecheck": "tsc --noEmit -p tsconfig.test.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
     "format": "prettier --write src/**/*.ts",
     "lint": "eslint \"src/**/*.{ts,js}\"",
     "lint:fix": "eslint \"src/**/*.{ts,js}\" --fix",

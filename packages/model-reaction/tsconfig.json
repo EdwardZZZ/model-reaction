@@ -1,21 +1,14 @@
 {
-  // Visit https://aka.ms/tsconfig to read more about this file
+  // Default project for IDE diagnostics and full source/test type checking.
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    // File Layout
     "rootDir": "./src",
-    "outDir": "./dist",
-
-    // Environment Settings
-    // See also https://aka.ms/tsconfig/module
     "module": "esnext",
     "target": "esnext",
     "jsx": "react-jsx",
-    "types": ["jest"],
-
-    // Other Outputs
-    "declaration": true,
+    "types": ["jest", "node"],
+    "noEmit": true
   },
   "include": ["src/**/*"],
-  "exclude": ["node_modules", "**/*.spec.ts", "**/*.test.ts", "**/*.test.tsx"],
+  "exclude": ["node_modules", "dist"]
 }

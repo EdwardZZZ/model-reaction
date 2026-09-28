@@ -1,0 +1,11 @@
+{
+  // Production build only; tests remain in the default IDE/typecheck project.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "outDir": "./dist",
+    "types": [],
+    "declaration": true
+  },
+  "exclude": ["node_modules", "dist", "**/*.spec.ts", "**/*.test.ts", "**/*.test.tsx"]
+}

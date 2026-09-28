@@ -9,7 +9,7 @@ const sharedPlugins = (declarationDir) => [
   resolve({ browser: true, preferBuiltins: false }),
   commonjs({ include: /node_modules/ }),
   typescript({
-    tsconfig: './tsconfig.json',
+    tsconfig: './tsconfig.build.json',
     declarationDir,
     compilerOptions: { module: 'esnext' },
   }),
