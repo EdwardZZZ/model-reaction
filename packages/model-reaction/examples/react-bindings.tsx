@@ -29,6 +29,7 @@ import {
     useModelFields,
     useModelFieldState,
     useModelSelector,
+    useDraftField,
 } from '../src/react';
 
 // 1. Define the model. Use an explicit interface for the cleanest types.
@@ -52,33 +53,24 @@ function createCartModel() {
     });
 }
 
-// 2. Component that re-renders only when `name` changes.
+// 2. Recommended controlled text input; the local draft prevents rejected
+//    intermediate values from snapping back to the last committed value.
 function NameInput() {
     const cart = useModel<Cart>();
-    const name = useModelField(cart, 'name');
+    const { draft, setDraft } = useDraftField(cart, 'name');
     return (
         <input
-            value={name}
-            onChange={async (e) => {
-                await cart.setField('name', e.target.value);
-            }}
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
         />
     );
 }
 
 // 3. Component that re-renders only when `qty` changes.
-function QtyInput() {
+function QtyValue() {
     const cart = useModel<Cart>();
     const qty = useModelField(cart, 'qty');
-    return (
-        <input
-            type="number"
-            value={qty}
-            onChange={async (e) => {
-                await cart.setField('qty', Number(e.target.value));
-            }}
-        />
-    );
+    return <output>{qty}</output>;
 }
 
 // 4. Component that re-renders only when total = qty * price changes.
@@ -145,13 +137,13 @@ function CartContents() {
     return (
         <div>
             <NameInput />
-            <QtyInput />
+            <QtyValue />
             <Total />
             <CouponBadge />
             <ValidationSummary />
             <Summary />
-            <NameField />
-            <CouponInput />
+            <CouponField />
+            <QtyControl />
             <NameFieldWithBlur />
         </div>
     );
@@ -165,22 +157,21 @@ function Summary() {
     return <div>Snapshot: qty={qty} price={price}</div>;
 }
 
-// 7c. `<Field>` render-prop variant (consumes the provider context).
-//     `touched` is a pure UI concern — keep it as local component state.
-function NameField() {
-    const [touched, setTouched] = useState(false);
+// 7c. `<Field>` render-prop variant for a control that can bind directly to
+//     committed data (consumes the provider context).
+function CouponField() {
     return (
-        <Field<Cart, 'name'> name="name">
+        <Field<Cart, 'coupon'> name="coupon">
             {({ value, setValue, meta }) => (
                 <label>
-                    <input
+                    <select
                         value={value}
-                        onChange={async (e) => {
-                            await setValue(e.target.value);
-                        }}
-                        onBlur={() => setTouched(true)}
-                    />
-                    {touched && meta.error ? (
+                        onChange={(e) => void setValue(e.target.value)}
+                    >
+                        <option value="">No coupon</option>
+                        <option value="SAVE10">SAVE10</option>
+                    </select>
+                    {meta.error ? (
                         <span style={{ color: 'red' }}>{meta.error}</span>
                     ) : null}
                 </label>
@@ -189,46 +180,43 @@ function NameField() {
     );
 }
 
-// 7d. `useModelFieldState` example: form-style binding in a single hook.
+// 7d. `useModelFieldState` example for a non-text control.
 //     Demonstrates `validating`, `dirty`, `error` metadata.
-function CouponInput() {
+function QtyControl() {
     const cart = useModel<Cart>();
-    const [coupon, setCoupon, meta] = useModelFieldState(cart, 'coupon');
+    const [qty, setQty, meta] = useModelFieldState(cart, 'qty');
     return (
         <input
+            type="range"
+            min={1}
+            max={10}
             data-validating={meta.validating}
             data-dirty={meta.dirty}
-            value={coupon}
-            onChange={async (e) => {
-                await setCoupon(e.target.value);
-            }}
+            value={qty}
+            onChange={(e) => void setQty(Number(e.target.value))}
         />
     );
 }
 
-// 7e. Real-world controlled input with touched / blur / error display.
-//     `touched` is intentionally NOT in `meta` — it is component-local UI
-//     state, owned here via `useState`. The hook gives us:
+// 7e. Real-world controlled text input with touched / blur / error display.
+//     `useDraftField` owns the local draft and standard edit-lifecycle state:
 //       - `meta.error` for the message,
 //       - `meta.validating` to disable the input while the async setter is
 //         in flight (prevents duplicate submissions),
 //       - `meta.dirty` if you want to flag rejected writes.
 function NameFieldWithBlur() {
     const cart = useModel<Cart>();
-    const [name, setName, meta] = useModelFieldState(cart, 'name');
-    const [touched, setTouched] = useState(false);
-    const showError = touched && meta.error;
+    const { draft, setDraft, meta, onBlur, showError } =
+        useDraftField(cart, 'name');
     return (
         <label style={{ display: 'block' }}>
             <span>Name</span>
             <input
-                value={name}
+                value={draft}
                 disabled={meta.validating}
-                onChange={async (e) => {
-                    await setName(e.target.value);
-                }}
-                onBlur={() => setTouched(true)}
-                aria-invalid={showError ? 'true' : 'false'}
+                onChange={(e) => setDraft(e.target.value)}
+                onBlur={onBlur}
+                aria-invalid={showError}
                 style={{
                     borderColor: showError ? 'red' : undefined,
                 }}
@@ -238,9 +226,6 @@ function NameFieldWithBlur() {
                     {meta.error}
                 </span>
             ) : null}
-            <button type="button" onClick={() => setTouched(false)}>
-                Reset
-            </button>
         </label>
     );
 }

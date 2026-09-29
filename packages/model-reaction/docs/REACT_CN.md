@@ -26,8 +26,8 @@
 | `useModelSelector(model, selector, isEqual?)` | hook | 订阅派生值（selector 引用是订阅的一部分，请用 `useCallback` 锁定） |
 | `useModelComputed(model, selector, isEqual?)` | hook | 与 `useModelSelector` 形参相同，但订阅不依赖 selector 引用；当前 render 的 selector 可直接闭包 `id`、`index` 等 props，无需 `useCallback` |
 | `useModelFields(model, fields)` | hook | 一次订阅多个字段（浅比较） |
-| `useModelFieldState(model, field)` | hook | `[value, setValue, meta]` 一体化表单绑定，含 `error / dirty / validating` |
-| `useDraftField(model, field, options?)` | hook | **可选** 受控输入绑定：在 `useModelFieldState` 之上加本地 draft + `touched`/错误门控。用于严格/异步校验 |
+| `useDraftField(model, field, options?)` | hook | **默认推荐的文本输入绑定**，包含本地 draft、`touched`、错误门控和 model 校验 |
+| `useModelFieldState(model, field)` | hook | 更低层的 committed value 绑定，返回 `[value, setValue, meta]`；用于非文本控件或自定义策略 |
 | `shallow` | 函数 | 用于对象/数组选择器的浅比较工具 |
 | `<ModelProvider model>` | 组件 | 通过 Context 注入 model |
 | `useModel<T>()` | hook | 读取最近 Provider 中的 model |
@@ -47,8 +47,8 @@ import {
     useModel,
     useModelField,
     useModelFields,
-    useModelFieldState,
     useModelSelector,
+    useDraftField,
 } from 'model-reaction/react';
 
 interface Cart {
@@ -67,18 +67,11 @@ function createCartModel() {
     });
 }
 
-// 1. 单字段 hook
-function NameInput() {
+// 1. 单字段展示 hook
+function NameValue() {
     const cart = useModel<Cart>();
     const name = useModelField(cart, 'name');
-    return (
-        <input
-            value={name}
-            onChange={async (e) => {
-                await cart.setField('name', e.target.value);
-            }}
-        />
-    );
+    return <span>{name}</span>;
 }
 
 // 2. 派生值 hook —— selector 引用是订阅的一部分，请用 useCallback 锁定
@@ -96,22 +89,20 @@ function PriceLine() {
     return <span>{qty} x {price}</span>;
 }
 
-// 4. 一体化表单绑定 —— `touched` 是组件本地 UI 状态
+// 4. 默认推荐的文本输入绑定
 function CouponInput() {
     const cart = useModel<Cart>();
-    const [coupon, setCoupon, meta] = useModelFieldState(cart, 'coupon');
-    const [touched, setTouched] = useState(false);
+    const { draft, setDraft, meta, onBlur, showError } =
+        useDraftField(cart, 'coupon');
     return (
         <label>
             <input
-                value={coupon}
-                onChange={async (e) => {
-                    await setCoupon(e.target.value);
-                }}
-                onBlur={() => setTouched(true)}
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                onBlur={onBlur}
                 disabled={meta.validating}
             />
-            {touched && meta.error && <span style={{ color: 'red' }}>{meta.error}</span>}
+            {showError && <span style={{ color: 'red' }}>{meta.error}</span>}
         </label>
     );
 }
@@ -132,17 +123,19 @@ function CartModelOwner({ children }: { children: ReactNode }) {
 function CartApp() {
     return (
         <CartModelOwner>
-            <Field<Cart, 'name'> name="name">
+            <Field<Cart, 'coupon'> name="coupon">
                 {({ value, setValue, meta }) => (
-                    <input
+                    <select
                         value={value}
-                        onChange={async (e) => {
-                            await setValue(e.target.value);
-                        }}
+                        onChange={(e) => void setValue(e.target.value)}
                         aria-invalid={!!meta.error}
-                    />
+                    >
+                        <option value="">不使用优惠券</option>
+                        <option value="SAVE10">SAVE10</option>
+                    </select>
                 )}
             </Field>
+            <NameValue />
             <Total />
             <PriceLine />
             <CouponInput />
@@ -163,9 +156,8 @@ function Snapshot() {
 
 ## 严格 / 异步校验下的受控输入
 
-上面的示例把输入框的 `value` 直接绑定到已提交的字段（`value={name}` +
-`onChange={setField}`）。当校验器宽松且同步时，这样没问题——比如 `required`
-接受任何非空按键，每次编辑都会立即提交并干净地读回。
+把输入框的 `value` 直接绑定到已提交字段（`value={name}` +
+`onChange={setField}`），只适用于校验不会拒绝任何编辑中间态、也不会异步返回的情况。
 
 但只要校验会**拒绝**某个中间态按键，或**异步**返回结果，这种直连就会失效。
 根源是库的 verify-then-commit 契约（见 [AGENTS.md §1](../AGENTS.md)）：
@@ -182,9 +174,9 @@ function Snapshot() {
 这与库把 `touched` 排除在 model 之外的理由一致——「正在编辑的文本」属于 UI
 生命周期状态，而非 model 真理（见 [AGENTS.md §5](../AGENTS.md)）。
 
-这个模式已由适配层作为**可选** hook `useDraftField` 提供，构建在
-`useModelFieldState` 之上。需要才 import —— 核心绑定（`useModelFieldState`、
-`[value, setValue, meta]`）并不依赖它：
+适配层通过 `useDraftField` 提供这个模式，它是**受控文本输入的默认推荐用法**。
+它构建在 `useModelFieldState` 之上，因此核心 model 仍然只保存已提交和被拒绝的
+领域值：
 
 ```tsx
 import { useDraftField } from 'model-reaction/react';
@@ -215,9 +207,8 @@ onBlur, showError, committed }`：
 - `meta` / `committed` —— 底层 `useModelFieldState` 的元数据与最后提交的值。
 - `options.format` —— 回填时已提交/待定值如何渲染成文本（默认 `String`），见下方字段类型契约。
 
-> 它固化了 `useModelFieldState` 刻意留白的 UI 策略（`touched` 何时翻转、如何播种、
-> value→text 方向），所以是**独立、opt-in** 的导出，而非折进 `meta`。想自己拿捏这些
-> 取舍时，就用普通的 `useModelFieldState`。可运行的集成示例见 demo 应用
+> 需要 committed value 语义或绑定非文本控件时，使用更低层的
+> `useModelFieldState`。可运行的集成示例见 demo 应用
 > （`packages/demo/src/TextField.tsx`）。
 
 ### 字段类型契约

@@ -43,18 +43,22 @@ export interface FieldMeta {
 export type FieldSetter<V> = (value: V) => Promise<boolean>;
 
 /**
- * Receive a field value plus a setter and metadata in one hook. Designed
- * to make wiring controlled inputs to a model trivial:
+ * Receive a committed field value plus a setter and metadata in one hook.
+ * Use this lower-level binding for non-text controls or custom UI policies:
  *
  * ```tsx
- * const [name, setName, meta] = useModelFieldState(model, 'name');
+ * const [enabled, setEnabled, meta] = useModelFieldState(model, 'enabled');
  * <input
- *   value={name}
- *   onChange={(e) => setName(e.target.value)}
+ *   type="checkbox"
+ *   checked={enabled}
+ *   onChange={(e) => setEnabled(e.target.checked)}
  *   disabled={meta.validating}
  * />
  * {meta.error && <span>{meta.error}</span>}
  * ```
+ *
+ * For controlled text inputs, prefer `useDraftField` so rejected or in-flight
+ * edits remain visible without an application-managed intermediate value.
  *
  * `touched` / blur-gated error display is intentionally not provided —
  * it is a local UI concern, easily handled with a single `useState(false)`

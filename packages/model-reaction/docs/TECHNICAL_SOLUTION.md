@@ -383,12 +383,12 @@ export function createAdDraftModule(model: AdDraftModel) {
 ## 5. React 集成方案
 
 React 层推荐由页面级 owner 创建 model，并通过 `ModelProvider` 注入子树。
-宽松同步校验可直接使用 `useModelFieldState`；可能拒绝中间输入或异步返回的文本字段
-使用 `useDraftField`，避免受控输入回弹。
+文本输入统一推荐使用 `useDraftField`，避免校验拒绝中间输入时受控组件回弹；
+checkbox、select 等非文本控件可直接使用 `useModelFieldState`。
 
 ```tsx
 import { useEffect, useState } from 'react';
-import { Field, ModelProvider, useDraftField, useModel } from 'model-reaction/react';
+import { ModelProvider, useDraftField, useModel } from 'model-reaction/react';
 import type { ModelReturn } from 'model-reaction';
 
 function AdDraftOwner() {
@@ -430,16 +430,21 @@ function NameField() {
 }
 
 function TitleField() {
+  const model = useModel<AdDraftData>();
+  const { draft, setDraft, onBlur, showError, meta } =
+    useDraftField(model, 'creative.title');
+
   return (
-    <Field<AdDraftData, 'creative.title'> name="creative.title">
-      {({ value, setValue, meta }) => (
-        <label>
-          <span>广告标题</span>
-          <input value={value} onChange={(event) => setValue(event.target.value)} />
-          {meta.error && <small role="alert">{meta.error}</small>}
-        </label>
-      )}
-    </Field>
+    <label>
+      <span>广告标题</span>
+      <input
+        value={draft}
+        onChange={(event) => setDraft(event.target.value)}
+        onBlur={onBlur}
+        aria-invalid={showError}
+      />
+      {showError && <small role="alert">{meta.error}</small>}
+    </label>
   );
 }
 ```
@@ -449,8 +454,8 @@ function TitleField() {
 | 场景 | 推荐 API |
 | --- | --- |
 | 单字段展示 | `useModelField(model, field)` |
-| 宽松同步校验的表单输入 | `useModelFieldState(model, field)` |
-| 严格或异步校验的文本输入 | `useDraftField(model, field)` |
+| 文本表单输入 | `useDraftField(model, field)` |
+| 非文本控件或 committed value 绑定 | `useModelFieldState(model, field)` |
 | 多字段切片 | `useModelFields(model, fields)` |
 | 派生展示值 | `useModelSelector(model, selector)` |
 | 内联 selector 且依赖组件 props | `useModelComputed(model, selector)`（selector 若返回新对象/数组，须传 `isEqual`，如 `shallow`；详见 [REACT_CN.md](./REACT_CN.md#usemodelselector-vs-usemodelcomputed)） |

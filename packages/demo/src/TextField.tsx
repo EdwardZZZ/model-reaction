@@ -1,8 +1,7 @@
-import type { ModelReturn } from 'model-reaction';
-import { useDraftField } from 'model-reaction/react';
+import { useDraftField, useModel } from 'model-reaction/react';
 
 /**
- * A controlled text input bound to one model field.
+ * A controlled text input bound to the nearest provided model.
  *
  * All edit-lifecycle state (the draft, seeding from committed data, the
  * validate-then-commit on change, and the `touched`/blur gate for errors) lives
@@ -11,18 +10,17 @@ import { useDraftField } from 'model-reaction/react';
  * error.
  */
 export function TextField<T extends Record<string, any>>({
-    model,
     field,
     label,
     placeholder,
     readOnly,
 }: {
-    model: ModelReturn<T>;
     field: keyof T & string;
     label: string;
     placeholder?: string;
     readOnly?: boolean;
 }) {
+    const model = useModel<T>();
     const { draft, setDraft, meta, onBlur, showError } = useDraftField(model, field);
 
     return (

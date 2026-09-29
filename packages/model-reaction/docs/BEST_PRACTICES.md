@@ -97,8 +97,8 @@ get the most out of them.
 | Need | Use |
 | --- | --- |
 | Display one field | `useModelField` |
-| Controlled field with value / errors / pending state | `useModelFieldState` |
-| Text input with strict or async validation | `useDraftField` |
+| Controlled text input | `useDraftField` |
+| Non-text control or committed-value binding | `useModelFieldState` |
 | Stable derived selector | `useModelSelector` |
 | Selector that closes over current props | `useModelComputed` |
 | Several fields together | `useModelFields(model, ['a', 'b'])` |
@@ -151,29 +151,39 @@ Inside any descendant:
 
 ```tsx
 const model = useModel<User>();
-const [name, setName, meta] = useModelFieldState(model, 'name');
+const name = useDraftField(model, 'name');
 ```
 
-### 7.4 `<Field>` for declarative inputs
+### 7.4 `<Field>` for committed-value controls
 
-When a leaf component is purely a controlled input plus its error, prefer
-the `<Field>` render-prop form. It hides the `model` reference and makes
-the binding obvious:
+Use the `<Field>` render-prop form when a control can bind directly to the
+committed model value, such as a checkbox or select. Text inputs should use
+`useDraftField` so rejected intermediate edits remain visible:
 
 ```tsx
-function NameField() {
-    const [touched, setTouched] = useState(false);
+interface PlanForm {
+    plan: 'free' | 'pro';
+}
+
+function PlanField() {
     return (
-        <Field<User, 'name'> name="name">
+        <Field<PlanForm, 'plan'> name="plan">
             {({ value, setValue, meta }) => (
                 <label>
-                    <input
+                    <select
                         value={value}
-                        onChange={(e) => setValue(e.target.value)}
-                        onBlur={() => setTouched(true)}
+                        onChange={(e) => {
+                            const plan = e.target.value;
+                            if (plan === 'free' || plan === 'pro') {
+                                void setValue(plan);
+                            }
+                        }}
                         aria-invalid={!!meta.error}
-                    />
-                    {touched && meta.error && <span>{meta.error}</span>}
+                    >
+                        <option value="free">Free</option>
+                        <option value="pro">Pro</option>
+                    </select>
+                    {meta.error && <span>{meta.error}</span>}
                 </label>
             )}
         </Field>
@@ -183,10 +193,9 @@ function NameField() {
 
 ### 7.5 Touched semantics
 
-`useModelFieldState` deliberately does not track `touched` — it is a pure
-UI concern with no place on the model. Keep it as component-local state
-and gate the error display on it so messages only appear after the user
-leaves the field:
+`useDraftField` owns `touched`, `onBlur`, and `showError` for the standard text
+input flow. When using the lower-level `useModelFieldState`, keep `touched` as
+component-local state because it is a UI concern with no place on the model:
 
 ```tsx
 const [touched, setTouched] = useState(false);

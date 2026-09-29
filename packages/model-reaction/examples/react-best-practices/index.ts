@@ -8,11 +8,11 @@
  *
  * | Section | File |
  * | ------- | ---- |
- * | 7.1 — Pick the right hook                   | see `examples/react-bindings.tsx` (covers `useModelField`, `useModelFields`, `useModelSelector`, `useModelFieldState`) |
+ * | 7.1 — Pick the right hook                   | see `examples/react-bindings.tsx` (covers `useDraftField`, `useModelField`, `useModelFields`, `useModelSelector`, `useModelFieldState`) |
  * | 7.2 — Stable selector references            | `7-2-stable-selector.tsx`     |
  * | 7.2bis — `useModelComputed`                 | `7-2bis-model-computed.tsx`   |
  * | 7.3 — Avoid prop drilling with `<ModelProvider>` | `7-3-model-provider.tsx`  |
- * | 7.4 — `<Field>` for declarative inputs      | `7-4-field-render-prop.tsx`   |
+ * | 7.4 — `<Field>` for committed-value controls | `7-4-field-render-prop.tsx`  |
  * | 7.5 — Touched semantics                     | `7-5-touched.tsx`             |
  * | 7.6 — Submission flow                       | `7-6-submission-flow.tsx`     |
  * | 7.8 — Lifecycle and cleanup                 | `7-8-lifecycle.tsx`           |

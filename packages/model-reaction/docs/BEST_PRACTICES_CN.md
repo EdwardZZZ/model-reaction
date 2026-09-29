@@ -88,8 +88,8 @@ unsubscribe();
 | 需求 | 用 |
 | --- | --- |
 | 展示单个字段 | `useModelField` |
-| 需要值 / 错误 / pending 状态的受控字段 | `useModelFieldState` |
-| 带严格或异步校验的文本输入 | `useDraftField` |
+| 受控文本输入 | `useDraftField` |
+| 非文本控件或 committed value 绑定 | `useModelFieldState` |
 | 稳定的派生 selector | `useModelSelector` |
 | 闭包当前 props 的 selector | `useModelComputed` |
 | 一次订阅多个字段 | `useModelFields(model, ['a', 'b'])` |
@@ -139,28 +139,39 @@ const slice = useModelSelector(cart, selectSlice, shallow);
 
 ```tsx
 const model = useModel<User>();
-const [name, setName, meta] = useModelFieldState(model, 'name');
+const name = useDraftField(model, 'name');
 ```
 
-### 7.4 用 `<Field>` 写声明式输入
+### 7.4 用 `<Field>` 绑定 committed value 控件
 
-叶子组件只做受控输入加错误展示时，优先用 `<Field>` render-prop 形式，
-隐藏 model 引用，让绑定关系一目了然：
+当 checkbox、select 等控件可以直接绑定 model 已提交值时，可以使用 `<Field>`
+render-prop 隐藏 model 引用。文本输入默认使用 `useDraftField`，以保留被校验拒绝的
+编辑中间态：
 
 ```tsx
-function NameField() {
-    const [touched, setTouched] = useState(false);
+interface PlanForm {
+    plan: 'free' | 'pro';
+}
+
+function PlanField() {
     return (
-        <Field<User, 'name'> name="name">
+        <Field<PlanForm, 'plan'> name="plan">
             {({ value, setValue, meta }) => (
                 <label>
-                    <input
+                    <select
                         value={value}
-                        onChange={(e) => setValue(e.target.value)}
-                        onBlur={() => setTouched(true)}
+                        onChange={(e) => {
+                            const plan = e.target.value;
+                            if (plan === 'free' || plan === 'pro') {
+                                void setValue(plan);
+                            }
+                        }}
                         aria-invalid={!!meta.error}
-                    />
-                    {touched && meta.error && <span>{meta.error}</span>}
+                    >
+                        <option value="free">免费版</option>
+                        <option value="pro">专业版</option>
+                    </select>
+                    {meta.error && <span>{meta.error}</span>}
                 </label>
             )}
         </Field>
@@ -170,9 +181,9 @@ function NameField() {
 
 ### 7.5 touched 语义
 
-`useModelFieldState` 故意不追踪 `touched` —— 它是纯 UI 关注点，不属于
-模型。请在组件本地用 `useState` 管理，并用它来 gate 错误展示，让消息
-只在用户离开字段后才出现：
+标准文本输入流程中，`useDraftField` 已经提供 `touched`、`onBlur` 和
+`showError`。使用更低层的 `useModelFieldState` 时，仍应在组件本地管理
+`touched`，因为它是 UI 关注点，不属于模型：
 
 ```tsx
 const [touched, setTouched] = useState(false);

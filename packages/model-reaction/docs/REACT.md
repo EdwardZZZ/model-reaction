@@ -28,8 +28,8 @@ only when its watched slice actually changes.
 | `useModelSelector(model, selector, isEqual?)` | hook | Subscribe to a derived value (selector reference is **part of the subscription** — wrap it in `useCallback`). |
 | `useModelComputed(model, selector, isEqual?)` | hook | Same shape as `useModelSelector`, but the subscription does not depend on selector identity. The current render's selector can close over `id`, `index`, and other props without `useCallback`. |
 | `useModelFields(model, fields)` | hook | Subscribe to several fields at once (shallow-compared). |
-| `useModelFieldState(model, field)` | hook | `[value, setValue, meta]` form-style binding with `error / dirty / validating`. |
-| `useDraftField(model, field, options?)` | hook | **Optional** controlled-input binding: local draft + `touched`/error gating on top of `useModelFieldState`. For strict/async validators. |
+| `useDraftField(model, field, options?)` | hook | **Recommended text-input binding** with a local draft, `touched`, error gating, and model validation. |
+| `useModelFieldState(model, field)` | hook | Lower-level committed-value binding with `[value, setValue, meta]`; use for non-text controls or custom policies. |
 | `shallow` | function | Shallow equality helper for object/array selectors. |
 | `<ModelProvider model>` | component | Provide a model via context. |
 | `useModel<T>()` | hook | Read the model from the nearest provider. |
@@ -50,8 +50,8 @@ import {
     useModel,
     useModelField,
     useModelFields,
-    useModelFieldState,
     useModelSelector,
+    useDraftField,
 } from 'model-reaction/react';
 
 interface Cart {
@@ -70,18 +70,11 @@ function createCartModel() {
     });
 }
 
-// 1. Single-field hook.
-function NameInput() {
+// 1. Single-field display hook.
+function NameValue() {
     const cart = useModel<Cart>();
     const name = useModelField(cart, 'name');
-    return (
-        <input
-            value={name}
-            onChange={async (e) => {
-                await cart.setField('name', e.target.value);
-            }}
-        />
-    );
+    return <span>{name}</span>;
 }
 
 // 2. Selector hook — selector identity is part of the subscription, so
@@ -100,22 +93,20 @@ function PriceLine() {
     return <span>{qty} x {price}</span>;
 }
 
-// 4. All-in-one form binding. `touched` is component-local UI state.
+// 4. Recommended text-input binding.
 function CouponInput() {
     const cart = useModel<Cart>();
-    const [coupon, setCoupon, meta] = useModelFieldState(cart, 'coupon');
-    const [touched, setTouched] = useState(false);
+    const { draft, setDraft, meta, onBlur, showError } =
+        useDraftField(cart, 'coupon');
     return (
         <label>
             <input
-                value={coupon}
-                onChange={async (e) => {
-                    await setCoupon(e.target.value);
-                }}
-                onBlur={() => setTouched(true)}
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                onBlur={onBlur}
                 disabled={meta.validating}
             />
-            {touched && meta.error && <span style={{ color: 'red' }}>{meta.error}</span>}
+            {showError && <span style={{ color: 'red' }}>{meta.error}</span>}
         </label>
     );
 }
@@ -136,17 +127,19 @@ function CartModelOwner({ children }: { children: ReactNode }) {
 function CartApp() {
     return (
         <CartModelOwner>
-            <Field<Cart, 'name'> name="name">
+            <Field<Cart, 'coupon'> name="coupon">
                 {({ value, setValue, meta }) => (
-                    <input
+                    <select
                         value={value}
-                        onChange={async (e) => {
-                            await setValue(e.target.value);
-                        }}
+                        onChange={(e) => void setValue(e.target.value)}
                         aria-invalid={!!meta.error}
-                    />
+                    >
+                        <option value="">No coupon</option>
+                        <option value="SAVE10">SAVE10</option>
+                    </select>
                 )}
             </Field>
+            <NameValue />
             <Total />
             <PriceLine />
             <CouponInput />
@@ -167,10 +160,9 @@ A complete sample lives at [`examples/react-bindings.tsx`](../examples/react-bin
 
 ## Controlled Inputs Under Strict / Async Validation
 
-The examples above bind an input's `value` straight to the committed field
-(`value={name}` + `onChange={setField}`). That works when the validator is
-loose and synchronous — e.g. `required` accepts every non-empty keystroke, so
-each edit commits immediately and reads back cleanly.
+Binding an input's `value` straight to a committed field
+(`value={name}` + `onChange={setField}`) works only when validation cannot
+reject an intermediate edit and never resolves asynchronously.
 
 It stops working the moment validation can **reject** an intermediate keystroke
 or resolve **asynchronously**, because of the library's verify-then-commit
@@ -192,9 +184,9 @@ background, and surface errors separately via `meta`. This is the same rationale
 the library gives for leaving `touched` out of the model — "text being edited"
 is UI lifecycle state, not model truth (see [AGENTS.md §5](../AGENTS.md)).
 
-The adapter ships this pattern as an **optional** hook, `useDraftField`, built
-on top of `useModelFieldState`. Import it only if you want it — the core binding
-(`useModelFieldState`, `[value, setValue, meta]`) does not depend on it:
+The adapter ships this pattern as `useDraftField`, the **default recommendation
+for controlled text inputs**. It is built on top of `useModelFieldState`, so the
+core model still contains only committed and rejected domain values:
 
 ```tsx
 import { useDraftField } from 'model-reaction/react';
@@ -229,11 +221,9 @@ touched, onBlur, showError, committed }`:
 - `options.format` — how a committed/pending value renders as text on reseed
   (defaults to `String`); see the field-type contract below.
 
-> It bakes in UI policy `useModelFieldState` deliberately leaves open — when
-> `touched` flips, seeding, the value→text direction — so it's a **separate,
-> opt-in** export rather than folded into `meta`. Reach for the plain
-> `useModelFieldState` when you want to make those calls yourself. A runnable
-> integration lives in the demo app (`packages/demo/src/TextField.tsx`).
+> Use the lower-level `useModelFieldState` when you need committed-value
+> semantics or are binding a non-text control. A runnable integration lives in
+> the demo app (`packages/demo/src/TextField.tsx`).
 
 ### Field-type contract
 

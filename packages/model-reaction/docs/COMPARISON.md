@@ -125,7 +125,7 @@ model-reaction:  setField -> [transform] -> [validate] -> commit -> [reaction] -
   step is disposed / reused independently).
 - **Writes must be awaited**: `setField` returns a Promise (validation is
   async).
-- **React integration is now solid (`ModelProvider` / `<Field>` /
+- **React integration is now solid (`ModelProvider` / `useDraftField` /
   `useModelFieldState`)** but community resources lag far behind RTK and
   zustand.
 
@@ -191,8 +191,9 @@ const userModel = createModel<{ name: string }>({
 });
 
 // component
-const [name, setName, meta] = useModelFieldState(userModel, 'name');
-// meta.error is derived from validators automatically.
+const { draft, setDraft, meta, onBlur, showError } =
+  useDraftField(userModel, 'name');
+// Bind draft/setDraft to the input; meta.error comes from validators.
 ```
 
 Validation logic, error state, and field subscriptions are all built-in,

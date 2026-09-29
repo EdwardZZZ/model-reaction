@@ -1,6 +1,6 @@
 import { createModel } from 'model-reaction/devtools';
 import { ValidationRules } from 'model-reaction';
-import { useModelField } from 'model-reaction/react';
+import { ModelProvider, useModel, useModelField } from 'model-reaction/react';
 import type { ModelReturn } from 'model-reaction';
 import { TextField } from '../TextField';
 import { useOwnedModel } from '../useOwnedModel';
@@ -39,14 +39,15 @@ function makeLineItem(label: string, unit: number, qty: number): ModelReturn<Pri
     });
 }
 
-function LineItemCard({ model, title }: { model: ModelReturn<PriceForm>; title: string }) {
+function LineItemCard({ title }: { title: string }) {
+    const model = useModel<PriceForm>();
     const total = useModelField(model, 'totalCents');
     return (
         <div className="card">
             <h3>{title}</h3>
             <div className="row">
-                <TextField model={model} field="unitPriceCents" label="Unit price (¢)" />
-                <TextField model={model} field="quantity" label="Quantity" />
+                <TextField<PriceForm> field="unitPriceCents" label="Unit price (¢)" />
+                <TextField<PriceForm> field="quantity" label="Quantity" />
             </div>
             <div className="derived">
                 <span className="derived-label">totalCents</span>{' '}
@@ -74,8 +75,12 @@ export function MultiInstance() {
                 the instance picker (top-right) to switch between them.
             </p>
             <div className="row">
-                <LineItemCard model={coffee} title="Line item #1" />
-                <LineItemCard model={bagel} title="Line item #2" />
+                <ModelProvider model={coffee}>
+                    <LineItemCard title="Line item #1" />
+                </ModelProvider>
+                <ModelProvider model={bagel}>
+                    <LineItemCard title="Line item #2" />
+                </ModelProvider>
             </div>
         </section>
     );

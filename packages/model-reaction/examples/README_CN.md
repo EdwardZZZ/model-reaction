@@ -25,8 +25,9 @@
 展示校验失败的输入如何被转存到 `dirtyData`（可通过 `getDirtyData()` 取回、`clearDirtyData()` 清空）而不污染 `data`，以及 `Rule.when(predicate)` 如何让规则仅在满足跨字段条件时才生效。
 
 ### React 绑定示例 (react-bindings.tsx)
-展示字段级与 selector 级 React 订阅、Provider 所有权、表单元数据、本地 draft
-与 Schema 类型推导。包脚本会通过 `react-dom/server` 渲染该示例。
+展示字段级与 selector 级 React 订阅、Provider 所有权、默认推荐的
+`useDraftField` 绑定、表单元数据、本地 draft 与 Schema 类型推导。包脚本会通过
+`react-dom/server` 渲染该示例。
 
 ### 多记录深层依赖示例 (multi-record-deep-deps.ts)
 构造较大的确定性 schema，并对 100 条记录运行五层 reaction 链。

@@ -4,6 +4,7 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const entries = [
   ['model-reaction', 'createModel'],
+  ['model-reaction/react', 'useDraftField'],
   ['model-reaction/react', 'useModelFieldState'],
   ['model-reaction/devtools', 'createModel'],
 ];

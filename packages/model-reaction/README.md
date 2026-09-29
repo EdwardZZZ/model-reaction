@@ -25,6 +25,8 @@ values stay in `dirtyData`, and React lifecycles are explicit
 
 ## Installation
 
+Requires Node.js 18 or later.
+
 ```bash
 npm install model-reaction          # core only
 npm install model-reaction react    # + React bindings (peer dep, react >= 18)
@@ -32,7 +34,7 @@ npm install model-reaction react    # + React bindings (peer dep, react >= 18)
 
 ```ts
 import { createModel, ValidationRules } from 'model-reaction';
-import { useModelField } from 'model-reaction/react'; // optional
+import { useDraftField } from 'model-reaction/react'; // optional
 ```
 
 > The default entry has zero React dependency. Only `model-reaction/react` imports React.
@@ -127,12 +129,23 @@ See [docs/API.md](docs/API.md#events) for the full event list.
 ```tsx
 import { useEffect, useState, type ReactNode } from 'react';
 import { createModel, ValidationRules, type ModelReturn } from 'model-reaction';
-import { ModelProvider, useModel, useModelField, useModelFieldState } from 'model-reaction/react';
+import { ModelProvider, useModel, useModelFieldState, useDraftField } from 'model-reaction/react';
 
 function NameInput() {
   const user = useModel<User>();
-  const name = useModelField(user, 'name');
-  return <input value={name} onChange={async (e) => { await user.setField('name', e.target.value); }} />;
+  const { draft, setDraft, meta, onBlur, showError } = useDraftField(user, 'name');
+  return (
+    <label>
+      <input
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={onBlur}
+        aria-invalid={showError}
+      />
+      {meta.validating && <span>Validating...</span>}
+      {showError && <span role="alert">{meta.error}</span>}
+    </label>
+  );
 }
 
 function AgeInput() {
@@ -170,44 +183,25 @@ or a **per-route model** (fresh instance per route / modal); avoid module-level
 singletons. For the full hook list, lifecycle examples, the `useModelSelector` vs
 `useModelComputed` decision tree, and performance guidance, see [docs/REACT.md](docs/REACT.md).
 
-### Form Field Bindings — `useModelFieldState`
+### Text Form Fields — `useDraftField`
 
-`useModelFieldState` is the highest-level hook in the React adapter: a single call returns everything you need to wire a controlled input to a model field — value, async setter, and validation / dirty / validating metadata.
-
-```ts
-const [value, setValue, meta] = useModelFieldState(model, field);
-```
-
-**`FieldSetter<V> = (value: V) => Promise<boolean>`**
-
-The setter wraps `model.setField` and additionally toggles `meta.validating` for the lifetime of the call. The returned `Promise<boolean>` resolves with the validation result (`true` = committed, `false` = rejected and stored as dirty data).
-
-**`FieldMeta`**
-
-| Property | Type | Description |
-| --- | --- | --- |
-| `errors` | `ValidationError[]` | All validation errors for this field. Empty array if none. |
-| `error` | `string \| null` | Convenience: first error message, or `null`. |
-| `validating` | `boolean` | `true` while an async `setValue` is in flight from this hook instance. |
-| `dirty` | `boolean` | `true` if the field currently has an entry in `model.getDirtyData()` (i.e. its last write failed validation). |
-
-**Recipe — touched / blur / error display:**
-
-`touched` is intentionally not part of `meta` — it is a pure UI concern. Keep it as component-local state and gate the error display on it:
+`useDraftField` is the recommended binding for controlled text inputs. It keeps
+the edit-in-progress text local, validates through the model, and exposes
+validation, dirty, touched, and pending state without requiring a separate
+`useState`.
 
 ```tsx
 function NameField() {
-  const [name, setName, meta] = useModelFieldState(user, 'name');
-  const [touched, setTouched] = React.useState(false);
-  const showError = touched && meta.error;
+  const { draft, setDraft, meta, onBlur, showError } =
+    useDraftField(user, 'name');
   return (
     <label>
       <input
-        value={name}
+        value={draft}
         disabled={meta.validating}
-        onChange={(e) => setName(e.target.value)}
-        onBlur={() => setTouched(true)}
-        aria-invalid={showError ? 'true' : 'false'}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={onBlur}
+        aria-invalid={showError}
       />
       {showError && <span role="alert">{meta.error}</span>}
     </label>
@@ -215,13 +209,11 @@ function NameField() {
 }
 ```
 
-> `validating` is component-local (per hook instance); it tracks only setters issued from this hook, not arbitrary `model.setField` calls elsewhere.
-
-For inputs under **strict or async** validators — where a rejected or in-flight
-keystroke must not blank the field — the adapter also ships an optional
-`useDraftField(model, field, options?)` that layers a local draft and blur-gated
-error display on top of `useModelFieldState`. Import it only if you want it; the
-core binding stays draft-free. See [docs/REACT.md](docs/REACT.md#controlled-inputs-under-strict--async-validation).
+Rejected or in-flight values remain visible in `draft` while `data` keeps the
+last committed value. Use the lower-level `useModelFieldState` for non-text
+controls such as checkboxes, selects, and date pickers, or when committed-value
+semantics are explicitly required. See
+[docs/REACT.md](docs/REACT.md#controlled-inputs-under-strict--async-validation).
 
 ## Documentation
 

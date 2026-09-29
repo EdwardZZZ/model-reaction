@@ -1,7 +1,6 @@
 import { createModel } from 'model-reaction/devtools';
 import { ValidationRules } from 'model-reaction';
-import { useModelField } from 'model-reaction/react';
-import type { ModelReturn } from 'model-reaction';
+import { ModelProvider, useModel, useModelField } from 'model-reaction/react';
 import { TextField } from '../TextField';
 import { useOwnedModel } from '../useOwnedModel';
 
@@ -52,10 +51,15 @@ export function ReactionChain() {
     );
 
     if (!model) return null;
-    return <ReactionChainView model={model} />;
+    return (
+        <ModelProvider model={model}>
+            <ReactionChainView />
+        </ModelProvider>
+    );
 }
 
-function ReactionChainView({ model }: { model: ModelReturn<NameForm> }) {
+function ReactionChainView() {
+    const model = useModel<NameForm>();
     const fullName = useModelField(model, 'fullName');
     const greeting = useModelField(model, 'greeting');
 
@@ -69,8 +73,8 @@ function ReactionChainView({ model }: { model: ModelReturn<NameForm> }) {
                 graph.
             </p>
             <div className="row">
-                <TextField model={model} field="firstName" label="First name" />
-                <TextField model={model} field="lastName" label="Last name" />
+                <TextField<NameForm> field="firstName" label="First name" />
+                <TextField<NameForm> field="lastName" label="Last name" />
             </div>
             <div className="derived">
                 <div><span className="derived-label">fullName</span> {fullName || '—'}</div>

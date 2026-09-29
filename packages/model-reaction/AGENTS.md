@@ -112,20 +112,19 @@ fullName: {
 ### 4.3 React form field
 
 ```tsx
-import { useModelFieldState } from 'model-reaction/react';
+import { useDraftField } from 'model-reaction/react';
 
 function Input({ model, field, label }) {
-  const [value, setValue, meta] = useModelFieldState(model, field);
-  const [touched, setTouched] = useState(false);
-  const showError = touched && meta.error;
+  const { draft, setDraft, meta, onBlur, showError } =
+    useDraftField(model, field);
 
   return (
     <label>
       <span>{label}</span>
       <input
-        value={value ?? ''}
-        onChange={(e) => setValue(e.target.value)}
-        onBlur={() => setTouched(true)}
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={onBlur}
         aria-invalid={Boolean(showError)}
         disabled={meta.validating}
       />
@@ -135,10 +134,9 @@ function Input({ model, field, label }) {
 }
 ```
 
-> Under strict or async validators (a keystroke can be rejected or still
-> in-flight), bind through the optional `useDraftField(model, field)` from
-> `model-reaction/react` instead — it holds the edit-in-progress text in a local
-> draft so the input stays typeable. Same reasoning as the `touched` row in §5.
+`useDraftField` is the default recommendation for text inputs. Use the lower-level
+`useModelFieldState` for non-text controls or when the UI intentionally reflects
+only committed model values.
 
 ### 4.4 Selector subscription
 
@@ -167,7 +165,7 @@ These are **deliberate omissions**. Don't add them; don't fake them.
 
 | Missing | Why |
 | --- | --- |
-| Per-field `touched` state in the model | Belongs to UI lifecycle, not to data model. Use component-local `useState` (see §4.3). |
+| Per-field `touched` state in the core model | Belongs to UI lifecycle, not to domain data. `useDraftField` owns it for the standard text-input flow; use component-local state with lower-level bindings. |
 | `commitDirty(field)` / `resetDirty(field)` | Computed fields that depend on a dirty field could be poisoned. Reset by recreating the model. |
 | Arbitrary side-effect from validators | Validators are pure boolean tests. Use reactions for side-effects. |
 | Synchronous batching across `setField` calls | Each `setField` is its own validation cycle. Use `setFields({ ... })` to batch validation + a single reaction pass — its cross-field validators also see the merged batch, so co-dependent fields can be set together. |

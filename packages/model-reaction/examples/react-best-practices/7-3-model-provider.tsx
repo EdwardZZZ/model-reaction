@@ -11,7 +11,7 @@ import { createModel, ValidationRules } from '../../src/index';
 import {
     ModelProvider,
     useModel,
-    useModelFieldState,
+    useDraftField,
 } from '../../src/react';
 
 interface User {
@@ -26,17 +26,17 @@ const userModel = createModel<User>({
 
 function NameField() {
     const model = useModel<User>();
-    const [name, setName] = useModelFieldState(model, 'name');
+    const { draft, setDraft } = useDraftField(model, 'name');
     return (
-        <input value={name} onChange={(e) => setName(e.target.value)} />
+        <input value={draft} onChange={(e) => setDraft(e.target.value)} />
     );
 }
 
 function AddressFields() {
     const model = useModel<User>();
-    const [address, setAddress] = useModelFieldState(model, 'address');
+    const { draft, setDraft } = useDraftField(model, 'address');
     return (
-        <input value={address} onChange={(e) => setAddress(e.target.value)} />
+        <input value={draft} onChange={(e) => setDraft(e.target.value)} />
     );
 }
 

@@ -1,41 +1,40 @@
 /**
- * BEST_PRACTICES §7.4 — `<Field>` for declarative inputs
+ * BEST_PRACTICES §7.4 — `<Field>` for committed-value controls
  *
- * Use the `<Field>` render-prop form to bind a leaf input + its error
- * without referencing the model directly.
- *
- * `touched` is a UI-local concern — keep it in component state via
- * `useState`, not on the model.
+ * Use the `<Field>` render-prop form for controls such as selects that can
+ * bind directly to committed data without an edit-in-progress text value.
  */
 import * as React from 'react';
-import { useState } from 'react';
 void React;
 
-import { createModel, ValidationRules } from '../../src/index';
+import { createModel } from '../../src/index';
 import { Field, ModelProvider } from '../../src/react';
 
 interface User {
-    name: string;
+    plan: 'free' | 'pro';
 }
 
 const userModel = createModel<User>({
-    name: { type: 'string', default: '', validator: [ValidationRules.required] },
+    plan: { type: 'enum', values: ['free', 'pro'], default: 'free' },
 });
 
-export function NameFieldDemo() {
-    const [touched, setTouched] = useState(false);
+export function PlanFieldDemo() {
     return (
         <ModelProvider model={userModel}>
-            <Field<User, 'name'> name="name">
+            <Field<User, 'plan'> name="plan">
                 {({ value, setValue, meta }) => (
                     <label>
-                        <input
+                        <select
                             value={value}
-                            onChange={(e) => setValue(e.target.value)}
-                            onBlur={() => setTouched(true)}
+                            onChange={(e) =>
+                                setValue(e.target.value as User['plan'])
+                            }
                             aria-invalid={!!meta.error}
-                        />
-                        {touched && meta.error && <span>{meta.error}</span>}
+                        >
+                            <option value="free">Free</option>
+                            <option value="pro">Pro</option>
+                        </select>
+                        {meta.error && <span>{meta.error}</span>}
                     </label>
                 )}
             </Field>

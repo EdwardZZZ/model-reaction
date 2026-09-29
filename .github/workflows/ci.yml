@@ -12,8 +12,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Node 18+ only: the toolchain (jest 30, vite 6, esbuild 0.28) dropped
-        # Node 16. The published library still targets Node >=16 at runtime.
+        # Node 18 is the minimum supported runtime.
         node-version: [18.x, 20.x, 22.x]
 
     steps:

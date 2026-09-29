@@ -74,12 +74,17 @@ export interface FieldProps<
 
 /**
  * Bind a child render-prop to a single field of the surrounding model.
+ * This exposes committed-value semantics; prefer `useDraftField` for text
+ * inputs that must preserve rejected or in-flight edits.
  *
  * ```tsx
  * <ModelProvider model={userModel}>
- *   <Field name="name">
+ *   <Field name="plan">
  *     {({ value, setValue, meta }) => (
- *       <input value={value} onChange={e => setValue(e.target.value)} />
+ *       <select value={value} onChange={e => setValue(e.target.value)}>
+ *         <option value="free">Free</option>
+ *         <option value="pro">Pro</option>
+ *       </select>
  *     )}
  *   </Field>
  * </ModelProvider>

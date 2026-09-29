@@ -1,5 +1,6 @@
 import { createModel } from 'model-reaction/devtools';
 import { ValidationRules } from 'model-reaction';
+import { ModelProvider } from 'model-reaction/react';
 import { TextField } from '../TextField';
 import { useOwnedModel } from '../useOwnedModel';
 
@@ -52,18 +53,28 @@ export function AsyncValidation() {
     if (!model) return null;
 
     return (
-        <section className="scenario">
-            <h2>Async validation</h2>
-            <p className="scenario-desc">
-                <code>username</code> runs an async availability check (~600ms).
-                Try <code>ada</code>, <code>admin</code> or <code>root</code> —
-                the field shows <em>validating…</em>, then the rejected value
-                appears under <code>dirtyData</code> in the panel.
-            </p>
-            <div className="row">
-                <TextField model={model} field="username" label="Username" placeholder="try 'ada'" />
-                <TextField model={model} field="email" label="Email" placeholder="you@example.com" />
-            </div>
-        </section>
+        <ModelProvider model={model}>
+            <section className="scenario">
+                <h2>Async validation</h2>
+                <p className="scenario-desc">
+                    <code>username</code> runs an async availability check (~600ms).
+                    Try <code>ada</code>, <code>admin</code> or <code>root</code> —
+                    the field shows <em>validating…</em>, then the rejected value
+                    appears under <code>dirtyData</code> in the panel.
+                </p>
+                <div className="row">
+                    <TextField<SignupForm>
+                        field="username"
+                        label="Username"
+                        placeholder="try 'ada'"
+                    />
+                    <TextField<SignupForm>
+                        field="email"
+                        label="Email"
+                        placeholder="you@example.com"
+                    />
+                </div>
+            </section>
+        </ModelProvider>
     );
 }

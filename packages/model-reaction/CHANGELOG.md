@@ -8,13 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- **`useDraftField` React hook** (`model-reaction/react`): an optional
-  controlled-input binding for fields under strict or async validators, where a
-  rejected or in-flight keystroke must not blank the input. It layers a local
-  draft, blur-gated error display (`touched` / `onBlur` / `showError`), and a
-  `format` option on top of `useModelFieldState`. It is a separate named export,
-  not folded into `useModelFieldState` or `meta`, so the core binding stays
-  draft-free and consumers who don't import it pay nothing. See
+- **`useDraftField` React hook** (`model-reaction/react`): the recommended
+  controlled text-input binding, including fields under strict or async
+  validators where a rejected or in-flight keystroke must not blank the input.
+  It layers a local draft, blur-gated error display (`touched` / `onBlur` /
+  `showError`), and a `format` option on top of `useModelFieldState`. See
   `docs/REACT.md` / `docs/REACT_CN.md`.
 - **DevTools browser extension** for inspecting models at runtime: a live data
   tree (`data` / `dirtyData` / `errors`), the reaction dependency graph, and a
@@ -29,6 +27,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and the `packages/devtools/` workspace package.
 
 ### Changed
+- The minimum supported Node.js version is now 18, aligned with the workspace
+  toolchain and CI matrix.
 - **Reactions now run an initial pass at construction.** Previously a derived
   field kept its own `default` until the first change to a dependency, so a
   model built purely from defaults showed stale derived values (e.g. a
@@ -41,7 +41,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now reflects the computed value from the start.
 
 ### Fixed
-- Published ESM entry points now use `.mjs`, so Node 16+ loads
+- Published ESM entry points now use `.mjs`, so Node 18+ loads
   `model-reaction`, `model-reaction/react`, and `model-reaction/devtools`
   through the `import` condition without parsing them as CommonJS.
 

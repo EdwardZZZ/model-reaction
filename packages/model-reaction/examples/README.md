@@ -26,7 +26,7 @@ Demonstrates how failed input is diverted to `dirtyData` (retrievable via `getDi
 
 ### React Bindings Example (react-bindings.tsx)
 Shows field-level and selector-level React subscriptions, provider ownership,
-form metadata, local drafts, and schema type inference. The package script
+the recommended `useDraftField` binding, form metadata, local drafts, and schema type inference. The package script
 renders it through `react-dom/server`.
 
 ### Multi-record Deep Dependency Example (multi-record-deep-deps.ts)

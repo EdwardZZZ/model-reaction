@@ -47,8 +47,8 @@ export interface UseDraftFieldOptions<V> {
 /**
  * Bind a model field to a controlled text input, owning the edit-lifecycle
  * UI state (draft text, `touched`, error gating) so the rendering component
- * stays presentational. An **optional** convenience built on
- * {@link useModelFieldState}; import it only if you want it.
+ * stays presentational. This is the recommended form binding for text inputs;
+ * use {@link useModelFieldState} directly for non-text controls.
  *
  * The draft — "the text being edited" — lives in local state, not the model:
  * under verify-then-commit an invalid or still-in-flight keystroke never reaches

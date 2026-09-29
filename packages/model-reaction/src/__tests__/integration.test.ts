@@ -1598,7 +1598,7 @@ describe('Integration Tests — Full Documentation Scenarios', () => {
                 expect(doc).toContain('function CartModelOwner');
                 expect(doc).toContain('const owned = createCartModel()');
                 expect(doc).toContain('return () => owned.dispose()');
-                expect(doc).toContain('await cart.setField');
+                expect(doc).toContain("useDraftField(cart, 'coupon')");
                 expect(doc).not.toContain('const cart = createModel<Cart>({');
             }
 

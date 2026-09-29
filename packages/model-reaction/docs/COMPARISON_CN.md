@@ -102,7 +102,7 @@ model-reaction:  setField -> [transform] -> [validate] -> commit -> [reaction] -
   这样 `reaction` 的跨字段依赖图仍在同一 model 内自动管理，反而绕开了本条弱项；
   只有当两块表单**生命周期不同**（如分步向导各步骤独立 dispose / 复用）时才真需要拆 model。
 - **写入需 await**：`setField` 返回 Promise（因校验异步）。
-- **React 集成虽已加强（`ModelProvider` / `Field` / `useModelFieldState`）**，但社区资源远不如 RTK / zustand。
+- **React 集成虽已加强（`ModelProvider` / `useDraftField` / `useModelFieldState`）**，但社区资源远不如 RTK / zustand。
 
 ---
 
@@ -165,8 +165,9 @@ const userModel = createModel<{ name: string }>({
 });
 
 // 组件
-const [name, setName, meta] = useModelFieldState(userModel, 'name');
-// meta.error 自动来源于 validator
+const { draft, setDraft, meta, onBlur, showError } =
+  useDraftField(userModel, 'name');
+// 输入框绑定 draft/setDraft；meta.error 自动来源于 validator
 ```
 
 校验逻辑、错误状态、字段订阅都内置，且类型全自动。
