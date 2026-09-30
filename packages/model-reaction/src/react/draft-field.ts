@@ -81,23 +81,39 @@ export function useDraftField<
         []
     );
 
-    // Seed once on mount: pending dirty value if any, else committed value.
+    // Seed on mount: pending dirty value if any, else committed value.
     const [draft, setDraft] = useState(() => {
-        const pending = (model.getDirtyData() as Partial<T>)[field];
-        return display((pending ?? committed) as T[K]);
+        const dirtyData = model.getDirtyData() as Partial<T>;
+        const value = Object.prototype.hasOwnProperty.call(dirtyData, field)
+            ? dirtyData[field]
+            : committed;
+        return display(value as T[K]);
     });
     const [touched, setTouched] = useState(false);
 
-    // Reflect outside-driven commits (a reaction, a setField elsewhere). Keyed
-    // off the previous committed value, not a "first render" flag: on mount it
-    // matches so the seeded draft survives, and this stays correct under
-    // StrictMode's setup→cleanup→setup double-invoke (a mount flag would not).
+    // A model/field change starts a new editing session. Re-seed from that
+    // field's pending value and clear UI-only state before tracking commits.
+    const identity = useRef({ model, field });
     const lastCommitted = useRef(committed);
     useEffect(() => {
+        if (identity.current.model !== model || identity.current.field !== field) {
+            identity.current = { model, field };
+            lastCommitted.current = committed;
+            const dirtyData = model.getDirtyData() as Partial<T>;
+            const value = Object.prototype.hasOwnProperty.call(dirtyData, field)
+                ? dirtyData[field]
+                : committed;
+            setDraft(display(value as T[K]));
+            setTouched(false);
+            return;
+        }
+
+        // Reflect outside-driven commits (a reaction, a setField elsewhere).
+        // On mount the committed value matches, so the seeded draft survives.
         if (Object.is(lastCommitted.current, committed)) return;
         lastCommitted.current = committed;
         setDraft(display(committed));
-    }, [committed, display]);
+    }, [model, field, committed, display]);
 
     const edit = useCallback(
         (next: string) => {

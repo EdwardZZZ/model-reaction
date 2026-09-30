@@ -35,14 +35,14 @@ import {
     getDevtoolsHook,
 } from './devtools/devtools-hook';
 
-export function createModel<T extends Record<string, any>>(
-    schema: Model<T>,
-    options?: ModelOptions
-): ModelReturn<T>;
 export function createModel<S extends Record<string, FieldSchema>>(
     schema: S,
     options?: ModelOptions
 ): ModelReturn<InferModelData<S>>;
+export function createModel<T extends Record<string, any>>(
+    schema: Model<T>,
+    options?: ModelOptions
+): ModelReturn<T>;
 export function createModel(
     schema: Record<string, FieldSchema>,
     options: ModelOptions = {}

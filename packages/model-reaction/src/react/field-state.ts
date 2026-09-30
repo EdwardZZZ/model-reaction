@@ -1,7 +1,6 @@
 import {
     useCallback,
     useMemo,
-    useRef,
     useState,
     useSyncExternalStore,
 } from 'react';
@@ -135,18 +134,39 @@ export function useModelFieldState<
         metaSnapshot
     );
 
-    const [validating, setValidating] = useState(false);
-    const validatingCount = useRef(0);
+    const [validationState, setValidationState] = useState(() => ({
+        model,
+        field,
+        count: 0,
+    }));
+    const validating =
+        validationState.model === model &&
+        validationState.field === field &&
+        validationState.count > 0;
 
     const setter = useCallback<FieldSetter<T[K]>>(
         async (next) => {
-            validatingCount.current++;
-            setValidating(true);
+            setValidationState((current) => ({
+                model,
+                field,
+                count:
+                    current.model === model && current.field === field
+                        ? current.count + 1
+                        : 1,
+            }));
             try {
                 return await model.setField(field, next);
             } finally {
-                validatingCount.current--;
-                setValidating(validatingCount.current > 0);
+                setValidationState((current) => {
+                    if (current.model !== model || current.field !== field) {
+                        return current;
+                    }
+                    return {
+                        model,
+                        field,
+                        count: Math.max(0, current.count - 1),
+                    };
+                });
             }
         },
         [model, field]

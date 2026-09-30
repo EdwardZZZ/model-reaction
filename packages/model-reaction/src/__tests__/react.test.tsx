@@ -875,6 +875,49 @@ describe('useModelFieldState', () => {
         ]);
         model.dispose();
     });
+
+    it('does not leak validating state across model changes', async () => {
+        let releaseValidation: (() => void) | undefined;
+        const first = createModel<Signup>({
+            email: {
+                type: 'string',
+                default: '',
+                validator: [
+                    {
+                        type: 'slow',
+                        message: 'slow',
+                        validate: () =>
+                            new Promise<boolean>((resolve) => {
+                                releaseValidation = () => resolve(true);
+                            }),
+                    },
+                ],
+            },
+        });
+        const second = makeSignupModel();
+        const { result, rerender } = renderHook(
+            ({ model }) => useModelFieldState(model, 'email'),
+            { initialProps: { model: first } }
+        );
+
+        let pending!: Promise<boolean>;
+        act(() => {
+            pending = result.current[1]('first@example.com');
+        });
+        expect(result.current[2].validating).toBe(true);
+
+        rerender({ model: second });
+        expect(result.current[2].validating).toBe(false);
+
+        await act(async () => {
+            releaseValidation?.();
+            await pending;
+        });
+        expect(result.current[2].validating).toBe(false);
+
+        first.dispose();
+        second.dispose();
+    });
 });
 
 // ---------------------------------------------------------------------------
@@ -1143,6 +1186,52 @@ describe('useDraftField', () => {
             result.current.onBlur();
         });
         expect(result.current.showError).toBe(true);
+        model.dispose();
+    });
+
+    it('starts a fresh draft session when the model changes', async () => {
+        const first = makeSignup();
+        const second = makeSignup();
+        await second.setField('username', 'bo');
+
+        const { result, rerender } = renderHook(
+            ({ model }) => useDraftField(model, 'username'),
+            { initialProps: { model: first } }
+        );
+
+        await act(async () => {
+            result.current.setDraft('xy');
+            result.current.onBlur();
+        });
+        expect(result.current.draft).toBe('xy');
+        expect(result.current.touched).toBe(true);
+
+        rerender({ model: second });
+        expect(result.current.draft).toBe('bo');
+        expect(result.current.touched).toBe(false);
+        expect(result.current.meta.dirty).toBe(true);
+
+        first.dispose();
+        second.dispose();
+    });
+
+    it('starts a fresh draft session when the field changes', async () => {
+        const model = makeSignup();
+        const { result, rerender } = renderHook(
+            ({ field }: { field: keyof Signup }) => useDraftField(model, field),
+            { initialProps: { field: 'username' as keyof Signup } }
+        );
+
+        await act(async () => {
+            result.current.setDraft('xy');
+            result.current.onBlur();
+        });
+
+        rerender({ field: 'priceCents' });
+        expect(result.current.draft).toBe('350');
+        expect(result.current.touched).toBe(false);
+        expect(result.current.meta.dirty).toBe(false);
+
         model.dispose();
     });
 });
