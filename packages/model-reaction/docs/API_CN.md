@@ -31,6 +31,10 @@ createModel<S extends Record<string, FieldSchema>>(
 ): ModelReturn<InferModelData<S>>;
 ```
 
+第一个参数是单个扁平 Schema 对象，每个顶层属性对应一个模型字段。大型 Schema
+可以先按职责拆成多个片段，再通过对象展开合并后传入。对象、数组等字段值本身仍可
+包含嵌套数据，但模型只在顶层跟踪字段变化。
+
 > **默认值不经过校验。** 每个字段的 `default` 在构造时被直接写入 `data`，
 > 验证器**不会**对其运行。因此 model 可能一开始就处于非法状态，而
 > `validationErrors` 却是空的。在信任初始 `data` 之前，请先
@@ -82,8 +86,24 @@ total: {
 }
 ```
 
-`computed` 和 `action` 都可以是异步函数，其 Promise 会纳入 `settled()`：
-计算结果会在校验和提交前被等待，action 拒绝则通过 `reaction:error` 上报。
+`computed` 必须同步执行且保持纯净：只读取 `fields` 中声明的依赖并返回目标字段的
+新值。返回 Promise 时会通过 `reaction:error` 上报，且结果不会提交。运行时无法
+检测发请求、写日志或修改外部状态等其他副作用，调用方必须避免这些行为。异步操作
+和其他副作用应放在 `action` 中。`action` 可以是异步函数，其 Promise 会纳入
+`settled()`；action 拒绝同样通过 `reaction:error` 上报。
+
+需要有条件地终止当前 reaction 时，返回包入口导出的 `SKIP_REACTION`：
+
+```ts
+import { SKIP_REACTION } from 'model-reaction';
+
+computed: ({ enabled, source }) =>
+  enabled ? String(source).trim() : SKIP_REACTION
+```
+
+返回 `SKIP_REACTION` 是正常的 no-op：不会验证或写入目标字段，不会修改
+`dirtyData`，也不会触发 `field:change`、下游 reaction 或当前 reaction 的
+`action`。reaction 数组中的后续项仍会按声明顺序执行。
 
 多个 reaction 因同一个依赖字段变化而写入同一目标时，最后调度的写入具有最终效力，
 之前的写入会被更新的写入覆盖。因此上例中，如果第二个结果通过校验，`total` 由第二个
@@ -133,7 +153,7 @@ reaction 决定；如果它校验失败，结果会进入 `dirtyData`，不会�
 
 | 方法 | 说明 |
 | --- | --- |
-| `settled(): Promise<void>` | 等待所有挂起的反应与异步验证完成 |
+| `settled(): Promise<void>` | 等待所有挂起或级联的反应、异步 action 与异步验证完成 |
 | `dispose(): void` | 释放定时器、监听器与内部状态 |
 
 ## 事件
@@ -239,6 +259,6 @@ const custom = formatValidationErrors(
 `ModelErrorCode`、`ModelEventMap`、`InferFieldType` 和 `InferModelData`。
 
 从包入口导出的运行时值包括 `createModel`、`ValidationRules`、`Rule`、
-`ModelEvents` 和 `formatValidationErrors`。
+`ModelEvents`、`SKIP_REACTION` 和 `formatValidationErrors`。
 
 完整类型定义请见 [`src/types.ts`](../src/types.ts)。

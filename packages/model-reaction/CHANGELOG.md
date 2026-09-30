@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`SKIP_REACTION` sentinel:** return it from `reaction.computed` to skip
+  validation, commit, field events, downstream reactions, and `action` for the
+  current reaction.
 - **`useDraftField` React hook** (`model-reaction/react`): the recommended
   controlled text-input binding, including fields under strict or async
   validators where a rejected or in-flight keystroke must not blank the input.
@@ -27,6 +30,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and the `packages/devtools/` workspace package.
 
 ### Changed
+- **Breaking:** `reaction.computed` is now a synchronous pure-computation
+  contract. Returning a Promise reports `reaction:error` and does not commit a
+  value; move asynchronous work and other side effects to `reaction.action`.
 - The minimum supported Node.js version is now 18, aligned with the workspace
   toolchain and CI matrix.
 - **Reactions now run an initial pass at construction.** Previously a derived

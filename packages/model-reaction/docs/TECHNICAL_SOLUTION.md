@@ -24,9 +24,9 @@
                        │
 ┌──────────────────────▼─────────────────────┐
 │  模块层 Modules                             │
-│  - 广告基础信息模块                         │
-│  - 创意内容模块                             │
-│  - 投放配置模块                             │
+│  - 按业务域声明 Schema 片段                 │
+│  - 展开片段得到扁平 Schema                  │
+│  - 封装业务动作与 DTO 转换                  │
 │  - 提审与校验编排                           │
 └──────────────────────┬─────────────────────┘
                        │
@@ -50,7 +50,7 @@
 | 层级 | 职责 | 不应承担 |
 | --- | --- | --- |
 | 数据层 | 字段定义、类型元数据、验证、派生值、订阅 | UI touched 状态、接口请求副作用 |
-| 模块层 | 聚合字段写入、业务动作、提交前校验、DTO 转换 | 直接操作 DOM、展示错误样式 |
+| 模块层 | 组织并展开 Schema 片段、聚合字段写入、业务动作、DTO 转换 | 直接操作 DOM、展示错误样式 |
 | 组件层 | 输入、展示、局部交互状态、调用模块方法 | 复制业务校验、绕过 model 写数据 |
 | Owner 层 | 创建与销毁 model、提供上下文、路由级隔离 | 复用全局 singleton model |
 
@@ -64,40 +64,74 @@ schema -> ModelManager -> data       已提交的事实数据（默认值需显�
                        -> reactions  由依赖字段自动计算的派生值
 ```
 
-广告创编模型推荐使用扁平字段名，字段名表达业务域，例如 `basic.name`、`creative.title`、`targeting.budget`。这样可以避免深层对象局部更新带来的额外合并逻辑，并保持字段级订阅简单。
+广告创编模型推荐使用扁平字段名，例如 `id`、`title`、`budget`。`basic`、
+`creative`、`targeting`、`audit` 只用于拆分 Schema 文件和变量，不作为字段前缀
+写入模型。因此 `basicSchema` 中定义的 `id` 在统一模型中仍是 `id`，
+`creativeSchema` 中定义的 `title` 仍是 `title`。
 
-### 3.1 字段分组
+这样既能按业务模块维护字段，又能让组件、reaction 和 DTO 转换直接使用扁平字段，
+避免把代码组织结构泄漏到数据契约中。
 
-| 业务域 | 字段示例 | 说明 |
+### 3.1 数据模块与字段
+
+| 数据模块 | 字段 | 说明 |
 | --- | --- | --- |
-| `basic` | `basic.id`、`basic.name`、`basic.status` | 广告基础身份与生命周期状态 |
-| `creative` | `creative.title`、`creative.description`、`creative.imageUrl` | 创意内容与落地页 |
-| `targeting` | `targeting.budget`、`targeting.dailyBudget`、`targeting.platforms` | 投放预算、周期、平台 |
-| `audit` | `audit.ready`、`audit.blockReason` | 由其他字段派生的提审状态 |
+| `basic` | `id`、`name`、`status` | 广告基础身份与生命周期状态 |
+| `creative` | `title`、`description`、`imageUrl`、`landingPageUrl` | 创意内容与落地页 |
+| `targeting` | `budget`、`dailyBudget`、`startDate`、`endDate`、`platforms` | 投放预算、周期、平台 |
+| `audit` | `ready`、`blockReason` | 由其他模块字段派生的提审状态 |
 
-### 3.2 Schema 示例
+各模块导出的 Schema 片段直接展开到 `createModel` 的参数中。传入
+`createModel` 的始终是无层级的扁平 Schema：
 
 ```ts
-import { createModel, Rule, ValidationRules } from 'model-reaction';
+const model = createModel({
+  ...createBasicSchema(),
+  ...creativeSchema,
+  ...createTargetingSchema(),
+  ...auditSchema,
+});
+```
+
+### 3.2 Schema 片段与统一初始化
+
+```ts
+import {
+  createModel,
+  Rule,
+  ValidationRules,
+  type Model,
+} from 'model-reaction';
 
 type AdStatus = 'draft' | 'pending' | 'approved' | 'rejected' | 'active' | 'paused';
 
-interface AdDraftData {
-  'basic.id': string;
-  'basic.name': string;
-  'basic.status': AdStatus;
-  'creative.title': string;
-  'creative.description': string;
-  'creative.imageUrl': string;
-  'creative.landingPageUrl': string;
-  'targeting.budget': number;
-  'targeting.dailyBudget': number;
-  'targeting.startDate': Date;
-  'targeting.endDate': Date;
-  'targeting.platforms': string[];
-  'audit.ready': boolean;
-  'audit.blockReason': string;
+interface BasicData {
+  id: string;
+  name: string;
+  status: AdStatus;
 }
+
+interface CreativeData {
+  title: string;
+  description: string;
+  imageUrl: string;
+  landingPageUrl: string;
+}
+
+interface TargetingData {
+  budget: number;
+  dailyBudget: number;
+  startDate: Date;
+  endDate: Date;
+  platforms: string[];
+}
+
+interface AuditData {
+  ready: boolean;
+  blockReason: string;
+}
+
+type AdDraftData = BasicData & CreativeData & TargetingData & AuditData;
 
 const oneOf = <T extends string>(values: readonly T[]) =>
   new Rule('oneOf', `Must be one of ${values.join(', ')}`, (value) =>
@@ -117,109 +151,122 @@ const minItems = (min: number) =>
     (value) => Array.isArray(value) && value.length >= min,
   );
 
+function createBasicSchema(): Model<BasicData> {
+  return {
+    id: {
+      type: 'string',
+      default: `ad_${Date.now()}`,
+    },
+    name: {
+      type: 'string',
+      default: '',
+      validator: [
+        ValidationRules.required.withMessage('请输入广告名称'),
+        ValidationRules.minLength(3).withMessage('广告名称至少 3 个字符'),
+        ValidationRules.maxLength(50).withMessage('广告名称最多 50 个字符'),
+      ],
+    },
+    status: {
+      type: 'enum',
+      default: 'draft',
+      validator: [oneOf(['draft', 'pending', 'approved', 'rejected', 'active', 'paused'])],
+    },
+  };
+}
+
+const creativeSchema: Model<CreativeData> = {
+  title: {
+    type: 'string',
+    default: '',
+    validator: [
+      ValidationRules.required.withMessage('请输入广告标题'),
+      ValidationRules.maxLength(20).withMessage('广告标题最多 20 个字符'),
+    ],
+  },
+  description: {
+    type: 'string',
+    default: '',
+    validator: [
+      ValidationRules.required.withMessage('请输入广告描述'),
+      ValidationRules.maxLength(100).withMessage('广告描述最多 100 个字符'),
+    ],
+  },
+  imageUrl: {
+    type: 'string',
+    default: '',
+    validator: [ValidationRules.required, url],
+  },
+  landingPageUrl: {
+    type: 'string',
+    default: '',
+    validator: [ValidationRules.required, url],
+  },
+};
+
+function createTargetingSchema(): Model<TargetingData> {
+  return {
+    budget: {
+      type: 'number',
+      default: 1000,
+      validator: [ValidationRules.required, ValidationRules.min(100)],
+    },
+    dailyBudget: {
+      type: 'number',
+      default: 100,
+      validator: [ValidationRules.required, ValidationRules.min(10)],
+    },
+    startDate: {
+      type: 'date',
+      default: new Date(),
+      validator: [ValidationRules.required],
+    },
+    endDate: {
+      type: 'date',
+      default: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+      validator: [ValidationRules.required],
+    },
+    platforms: {
+      type: 'array',
+      default: [],
+      validator: [minItems(1)],
+    },
+  };
+}
+
+const auditSchema: Model<AuditData> = {
+  ready: {
+    type: 'boolean',
+    default: false,
+    reaction: {
+      fields: ['name', 'title', 'description', 'imageUrl', 'landingPageUrl', 'platforms'],
+      computed: (data) =>
+        Boolean(
+          data.name &&
+            data.title &&
+            data.description &&
+            data.imageUrl &&
+            data.landingPageUrl &&
+            data.platforms?.length,
+        ),
+    },
+  },
+  blockReason: {
+    type: 'string',
+    default: '',
+    reaction: {
+      fields: ['ready'],
+      computed: (data) => (data.ready ? '' : '请补全广告基础信息、创意内容和投放平台'),
+    },
+  },
+};
+
 export function createAdDraftModel() {
   return createModel<AdDraftData>(
     {
-      'basic.id': {
-        type: 'string',
-        default: `ad_${Date.now()}`,
-      },
-      'basic.name': {
-        type: 'string',
-        default: '',
-        validator: [
-          ValidationRules.required.withMessage('请输入广告名称'),
-          ValidationRules.minLength(3).withMessage('广告名称至少 3 个字符'),
-          ValidationRules.maxLength(50).withMessage('广告名称最多 50 个字符'),
-        ],
-      },
-      'basic.status': {
-        type: 'enum',
-        default: 'draft',
-        validator: [oneOf(['draft', 'pending', 'approved', 'rejected', 'active', 'paused'])],
-      },
-      'creative.title': {
-        type: 'string',
-        default: '',
-        validator: [
-          ValidationRules.required.withMessage('请输入广告标题'),
-          ValidationRules.maxLength(20).withMessage('广告标题最多 20 个字符'),
-        ],
-      },
-      'creative.description': {
-        type: 'string',
-        default: '',
-        validator: [
-          ValidationRules.required.withMessage('请输入广告描述'),
-          ValidationRules.maxLength(100).withMessage('广告描述最多 100 个字符'),
-        ],
-      },
-      'creative.imageUrl': {
-        type: 'string',
-        default: '',
-        validator: [ValidationRules.required, url],
-      },
-      'creative.landingPageUrl': {
-        type: 'string',
-        default: '',
-        validator: [ValidationRules.required, url],
-      },
-      'targeting.budget': {
-        type: 'number',
-        default: 1000,
-        validator: [ValidationRules.required, ValidationRules.min(100)],
-      },
-      'targeting.dailyBudget': {
-        type: 'number',
-        default: 100,
-        validator: [ValidationRules.required, ValidationRules.min(10)],
-      },
-      'targeting.startDate': {
-        type: 'date',
-        default: new Date(),
-        validator: [ValidationRules.required],
-      },
-      'targeting.endDate': {
-        type: 'date',
-        default: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
-        validator: [ValidationRules.required],
-      },
-      'targeting.platforms': {
-        type: 'array',
-        default: [],
-        validator: [minItems(1)],
-      },
-      'audit.ready': {
-        type: 'boolean',
-        default: false,
-        reaction: {
-          fields: [
-            'basic.name',
-            'creative.title',
-            'creative.description',
-            'creative.imageUrl',
-            'creative.landingPageUrl',
-            'targeting.platforms',
-          ],
-          computed: (data) =>
-            Boolean(
-              data['basic.name'] &&
-                data['creative.title'] &&
-                data['creative.description'] &&
-                data['creative.imageUrl'] &&
-                data['creative.landingPageUrl'] &&
-                data['targeting.platforms']?.length,
-            ),
-        },
-      },
-      'audit.blockReason': {
-        type: 'string',
-        default: '',
-        reaction: {
-          fields: ['audit.ready'],
-          computed: (data) => (data['audit.ready'] ? '' : '请补全广告基础信息、创意内容和投放平台'),
-        },
-      },
+      ...createBasicSchema(),
+      ...creativeSchema,
+      ...createTargetingSchema(),
+      ...auditSchema,
     },
     {
       debounceReactions: 16,
@@ -228,6 +275,13 @@ export function createAdDraftModel() {
   );
 }
 ```
+
+各 Schema 片段只负责代码拆分，展开后传入 `createModel` 的对象等价于直接声明
+`{ id, name, status, title, ... }`。所有片段共享同一个扁平字段命名空间，因此字段名
+必须全局唯一；不要在不同片段中重复声明同名字段，否则对象展开会覆盖前面的定义。
+不包含动态默认值的 Schema 片段直接用 `const` 定义即可。`basic` 和 `targeting`
+保留工厂，是因为其中的 ID 和日期需要在每次创建 model 时重新生成；这不是模块
+统一初始化的要求。
 
 ### 3.3 数据写入规则
 
@@ -244,9 +298,9 @@ export function createAdDraftModel() {
 
 | 约束 | 规则说明 | 触发时机 | 实现层 |
 | --- | --- | --- | --- |
-| 投放时间范围 | `targeting.endDate` 必须晚于 `targeting.startDate` | 用户修改日期、提交前 | 前端 + 服务端 |
-| 预算约束 | `targeting.dailyBudget` 不得大于 `targeting.budget` | 用户修改预算、提交前 | 前端 + 服务端 |
-| 平台最少选择 | `targeting.platforms` 至少选择一个平台 | 用户修改平台、提交前 | 前端 + 服务端 |
+| 投放时间范围 | `endDate` 必须晚于 `startDate` | 用户修改日期、提交前 | 前端 + 服务端 |
+| 预算约束 | `dailyBudget` 不得大于 `budget` | 用户修改预算、提交前 | 前端 + 服务端 |
+| 平台最少选择 | `platforms` 至少选择一个平台 | 用户修改平台、提交前 | 前端 + 服务端 |
 | 平台素材规格 | 不同平台对标题长度、图片比例、落地页协议可能不同 | 用户切换平台、提交前 | 前端 + 服务端 |
 | 落地页安全 | 落地页必须为合法 URL，必要时通过安全检测或白名单校验 | 输入 URL、提交前 | 前端基础校验 + 服务端最终校验 |
 | 状态迁移 | 仅 `draft` 可提交为 `pending`，审核中不可再次编辑部分字段 | 保存、提审、回填 | 模块层 + 服务端 |
@@ -264,8 +318,8 @@ const afterStartDate = new Rule(
   '结束时间必须晚于开始时间',
   (value, data) =>
     value instanceof Date &&
-    data?.['targeting.startDate'] instanceof Date &&
-    value.getTime() > data['targeting.startDate'].getTime(),
+    data?.startDate instanceof Date &&
+    value.getTime() > data.startDate.getTime(),
 );
 
 const dailyWithinBudget = new Rule(
@@ -273,8 +327,8 @@ const dailyWithinBudget = new Rule(
   '日预算不能大于总预算',
   (value, data) =>
     typeof value === 'number' &&
-    typeof data?.['targeting.budget'] === 'number' &&
-    value <= data['targeting.budget'],
+    typeof data?.budget === 'number' &&
+    value <= data.budget,
 );
 ```
 
@@ -282,11 +336,12 @@ const dailyWithinBudget = new Rule(
 
 - 能在本地确定的规则优先放在 schema validator 中。
 - 会依赖平台配置中心、风控服务、素材审核服务的规则放到提交前接口中兜底。
-- 需要展示"当前为什么不能提交"时，优先用 reaction 生成面向 UI 的派生字段，如 `audit.blockReason`。
+- 需要展示"当前为什么不能提交"时，优先用 reaction 生成面向 UI 的派生字段，如 `blockReason`。
 
-## 4. 模块层设计
+## 4. 业务动作模块设计
 
-模块层封装广告创编动作，避免组件直接拼装大量字段名。
+第 3 节的数据模块负责组织 Schema；本节的业务动作模块负责封装广告创编操作，
+避免组件直接拼装大量字段名。两者最终操作的是同一个扁平 model。
 
 ```ts
 import type { ModelReturn } from 'model-reaction';
@@ -314,58 +369,58 @@ export function createAdDraftModule(model: AdDraftModel) {
 
     setBasicInfo(name: string) {
       return model.setFields({
-        'basic.name': name,
-        'basic.status': 'draft',
+        name,
+        status: 'draft',
       });
     },
 
     setCreative(input: CreativeInput) {
       return model.setFields({
-        'creative.title': input.title,
-        'creative.description': input.description,
-        'creative.imageUrl': input.imageUrl,
-        'creative.landingPageUrl': input.landingPageUrl,
+        title: input.title,
+        description: input.description,
+        imageUrl: input.imageUrl,
+        landingPageUrl: input.landingPageUrl,
       });
     },
 
     setTargeting(input: TargetingInput) {
       return model.setFields({
-        'targeting.budget': input.budget,
-        'targeting.dailyBudget': input.dailyBudget,
-        'targeting.startDate': input.startDate,
-        'targeting.endDate': input.endDate,
-        'targeting.platforms': input.platforms,
+        budget: input.budget,
+        dailyBudget: input.dailyBudget,
+        startDate: input.startDate,
+        endDate: input.endDate,
+        platforms: input.platforms,
       });
     },
 
     async submitForAudit() {
       const valid = await model.validateAll();
       await model.settled();
-      if (!valid || !model.getField('audit.ready')) {
+      if (!valid || !model.getField('ready')) {
         return false;
       }
 
-      return model.setField('basic.status', 'pending');
+      return model.setField('status', 'pending');
     },
 
     toPayload() {
       const data = model.data;
       return {
-        id: data['basic.id'],
-        name: data['basic.name'],
-        status: data['basic.status'],
+        id: data.id,
+        name: data.name,
+        status: data.status,
         creative: {
-          title: data['creative.title'],
-          description: data['creative.description'],
-          imageUrl: data['creative.imageUrl'],
-          landingPageUrl: data['creative.landingPageUrl'],
+          title: data.title,
+          description: data.description,
+          imageUrl: data.imageUrl,
+          landingPageUrl: data.landingPageUrl,
         },
         targeting: {
-          budget: data['targeting.budget'],
-          dailyBudget: data['targeting.dailyBudget'],
-          startDate: data['targeting.startDate'],
-          endDate: data['targeting.endDate'],
-          platforms: data['targeting.platforms'],
+          budget: data.budget,
+          dailyBudget: data.dailyBudget,
+          startDate: data.startDate,
+          endDate: data.endDate,
+          platforms: data.platforms,
         },
       };
     },
@@ -378,7 +433,7 @@ export function createAdDraftModule(model: AdDraftModel) {
 - 组件调用语义化方法，例如 `setCreative()`、`submitForAudit()`，不要散落字段名。
 - 所有写入方法返回 `Promise<boolean>`，便于组件展示成功或失败状态。
 - 接口请求、埋点、弹窗提示等副作用放在模块外的应用服务或组件事件中。
-- `reaction.computed` 必须保持纯函数，副作用只能放在 `reaction.action` 或调用链外部。
+- `reaction.computed` 必须是同步纯函数，不能返回 Promise；异步操作和其他副作用只能放在 `reaction.action` 或调用链外部。
 
 ## 5. React 集成方案
 
@@ -413,7 +468,7 @@ function AdDraftOwner() {
 function NameField() {
   const model = useModel<AdDraftData>();
   const { draft, setDraft, onBlur, showError, meta } =
-    useDraftField(model, 'basic.name');
+    useDraftField(model, 'name');
 
   return (
     <label>
@@ -432,7 +487,7 @@ function NameField() {
 function TitleField() {
   const model = useModel<AdDraftData>();
   const { draft, setDraft, onBlur, showError, meta } =
-    useDraftField(model, 'creative.title');
+    useDraftField(model, 'title');
 
   return (
     <label>
@@ -510,7 +565,7 @@ AdCreationPage
   -> 拉取草稿并 setFields 回填
   -> 用户逐步编辑字段
   -> schema validator 即时校验
-  -> reaction 产出 audit.ready / audit.blockReason
+  -> reaction 产出 ready / blockReason
   -> 点击保存草稿
   -> 点击提交审核
   -> validateAll
@@ -530,8 +585,8 @@ AdCreationPage
 
 ### 6.2 派生策略
 
-- 将可由已有字段计算出的数据定义为 reaction 字段，例如 `audit.ready`、`audit.blockReason`、`targeting.totalDays`。
-- `computed` 只做纯计算，不发请求、不写日志、不修改外部变量。
+- 将可由已有字段计算出的数据定义为 reaction 字段，例如 `ready`、`blockReason`、`totalDays`。
+- `computed` 只做同步纯计算，不返回 Promise、不发请求、不写日志、不修改外部变量。
 - 对频繁输入字段触发的派生计算配置 `debounceReactions`。
 - 需要监听派生结果时，使用 `subscribeField` 或 React selector，不在组件中重复计算。
 
@@ -606,7 +661,7 @@ interface SubmitAdResponse {
 建议转换约束：
 
 - `Date` 在出站时统一序列化为 ISO 字符串。
-- 内部字段名如 `basic.name` 仅用于前端模型；对外 DTO 使用稳定业务语义字段。
+- model 内部保持 `name`、`title` 等扁平字段；出站时按后端契约组装嵌套 DTO。
 - 枚举值与平台 ID 应由平台配置中心或常量表统一维护，避免前后端漂移。
 
 ### 7.3 服务端错误回填
@@ -709,9 +764,9 @@ function AdEditorRoute() {
 
 | 测试类型 | 覆盖重点 |
 | --- | --- |
-| Schema 单测 | 默认值、类型、必填、长度、枚举、数组数量 |
+| Schema 单测 | 片段展开后的字段集合、默认值、类型、必填、长度、枚举、数组数量 |
 | 模块单测 | `setBasicInfo`、`setCreative`、`setTargeting`、`submitForAudit` |
-| Reaction 单测 | `audit.ready`、`audit.blockReason` 等派生字段是否随依赖变化 |
+| Reaction 单测 | `ready`、`blockReason` 等派生字段是否随依赖变化 |
 | React 集成测试 | 字段输入、错误展示、dirty 状态、提交按钮流程 |
 | 回归测试 | 提交 payload 字段映射、失败输入不会污染 `data` |
 
@@ -720,20 +775,23 @@ function AdEditorRoute() {
 ```ts
 const model = createAdDraftModel();
 
-const ok = await model.setField('basic.name', 'ab');
+const ok = await model.setField('name', 'ab');
 expect(ok).toBe(false);
-expect(model.data['basic.name']).toBe('');
-expect(model.getDirtyData()['basic.name']).toBe('ab');
+expect(model.data.name).toBe('');
+expect(model.getDirtyData().name).toBe('ab');
 
 model.dispose();
 ```
 
 建议额外补充的测试样例：
 
-- `targeting.endDate <= targeting.startDate` 时返回明确错误文案。
-- `targeting.dailyBudget > targeting.budget` 时提交被阻断。
+- Schema 片段展开后只有 `id`、`title` 等扁平字段，不存在模块前缀字段。
+- 不同 Schema 片段不得声明同名字段，避免对象展开时发生覆盖。
+- 两个 model 实例不共享 `Date`、数组、对象等可变默认值。
+- `endDate <= startDate` 时返回明确错误文案。
+- `dailyBudget > budget` 时提交被阻断。
 - 服务端返回字段错误后，重新编辑该字段会清除对应服务端错误。
-- 草稿回填后 `audit.ready`、`audit.blockReason` 能正确重算。
+- 草稿回填后 `ready`、`blockReason` 能正确重算。
 - 多平台选择时，平台特有规则能正确启用或禁用。
 
 ## 11. 交付建议
@@ -743,7 +801,13 @@ model.dispose();
 ```text
 src/
   models/
-    ad-draft.model.ts
+    ad-draft/
+      basic.schema.ts
+      creative.schema.ts
+      targeting.schema.ts
+      audit.schema.ts
+      compose-schema.ts
+      ad-draft.model.ts
   modules/
     ad-draft.module.ts
   components/

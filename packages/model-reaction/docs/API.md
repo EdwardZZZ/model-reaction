@@ -31,6 +31,12 @@ createModel<S extends Record<string, FieldSchema>>(
 ): ModelReturn<InferModelData<S>>;
 ```
 
+The first argument is one flat schema object, with each top-level property
+representing one model field. Large schemas may be split into focused fragments
+and merged with object spread before being passed in. Object and array field
+values may still contain nested data, but the model tracks changes only at the
+top level.
+
 > **Defaults bypass validation.** Each field's `default` is written directly
 > into `data` at construction — validators do **not** run against it. A model
 > can therefore start in an invalid state while `validationErrors` is empty.
@@ -89,9 +95,29 @@ total: {
 }
 ```
 
-Both `computed` and `action` may be asynchronous. Their promises are tracked by
-`settled()`: the computed value is awaited before validation and commit, and an
-action rejection is reported through `reaction:error`.
+`computed` must run synchronously and remain pure: it reads only the
+dependencies declared in `fields` and returns the target field's next value.
+Returning a Promise is reported through `reaction:error`, and no result is
+committed. Other side effects, such as requests, logging, or external-state
+mutations, cannot be detected at runtime and must be avoided by the caller. Put
+asynchronous work and other side effects in `action`. An `action` may be
+asynchronous; its Promise is tracked by `settled()`, and a rejection is
+reported through `reaction:error`.
+
+Return the package-level `SKIP_REACTION` export to conditionally stop the
+current reaction:
+
+```ts
+import { SKIP_REACTION } from 'model-reaction';
+
+computed: ({ enabled, source }) =>
+  enabled ? String(source).trim() : SKIP_REACTION
+```
+
+`SKIP_REACTION` is a normal no-op: the target field is not validated or
+written, `dirtyData` is unchanged, and no `field:change`, downstream reaction,
+or current reaction `action` is triggered. Later entries in a reaction array
+still run in declaration order.
 
 When several reactions write the same target for the same changed dependency,
 the last scheduled write is authoritative; earlier writes are superseded. Thus,
@@ -149,7 +175,7 @@ stream.
 
 | Method | Description |
 | --- | --- |
-| `settled(): Promise<void>` | Wait for all pending reactions and async validations to complete. |
+| `settled(): Promise<void>` | Wait for all pending or cascading reactions, async actions, and async validations to complete. |
 | `dispose(): void` | Release timers, listeners, and internal state. |
 
 ## Events
@@ -256,6 +282,7 @@ Publicly exported types include `Model`, `ModelOptions`, `ModelReturn`,
 `ModelErrorCode`, `ModelEventMap`, `InferFieldType`, and `InferModelData`.
 
 Runtime values exported from the package entry point are `createModel`,
-`ValidationRules`, `Rule`, `ModelEvents`, and `formatValidationErrors`.
+`ValidationRules`, `Rule`, `ModelEvents`, `SKIP_REACTION`, and
+`formatValidationErrors`.
 
 For full type definitions, see [`src/types.ts`](../src/types.ts).

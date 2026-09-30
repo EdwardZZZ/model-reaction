@@ -69,6 +69,12 @@ const ok = await user.validateAll();
 console.log(ok, user.data); // true { name: 'John', age: 30 }
 ```
 
+The first argument to `createModel` is one flat schema object: each top-level
+property represents one model field. Large schemas may be split into focused
+fragments and merged with object spread before being passed in. Object and
+array field values may still contain nested data, but the model tracks changes
+only at the top level.
+
 Always `await setField(...)` so validation has settled before you read `data`;
 always call `dispose()` from your cleanup path when the model's owner unmounts.
 The model supports shallow data and tracks changes at the field level. `data` and `getDirtyData()` return
@@ -82,8 +88,17 @@ and does not run validation or reactions.
 ### Reactions
 
 A field can declare dependencies and a `computed` function. Whenever any dependency changes, the field is recomputed automatically.
+`computed` must run synchronously, purely derive the target field's next value
+from the dependencies declared in `fields`, and never return a Promise. Do not
+make requests, log, or mutate external state inside it; put asynchronous work
+and other side effects in `action`.
+Return `SKIP_REACTION` to conditionally skip the current reaction. The target
+field is not validated or written, and neither `action` nor downstream
+reactions run.
 
 ```typescript
+import { createModel, SKIP_REACTION } from 'model-reaction';
+
 const m = createModel({
   first: { type: 'string', default: '' },
   last:  { type: 'string', default: '' },
@@ -92,7 +107,8 @@ const m = createModel({
     default: '',
     reaction: {
       fields: ['first', 'last'],
-      computed: (v) => `${v.first} ${v.last}`,
+      computed: (v) =>
+        v.first || v.last ? `${v.first} ${v.last}`.trim() : SKIP_REACTION,
     },
   },
 });

@@ -39,7 +39,31 @@ function makeLineItem(label: string, unit: number, qty: number): ModelReturn<Pri
     });
 }
 
-function LineItemCard({ title }: { title: string }) {
+function LineItemCard({
+    title,
+    label,
+    unitPriceCents,
+    quantity,
+}: {
+    title: string;
+    label: string;
+    unitPriceCents: number;
+    quantity: number;
+}) {
+    const model = useOwnedModel<PriceForm>(() =>
+        makeLineItem(label, unitPriceCents, quantity)
+    );
+
+    if (!model) return null;
+
+    return (
+        <ModelProvider model={model}>
+            <LineItemCardView title={title} />
+        </ModelProvider>
+    );
+}
+
+function LineItemCardView({ title }: { title: string }) {
     const model = useModel<PriceForm>();
     const total = useModelField(model, 'totalCents');
     return (
@@ -62,11 +86,6 @@ function LineItemCard({ title }: { title: string }) {
  * The DevTools panel's instance picker lets you switch between them.
  */
 export function MultiInstance() {
-    const coffee = useOwnedModel<PriceForm>(() => makeLineItem('Coffee', 350, 2));
-    const bagel = useOwnedModel<PriceForm>(() => makeLineItem('Bagel', 275, 1));
-
-    if (!coffee || !bagel) return null;
-
     return (
         <section className="scenario">
             <h2>Multiple instances</h2>
@@ -75,12 +94,18 @@ export function MultiInstance() {
                 the instance picker (top-right) to switch between them.
             </p>
             <div className="row">
-                <ModelProvider model={coffee}>
-                    <LineItemCard title="Line item #1" />
-                </ModelProvider>
-                <ModelProvider model={bagel}>
-                    <LineItemCard title="Line item #2" />
-                </ModelProvider>
+                <LineItemCard
+                    title="Line item #1"
+                    label="Coffee"
+                    unitPriceCents={350}
+                    quantity={2}
+                />
+                <LineItemCard
+                    title="Line item #2"
+                    label="Bagel"
+                    unitPriceCents={275}
+                    quantity={1}
+                />
             </div>
         </section>
     );

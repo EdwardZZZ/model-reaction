@@ -37,7 +37,8 @@ unsubscribe();
 ## 3. Complex Business Rules
 
 ### Reaction System Design
-- Keep `computed` functions pure and put side effects in `action`.
+- Keep `computed` functions synchronous and pure; never return a Promise. Put
+  asynchronous work and other side effects in `action`.
 - Declare every value read by `computed` in `reaction.fields`.
 - Prefer one reaction with all required dependencies over competing reactions
   that write the same target.

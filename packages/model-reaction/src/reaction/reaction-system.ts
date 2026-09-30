@@ -5,6 +5,7 @@ import {
     ModelEvents,
     ModelOptions,
     Reaction,
+    SKIP_REACTION,
     ValidationError,
 } from '../types';
 import { eachReactionEdge } from './reaction-graph';
@@ -24,6 +25,14 @@ interface ReactionCallbacks {
 interface ReactionJob {
     field: string;
     reaction: Reaction;
+}
+
+function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
+    return (
+        value !== null &&
+        (typeof value === 'object' || typeof value === 'function') &&
+        typeof (value as PromiseLike<unknown>).then === 'function'
+    );
 }
 
 export class ReactionSystem {
@@ -181,7 +190,16 @@ export class ReactionSystem {
                 dependentValues[f] = this.callbacks.getValue(f);
             }
 
-            const computedValue = await reaction.computed(dependentValues);
+            const computedValue = reaction.computed(dependentValues);
+            if (computedValue === SKIP_REACTION) return;
+            if (isPromiseLike(computedValue)) {
+                // Observe a rejected promise to avoid an unhandled rejection
+                // after reporting the synchronous-contract violation.
+                void Promise.resolve(computedValue).catch(() => undefined);
+                throw new TypeError(
+                    'reaction.computed must return synchronously; move async work to reaction.action'
+                );
+            }
             const committed = await this.callbacks.setValue(field, computedValue, { reactionStack });
             if (committed && reaction.action) {
                 await reaction.action({

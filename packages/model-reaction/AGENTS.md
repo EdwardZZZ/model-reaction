@@ -53,7 +53,9 @@ m.dispose();                                  // ALWAYS call this in cleanup
 
 2. **Reading `data` after a failed `setField`** — failed values go to `dirtyData`, not `data`. Use `getDirtyData()` to retrieve them.
 
-3. **Side effects inside `reaction.computed`** — `computed` MUST be pure. Put side effects in `reaction.action` instead.
+3. **Async work or side effects inside `reaction.computed`** — `computed` MUST
+   be synchronous and pure. It must not return a Promise. Put asynchronous work
+   and other side effects in `reaction.action` instead.
 
 4. **Not calling `dispose()`** — leaves reaction timers, listeners, and pending
    work active for as long as the model remains reachable. Wire disposal to the
@@ -219,7 +221,7 @@ pnpm --filter model-reaction-devtools run test
 | --- | --- |
 | `data` | Committed source of truth. Writes are validated; defaults are seeded directly. Read via `m.data` or `getField`. |
 | `dirtyData` | Last user input whose validation **failed**, indexed by field. Cleared by `clearDirtyData()` or by next successful `setField` of that field. |
-| `reaction.computed` | Pure function: `deps -> derived value`. |
+| `reaction.computed` | Synchronous pure function: `deps -> derived value`; must not return a Promise. |
 | `reaction.action` | Optional side-effect callback fired after the computed value validates and commits. |
 | `settled()` | Promise that resolves when all in-flight reactions and validations finish. Use it in tests. |
 | `verify-then-commit` | Set-field protocol: validate first, write to `data` only on pass; otherwise write to `dirtyData`. |

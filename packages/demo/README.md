@@ -43,8 +43,8 @@ first instance before creating the active one.
 Each ready model is mounted at the scenario's form boundary with
 `ModelProvider`. Descendants, including the shared `TextField`, read it through
 `useModel<T>()` instead of receiving it through props. The multi-instance
-scenario gives each line-item card its own provider, so the two model contexts
-remain isolated.
+scenario lets each line-item card create, provide, and dispose its own model, so
+the two model contexts and lifecycles remain isolated.
 
 Text inputs keep their draft in local component state (see
 [`TextField`](src/TextField.tsx), which uses `useDraftField` from

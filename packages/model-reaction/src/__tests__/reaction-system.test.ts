@@ -1,4 +1,4 @@
-import { createModel, Model, Reaction } from '../index';
+import { createModel, Model, Reaction, SKIP_REACTION } from '../index';
 import { ReactionSystem } from '../reaction/reaction-system';
 import { ModelManager } from '../core/model-manager';
 import { PendingTasks } from '../core/pending-tasks';
@@ -615,7 +615,7 @@ describe('ReactionSystem - via createModel', () => {
     });
 });
 
-describe('ReactionSystem - settled() waits for chained async reactions', () => {
+describe('ReactionSystem - settled() waits for chained reactions and async actions', () => {
     test('settled() should not resolve until chained reactions finish (no debounce)', async () => {
         interface S {
             a: number;
@@ -652,67 +652,99 @@ describe('ReactionSystem - settled() waits for chained async reactions', () => {
         model.dispose();
     });
 
-    test('awaits an async computed value before committing it', async () => {
-        const model = createModel({
-            source: { type: 'number' as const },
+    test('SKIP_REACTION bypasses validation, commit, action, and downstream reactions', async () => {
+        const targetValidator = jest.fn(() => true);
+        const targetComputed = jest.fn(() => SKIP_REACTION);
+        const targetAction = jest.fn();
+        const downstreamComputed = jest.fn(() => 'updated');
+        const targetSubscriber = jest.fn();
+        const reactionError = jest.fn();
+        interface S {
+            source: string;
+            target: string;
+            downstream: string;
+        }
+        const model = createModel<S>({
+            source: { type: 'string' },
             target: {
-                type: 'number' as const,
-                default: 0,
+                type: 'string',
+                default: 'initial',
+                validator: [
+                    {
+                        type: 'test',
+                        message: 'invalid',
+                        validate: targetValidator,
+                    },
+                ],
                 reaction: {
                     fields: ['source'],
-                    computed: async (deps) => {
-                        await Promise.resolve();
-                        return deps.source * 2;
-                    },
+                    computed: targetComputed,
+                    action: targetAction,
+                },
+            },
+            downstream: {
+                type: 'string',
+                default: 'downstream-initial',
+                reaction: {
+                    fields: ['target'],
+                    computed: downstreamComputed,
                 },
             },
         });
+        model.subscribeField('target', targetSubscriber);
+        model.on('reaction:error', reactionError);
 
-        await model.setField('source', 5);
+        await model.setField('source', 'update');
         await model.settled();
 
-        expect(model.getField('target')).toBe(10);
-        expect(model.getField('target')).not.toBeInstanceOf(Promise);
+        expect(targetComputed).toHaveBeenCalledWith({ source: 'update' });
+        expect(model.getField('target')).toBe('initial');
+        expect(model.getField('downstream')).toBe('downstream-initial');
+        expect(targetValidator).not.toHaveBeenCalled();
+        expect(targetSubscriber).not.toHaveBeenCalled();
+        expect(targetAction).not.toHaveBeenCalled();
+        expect(downstreamComputed).not.toHaveBeenCalled();
+        expect(reactionError).not.toHaveBeenCalled();
         model.dispose();
     });
 
-    test('preserves declaration order for async reactions on one target', async () => {
-        let releaseFirst!: () => void;
+    test('SKIP_REACTION does not cancel later reactions for the same target', async () => {
+        const skippedAction = jest.fn();
+        const committedAction = jest.fn();
         const model = createModel({
             source: { type: 'string' as const },
             target: {
                 type: 'string' as const,
-                default: '',
+                default: 'initial',
                 reaction: [
                     {
                         fields: ['source'],
-                        computed: async (deps) => {
-                            const source = deps.source;
-                            await new Promise<void>((resolve) => {
-                                releaseFirst = resolve;
-                            });
-                            return `first:${source}`;
-                        },
+                        computed: () => SKIP_REACTION,
+                        action: skippedAction,
                     },
                     {
                         fields: ['source'],
-                        computed: async (deps) => `second:${deps.source}`,
+                        computed: (deps: Record<string, any>) =>
+                            deps.source.toUpperCase(),
+                        action: committedAction,
                     },
                 ],
             },
         });
 
-        await model.setField('source', 'value');
-        await Promise.resolve();
-        releaseFirst();
+        await model.setField('source', 'update');
         await model.settled();
 
-        expect(model.getField('target')).toBe('second:value');
+        expect(model.getField('target')).toBe('UPDATE');
+        expect(skippedAction).not.toHaveBeenCalled();
+        expect(committedAction).toHaveBeenCalledTimes(1);
         model.dispose();
     });
 
-    test('applies the latest dependency value after an async reaction finishes', async () => {
-        let releaseFirst!: () => void;
+    test('rejects an async computed value without committing it', async () => {
+        const action = jest.fn();
+        const errorMessage =
+            'reaction.computed must return synchronously; move async work to reaction.action';
         const model = createModel({
             source: { type: 'number' as const },
             target: {
@@ -720,25 +752,26 @@ describe('ReactionSystem - settled() waits for chained async reactions', () => {
                 default: 0,
                 reaction: {
                     fields: ['source'],
-                    computed: async (deps) => {
-                        const source = deps.source;
-                        if (source === 1) {
-                            await new Promise<void>((resolve) => {
-                                releaseFirst = resolve;
-                            });
-                        }
-                        return source;
-                    },
+                    computed: async (deps) => deps.source * 2,
+                    action,
                 },
             },
         });
+        const errors: string[] = [];
+        model.on('reaction:error', (error) => errors.push(error.message));
 
-        await model.setField('source', 1);
-        await model.setField('source', 2);
-        releaseFirst();
+        await model.setField('source', 5);
         await model.settled();
 
-        expect(model.getField('target')).toBe(2);
+        expect(model.getField('target')).toBe(0);
+        expect(action).not.toHaveBeenCalled();
+        expect(errors).toEqual([errorMessage]);
+        expect(model.validationErrors.target?.[0]).toEqual(
+            expect.objectContaining({
+                rule: 'reaction_error',
+                message: errorMessage,
+            })
+        );
         model.dispose();
     });
 

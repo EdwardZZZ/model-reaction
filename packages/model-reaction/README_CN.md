@@ -68,6 +68,10 @@ const ok = await user.validateAll();
 console.log(ok, user.data); // true { name: 'John', age: 30 }
 ```
 
+`createModel` 的第一个参数是单个扁平 Schema 对象：每个顶层属性对应一个模型字段。
+大型 Schema 可以先按职责拆成片段，再通过对象展开合并后传入；对象、数组等字段值
+本身仍可包含嵌套数据，但模型只在顶层跟踪字段变化。
+
 始终 `await setField(...)`，确保验证完成后再读取 `data`；
 当 model 的 owner 卸载时，始终在 cleanup 路径里调用 `dispose()`。
 模型只支持浅层数据，按字段跟踪变化。`data` 和 `getDirtyData()` 返回稳定的浅冻结快照；
@@ -80,8 +84,15 @@ reactions。
 ### 反应（Reactions）
 
 字段可以声明依赖列表与 `computed` 函数；任一依赖变化时，字段会自动重算。
+`computed` 必须同步执行，只根据 `fields` 中声明的依赖做纯计算并返回目标字段的
+新值；不要返回 Promise，也不要在其中发请求、写日志或修改外部状态。异步操作和
+其他副作用应放在 `action` 中。
+需要有条件地跳过本次 reaction 时返回 `SKIP_REACTION`；此时不会验证或写入目标
+字段，也不会执行 `action` 或触发下游 reaction。
 
 ```typescript
+import { createModel, SKIP_REACTION } from 'model-reaction';
+
 const m = createModel({
   first: { type: 'string', default: '' },
   last:  { type: 'string', default: '' },
@@ -90,7 +101,8 @@ const m = createModel({
     default: '',
     reaction: {
       fields: ['first', 'last'],
-      computed: (v) => `${v.first} ${v.last}`,
+      computed: (v) =>
+        v.first || v.last ? `${v.first} ${v.last}`.trim() : SKIP_REACTION,
     },
   },
 });

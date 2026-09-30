@@ -21,7 +21,7 @@ export type {
     InferFieldType,
     InferModelData,
 } from './types';
-export { ModelEvents } from './types';
+export { ModelEvents, SKIP_REACTION } from './types';
 export { ValidationRules, Rule } from './validation/rules';
 export {
     formatValidationErrors,

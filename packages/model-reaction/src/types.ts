@@ -9,6 +9,13 @@ export const ModelEvents = {
     DIRTY_DATA_CLEARED: 'dirty-data:cleared',
 } as const;
 
+/**
+ * Return from `reaction.computed` to skip the current reaction without
+ * validating or committing its target field, running its `action`, or
+ * triggering downstream reactions.
+ */
+export const SKIP_REACTION = Symbol.for('model-reaction.SKIP_REACTION');
+
 export type ModelErrorEvent =
     | typeof ModelEvents.REACTION_ERROR
     | typeof ModelEvents.DEPENDENCY_ERROR
@@ -63,8 +70,16 @@ export interface ModelEventMap<T = Record<string, any>> {
 }
 
 export interface Reaction {
+    /** Top-level model fields whose values are passed to `computed`. */
     fields: string[];
+    /**
+     * Synchronously and purely derive the target field's next value from the
+     * declared dependencies. Must not return a Promise; keep asynchronous work
+     * and other side effects in `action`. Return {@link SKIP_REACTION} to leave
+     * the target unchanged and skip `action`.
+     */
     computed: (values: Record<string, any>) => any;
+    /** Optional side effect run after the computed value validates and commits. */
     action?: (data: Record<string, any>) => void | PromiseLike<void>;
 }
 

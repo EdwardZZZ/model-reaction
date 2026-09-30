@@ -32,7 +32,7 @@ unsubscribe();
 ## 3. 复杂业务规则
 
 ### 反应系统设计
-- 保持 `computed` 为纯函数，把副作用放在 `action`。
+- 保持 `computed` 为同步纯函数，不要返回 Promise；异步操作和其他副作用放在 `action`。
 - `computed` 读取的每个值都必须声明在 `reaction.fields` 中。
 - 优先用一个包含完整依赖的 reaction，避免多个 reaction 竞争写入同一目标。
 
