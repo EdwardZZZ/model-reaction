@@ -356,6 +356,36 @@ with a `useEffect` cleanup — never to a module's top-level scope.
 
 ## `useModelSelector` vs `useModelComputed`
 
+Deriving something from `model.data`? Pick by how the selector is written:
+
+```
+Reading model.data
+│
+├─ One field only ............ useModelField(model, 'field')
+├─ A fixed set of fields ...... useModelFields(model, ['a', 'b'])
+│
+└─ A computed / derived value
+   │
+   └─ Does the selector close over values that change between
+      renders (props or state such as id, index, query)?
+      │
+      ├─ YES → useModelComputed(model, (d) => d.items[id])
+      │        Subscribes by model identity only, so the inline
+      │        selector always sees the current render's props —
+      │        no useCallback needed.
+      │
+      └─ NO  → useModelSelector(model, selectStable)
+               Hoist the selector or wrap it in useCallback; the
+               selector becomes part of the subscription, so the
+               model filters changes before notifying React
+               (better for reusable selectors / high-frequency
+               updates).
+
+Selector returns a fresh object or array?
+→ pass `shallow` (or a custom isEqual) as the third argument,
+  in either branch, so equivalent results keep their reference.
+```
+
 Both hooks select from committed `model.data`, default to `Object.is`, and
 cache snapshots. Their subscriptions handle selector identity differently:
 

@@ -331,6 +331,33 @@ function EditUserRoute({ userId }: { userId: string }) {
 
 ## `useModelSelector` vs `useModelComputed`
 
+要从 `model.data` 派生值？按 selector 的写法来选：
+
+```
+读取 model.data
+│
+├─ 只取单个字段 ............ useModelField(model, 'field')
+├─ 取一组固定字段 .......... useModelFields(model, ['a', 'b'])
+│
+└─ 取计算 / 派生值
+   │
+   └─ selector 是否闭包了跨渲染变化的值
+      （props 或 state，如 id、index、query）？
+      │
+      ├─ 是 → useModelComputed(model, (d) => d.items[id])
+      │       仅按 model 身份订阅，内联 selector 始终看到当前
+      │       渲染的 props——无需 useCallback。
+      │
+      └─ 否 → useModelSelector(model, selectStable)
+              把 selector 提到模块作用域或用 useCallback 包裹；
+              selector 会成为订阅的一部分，模型在通知 React 前
+              先过滤变更（更适合可复用 selector / 高频更新）。
+
+selector 返回新建的对象或数组？
+→ 在任一分支把 `shallow`（或自定义 isEqual）作为第三个参数传入，
+  让等价结果保留同一引用。
+```
+
 两者都从已提交的 `model.data` 选择派生值，默认使用 `Object.is`，并缓存快照。
 主要差异是订阅如何处理 selector 引用：
 
