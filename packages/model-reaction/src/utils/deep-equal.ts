@@ -6,6 +6,7 @@
  *   - Date / RegExp
  *   - Arrays
  *   - Plain objects
+ *   - Other objects by reference identity
  *   - Cyclic references (via WeakSet so infinite recursion is avoided)
  *
  * The `seen` set tracks only the nodes on the *current* comparison path:
@@ -59,6 +60,17 @@ export function deepEqual(
                 if (!deepEqual(arrA[i], arrB[i], seen)) return false;
             }
             return true;
+        }
+
+        // Only plain objects expose all of their value through own fields.
+        // Map, Set and class instances must be replaced by a new reference.
+        const prototypeA = Object.getPrototypeOf(a);
+        const prototypeB = Object.getPrototypeOf(b);
+        if (
+            (prototypeA !== Object.prototype && prototypeA !== null) ||
+            (prototypeB !== Object.prototype && prototypeB !== null)
+        ) {
+            return false;
         }
 
         const keysA = Object.keys(a as Record<string, unknown>);

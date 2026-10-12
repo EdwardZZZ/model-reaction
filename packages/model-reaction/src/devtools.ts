@@ -22,7 +22,6 @@
 import { createModel as baseCreateModel } from './index';
 import type {
     FieldSchema,
-    InferModelData,
     Model,
     ModelOptions,
     ModelReturn,
@@ -35,18 +34,10 @@ import {
     getDevtoolsHook,
 } from './devtools/devtools-hook';
 
-export function createModel<S extends Record<string, FieldSchema>>(
-    schema: S,
-    options?: ModelOptions
-): ModelReturn<InferModelData<S>>;
-export function createModel<T extends Record<string, any>>(
-    schema: Model<T>,
-    options?: ModelOptions
-): ModelReturn<T>;
-export function createModel(
+export const createModel: typeof baseCreateModel = (
     schema: Record<string, FieldSchema>,
     options: ModelOptions = {}
-): ModelReturn<any> {
+): ModelReturn<any> => {
     const model = baseCreateModel(schema as Model<Record<string, any>>, options);
 
     const hook = getDevtoolsHook();
@@ -88,4 +79,4 @@ export function createModel(
     };
 
     return model;
-}
+};

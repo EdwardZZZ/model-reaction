@@ -918,6 +918,198 @@ describe('useModelFieldState', () => {
         first.dispose();
         second.dispose();
     });
+
+    describe.each(['model', 'field'] as const)('%s round trips', (identity) => {
+        test.each([
+            { editB: false, finishOldFirst: true },
+            { editB: false, finishOldFirst: false },
+            { editB: true, finishOldFirst: true },
+            { editB: true, finishOldFirst: false },
+        ])(
+            'isolates each A-B-A session (B request: $editB, old first: $finishOldFirst)',
+            async ({ editB, finishOldFirst }) => {
+                const releases = new Map<string, (valid: boolean) => void>();
+                const requests: Promise<boolean>[] = [];
+                const fieldSchema = {
+                    type: 'string' as const,
+                    default: '',
+                    validator: [{
+                        type: 'controlled',
+                        message: 'invalid',
+                        validate: (value: string) => new Promise<boolean>((resolve) => {
+                            releases.set(value, resolve);
+                        }),
+                    }],
+                };
+                const first = createModel({ a: fieldSchema, b: fieldSchema });
+                const second = createModel({ a: fieldSchema, b: fieldSchema });
+                const a = { model: first, field: 'a' as 'a' | 'b' };
+                const b = identity === 'model'
+                    ? { model: second, field: 'a' as const }
+                    : { model: first, field: 'b' as const };
+                const { result, rerender, unmount } = renderHook(
+                    ({ model, field }) => useModelFieldState(model, field),
+                    { initialProps: a, wrapper: React.StrictMode }
+                );
+                const start = (value: string): Promise<boolean> => {
+                    let pending!: Promise<boolean>;
+                    act(() => {
+                        pending = result.current[1](value);
+                        requests.push(pending);
+                    });
+                    return pending;
+                };
+                const finish = async (value: string, pending: Promise<boolean>) => {
+                    await act(async () => {
+                        releases.get(value)!(true);
+                        await pending;
+                    });
+                };
+
+                try {
+                    const oldA = start('old-a');
+                    expect(result.current[2].validating).toBe(true);
+                    rerender(b);
+                    expect(result.current[2].validating).toBe(false);
+                    const middle = editB ? start('middle-b') : undefined;
+                    rerender(a);
+                    expect(result.current[2].validating).toBe(false);
+                    const newA = start('new-a');
+                    let newFinished = false;
+                    void newA.then(() => { newFinished = true; });
+                    expect(result.current[2].validating).toBe(true);
+
+                    if (finishOldFirst) {
+                        await finish('old-a', oldA);
+                        expect(newFinished).toBe(false);
+                        expect(result.current[2].validating).toBe(true);
+                        if (middle) {
+                            await finish('middle-b', middle);
+                            expect(result.current[2].validating).toBe(true);
+                        }
+                        await finish('new-a', newA);
+                    } else {
+                        await finish('new-a', newA);
+                        expect(result.current[2].validating).toBe(false);
+                        await finish('old-a', oldA);
+                        if (middle) await finish('middle-b', middle);
+                    }
+                    expect(result.current[2].validating).toBe(false);
+                    expect(result.current[0]).toBe('new-a');
+                } finally {
+                    unmount();
+                    releases.forEach((release) => release(true));
+                    await Promise.all(requests);
+                    first.dispose();
+                    second.dispose();
+                }
+            }
+        );
+    });
+
+    it('keeps same-session overlapping requests counted until both complete', async () => {
+        const releases: Array<(valid: boolean) => void> = [];
+        const model = createModel({
+            email: {
+                type: 'string',
+                default: '',
+                validator: [{
+                    type: 'controlled',
+                    message: 'invalid',
+                    validate: () => new Promise<boolean>((resolve) => releases.push(resolve)),
+                }],
+            },
+        });
+        const { result, unmount } = renderHook(() =>
+            useModelFieldState(model, 'email')
+        );
+        let first!: Promise<boolean>;
+        let second!: Promise<boolean>;
+        act(() => {
+            first = result.current[1]('first');
+            second = result.current[1]('second');
+        });
+        try {
+            await act(async () => {
+                releases[1]!(true);
+                await second;
+            });
+            expect(result.current[2].validating).toBe(true);
+            expect(result.current[0]).toBe('second');
+            await act(async () => {
+                releases[0]!(false);
+                await first;
+            });
+            expect(result.current[2].validating).toBe(false);
+            expect(result.current[0]).toBe('second');
+        } finally {
+            unmount();
+            releases.forEach((release) => release(true));
+            await Promise.all([first, second]);
+            model.dispose();
+        }
+    });
+
+    it('preserves the active validation session when a field switch suspends', async () => {
+        let release!: (valid: boolean) => void;
+        const model = createModel({
+            a: {
+                type: 'string',
+                default: '',
+                validator: [{
+                    type: 'controlled',
+                    message: 'invalid',
+                    validate: () => new Promise<boolean>((resolve) => {
+                        release = resolve;
+                    }),
+                }],
+            },
+            b: { type: 'string', default: '' },
+        });
+        const suspended = new Promise<void>(() => {});
+        const renderAttempt = jest.fn();
+        let changeField!: (field: 'a' | 'b') => void;
+        let edit!: (value: string) => Promise<boolean>;
+        function CurrentField({ field }: { field: 'a' | 'b' }) {
+            const [, setValue, meta] = useModelFieldState(model, field);
+            React.useLayoutEffect(() => { edit = setValue; }, [setValue]);
+            renderAttempt(field);
+            if (field === 'b') throw suspended;
+            return <span>{field}:{String(meta.validating)}</span>;
+        }
+        function Form() {
+            const [field, setField] = useState<'a' | 'b'>('a');
+            changeField = setField;
+            return (
+                <React.Suspense fallback={<span>loading</span>}>
+                    <CurrentField field={field} />
+                </React.Suspense>
+            );
+        }
+        const { getByText, unmount } = render(<Form />);
+        let pending!: Promise<boolean>;
+        act(() => { pending = edit('pending'); });
+        try {
+            expect(getByText('a:true')).toBeTruthy();
+            act(() => {
+                React.startTransition(() => changeField('b'));
+            });
+            expect(renderAttempt).toHaveBeenCalledWith('b');
+            expect(getByText('a:true')).toBeTruthy();
+            await act(async () => {
+                release(true);
+                await pending;
+            });
+            expect(getByText('a:false')).toBeTruthy();
+            act(() => changeField('a'));
+            expect(getByText('a:false')).toBeTruthy();
+        } finally {
+            unmount();
+            release(true);
+            await pending;
+            model.dispose();
+        }
+    });
 });
 
 // ---------------------------------------------------------------------------
@@ -1233,5 +1425,71 @@ describe('useDraftField', () => {
         expect(result.current.meta.dirty).toBe(false);
 
         model.dispose();
+    });
+
+    it.each([null, undefined])(
+        'preserves an explicit dirty %s on mount and field reseed',
+        async (value) => {
+            const model = createModel<{
+                name: string | null | undefined;
+                other: string;
+            }>({
+                name: {
+                    type: 'string',
+                    default: 'committed',
+                    validator: [ValidationRules.required],
+                },
+                other: { type: 'string', default: 'other' },
+            });
+            await model.setField('name', value);
+            const { result, rerender, unmount } = renderHook(
+                ({ field }: { field: 'name' | 'other' }) => useDraftField(model, field),
+                { initialProps: { field: 'name' as 'name' | 'other' }, wrapper: React.StrictMode }
+            );
+            try {
+                expect(model.getDirtyData()).toHaveProperty('name', value);
+                expect(result.current.committed).toBe('committed');
+                expect(result.current.draft).toBe('');
+                rerender({ field: 'other' });
+                expect(result.current.draft).toBe('other');
+                rerender({ field: 'name' });
+                expect(result.current.draft).toBe('');
+            } finally {
+                unmount();
+                model.dispose();
+            }
+        }
+    );
+
+    it('keeps edits through format changes and uses the latest format for outside commits', async () => {
+        const model = makeSignup();
+        const { result, rerender, unmount } = renderHook(
+            ({ prefix }) => useDraftField(model, 'username', {
+                format: (value) => `${prefix}:${value}`,
+            }),
+            { initialProps: { prefix: 'first' }, wrapper: React.StrictMode }
+        );
+        try {
+            expect(result.current.draft).toBe('first:ada');
+            await act(async () => {
+                result.current.setDraft('ab');
+                result.current.onBlur();
+            });
+            rerender({ prefix: 'second' });
+            expect(result.current.draft).toBe('ab');
+            await act(async () => {
+                await model.setField('username', 'ada');
+            });
+            expect(result.current.draft).toBe('ab');
+            await act(async () => {
+                await model.setField('username', 'grace');
+            });
+            expect(result.current.draft).toBe('second:grace');
+            expect(result.current.committed).toBe('grace');
+            expect(result.current.touched).toBe(true);
+        } finally {
+            unmount();
+            model.dispose();
+        }
     });
 });

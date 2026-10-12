@@ -915,6 +915,156 @@ describe('ReactionSystem - settled() waits for chained reactions and async actio
     });
 });
 
+describe('ReactionSystem - lifecycle and rejected actions', () => {
+    test.each([false, true])(
+        'does not resume queued work or record a late error after dispose (reject: %s)',
+        async (rejectAction) => {
+            let releaseAction!: () => void;
+            let signalStarted!: () => void;
+            const gate = new Promise<void>((resolve) => {
+                releaseAction = resolve;
+            });
+            const started = new Promise<void>((resolve) => {
+                signalStarted = resolve;
+            });
+            const laterComputed = jest.fn(() => 2);
+            const laterAction = jest.fn();
+            const model = createModel({
+                source: { type: 'number' },
+                target: {
+                    type: 'number',
+                    default: 0,
+                    reaction: [
+                        {
+                            fields: ['source'],
+                            computed: () => 1,
+                            action: async () => {
+                                signalStarted();
+                                await gate;
+                                if (rejectAction) throw new Error('late failure');
+                            },
+                        },
+                        {
+                            fields: ['source'],
+                            computed: laterComputed,
+                            action: laterAction,
+                        },
+                    ],
+                },
+            });
+            await model.setField('source', 1);
+            await started;
+            model.dispose();
+            releaseAction();
+            // The owner releases settled waiters on dispose. A new event-loop
+            // turn drains these already-resolved action/queue continuations.
+            await new Promise((resolve) => setTimeout(resolve, 0));
+
+            expect(laterComputed).not.toHaveBeenCalled();
+            expect(laterAction).not.toHaveBeenCalled();
+            expect(model.data).toEqual({});
+            expect(model.validationErrors).toEqual({});
+            expect(model.getDirtyData()).toEqual({});
+        }
+    );
+
+    test('skips action when a target change listener disposes the model', async () => {
+        const action = jest.fn();
+        const model = createModel({
+            source: { type: 'number' },
+            target: {
+                type: 'number',
+                default: 0,
+                reaction: { fields: ['source'], computed: () => 1, action },
+            },
+        });
+        model.subscribeField('target', () => model.dispose());
+        await model.setField('source', 1);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        expect(action).not.toHaveBeenCalled();
+        expect(model.data).toEqual({});
+    });
+
+    test('does not recreate state when a target transform disposes the model', async () => {
+        const action = jest.fn();
+        const schema: Model<{ source: number; target: number }> = {
+            source: { type: 'number' },
+            target: {
+                type: 'number',
+                default: 0,
+                transform: (value) => {
+                    model.dispose();
+                    return value;
+                },
+                reaction: { fields: ['source'], computed: () => 1, action },
+            },
+        };
+        const model = createModel(schema);
+        await model.setField('source', 1);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        expect(action).not.toHaveBeenCalled();
+        expect(model.data).toEqual({});
+        expect(model.validationErrors).toEqual({});
+    });
+
+    test.each(['computed', 'action'] as const)(
+        'normalizes non-Error %s failures and continues the queue',
+        async (stage) => {
+            for (const reason of [null, undefined, 'offline', new Error('failed')]) {
+                const laterAction = jest.fn();
+                const model = createModel({
+                    source: { type: 'number' },
+                    target: {
+                        type: 'number',
+                        default: 0,
+                        reaction: [
+                            {
+                                fields: ['source'],
+                                computed: () => {
+                                    if (stage === 'computed') throw reason;
+                                    return 1;
+                                },
+                                action: () => Promise.reject(reason),
+                            },
+                            {
+                                fields: ['source'],
+                                computed: () => 2,
+                                action: laterAction,
+                            },
+                        ],
+                    },
+                });
+                const snapshots: unknown[] = [];
+                const onError = jest.fn(() => {
+                    snapshots.push(model.validationErrors.target);
+                });
+                model.on('reaction:error', onError);
+                try {
+                    await model.setField('source', 1);
+                    await model.settled();
+                    const message = reason instanceof Error
+                        ? reason.message
+                        : String(reason);
+                    expect(onError).toHaveBeenCalledTimes(1);
+                    expect(onError).toHaveBeenCalledWith(expect.objectContaining({
+                        code: 'reaction_error',
+                        field: 'target',
+                        message,
+                        originalError: expect.any(Error),
+                    }));
+                    expect(snapshots).toEqual([[
+                        { field: 'target', rule: 'reaction_error', message },
+                    ]]);
+                    expect(model.getField('target')).toBe(2);
+                    expect(laterAction).toHaveBeenCalledTimes(1);
+                } finally {
+                    model.dispose();
+                }
+            }
+        }
+    );
+});
+
 describe('ReactionSystem - direct unit tests', () => {
     test('reaction error when dependency access throws', () => {
         const errorSpy = jest

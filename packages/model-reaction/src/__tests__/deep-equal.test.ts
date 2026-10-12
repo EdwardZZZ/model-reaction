@@ -1,4 +1,5 @@
 import { deepEqual } from '../utils/deep-equal';
+import { createModel } from '../index';
 
 describe('deepEqual', () => {
     test('should handle primitive types correctly', () => {
@@ -104,5 +105,58 @@ describe('deepEqual', () => {
             second: { a: { b: { c: 1 } } },
         };
         expect(deepEqual(g, h)).toBe(true);
+    });
+
+    test('compares null-prototype objects by their own fields', () => {
+        const a = Object.assign(Object.create(null), { value: { count: 1 } });
+        const b = Object.assign(Object.create(null), { value: { count: 1 } });
+        expect(deepEqual(a, b)).toBe(true);
+        expect(deepEqual(a, { value: { count: 1 } })).toBe(true);
+        expect(deepEqual(a, { value: { count: 2 } })).toBe(false);
+    });
+
+    class OpaqueValue {
+        constructor(readonly count: number) {}
+    }
+
+    test.each([
+        { name: 'Map', previous: new Map([['count', 1]]), next: new Map([['count', 2]]) },
+        { name: 'Set', previous: new Set([1]), next: new Set([2]) },
+        { name: 'class instance', previous: new OpaqueValue(1), next: new OpaqueValue(1) },
+    ])('compares $name by reference and commits replacements', async ({ previous, next }) => {
+        expect(deepEqual(previous, previous)).toBe(true);
+        expect(deepEqual(previous, next)).toBe(false);
+        expect(deepEqual(previous, {})).toBe(false);
+        expect(deepEqual({}, previous)).toBe(false);
+        expect(deepEqual({ nested: previous }, { nested: next })).toBe(false);
+
+        const model = createModel<{ value: object; mirror: object | undefined }>({
+            value: { type: 'object', default: previous },
+            mirror: {
+                type: 'object',
+                reaction: { fields: ['value'], computed: ({ value }) => value },
+            },
+        });
+        try {
+            await model.settled();
+            const onField = jest.fn();
+            const onSelection = jest.fn();
+            model.subscribeField('value', onField);
+            model.subscribe((data) => data.value, onSelection);
+
+            expect(await model.setField('value', next)).toBe(true);
+            await model.settled();
+            expect(model.getField('value')).toBe(next);
+            expect(model.getField('mirror')).toBe(next);
+            expect(onField).toHaveBeenCalledTimes(1);
+            expect(onField).toHaveBeenCalledWith(next);
+            expect(onSelection).toHaveBeenCalledWith(next, previous);
+
+            await model.setField('value', next);
+            await model.settled();
+            expect(onField).toHaveBeenCalledTimes(1);
+        } finally {
+            model.dispose();
+        }
     });
 });

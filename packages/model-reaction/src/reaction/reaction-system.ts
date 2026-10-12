@@ -46,6 +46,7 @@ export class ReactionSystem {
     private options: ModelOptions;
     private callbacks: ReactionCallbacks;
     private pendingTasks: PendingTasks;
+    private disposed = false;
 
     constructor(
         schema: Model,
@@ -91,6 +92,7 @@ export class ReactionSystem {
         changedFields: string[],
         reactionStack: string[] = []
     ): void {
+        if (this.disposed) return;
         const debounceTime = this.options.debounceReactions ?? 0;
         const jobsToTrigger = new Map<ReactionJob, string>();
 
@@ -108,6 +110,7 @@ export class ReactionSystem {
         if (jobsToTrigger.size === 0) return;
 
         jobsToTrigger.forEach((changedField, job) => {
+            if (this.disposed) return;
             const { field } = job;
             if (reactionStack.includes(field)) {
                 this.callbacks.reportError(ModelEvents.REACTION_ERROR, {
@@ -174,10 +177,12 @@ export class ReactionSystem {
         job: ReactionJob,
         reactionStack: string[] = []
     ): Promise<void> {
+        if (this.disposed) return;
         const { field, reaction } = job;
         try {
             const dependentValues: Record<string, any> = {};
             for (const f of reaction.fields) {
+                if (this.disposed) return;
                 if (!(f in this.schema)) {
                     this.callbacks.reportError(ModelEvents.DEPENDENCY_ERROR, {
                         code: 'dependency_error',
@@ -190,6 +195,7 @@ export class ReactionSystem {
                 dependentValues[f] = this.callbacks.getValue(f);
             }
 
+            if (this.disposed) return;
             const computedValue = reaction.computed(dependentValues);
             if (computedValue === SKIP_REACTION) return;
             if (isPromiseLike(computedValue)) {
@@ -200,7 +206,9 @@ export class ReactionSystem {
                     'reaction.computed must return synchronously; move async work to reaction.action'
                 );
             }
+            if (this.disposed) return;
             const committed = await this.callbacks.setValue(field, computedValue, { reactionStack });
+            if (this.disposed) return;
             if (committed && reaction.action) {
                 await reaction.action({
                     ...dependentValues,
@@ -208,16 +216,18 @@ export class ReactionSystem {
                 });
             }
         } catch (error) {
-            this.handleReactionError(field, error as Error);
+            this.handleReactionError(field, error);
         }
     }
 
-    private handleReactionError(field: string, error: Error): void {
+    private handleReactionError(field: string, error: unknown): void {
+        if (this.disposed) return;
+        const originalError = error instanceof Error ? error : new Error(String(error));
         const modelError: ModelError = {
             code: 'reaction_error',
             field,
-            message: error.message,
-            originalError: error,
+            message: originalError.message,
+            originalError,
         };
         // Record the failure under the field the reaction computes, so it is
         // visible before subscribers receive the reaction error event.
@@ -230,6 +240,8 @@ export class ReactionSystem {
     }
 
     public dispose(): void {
+        if (this.disposed) return;
+        this.disposed = true;
         this.reactionTimeouts.forEach(({ timeoutId, endTask }) => {
             clearTimeout(timeoutId);
             endTask();

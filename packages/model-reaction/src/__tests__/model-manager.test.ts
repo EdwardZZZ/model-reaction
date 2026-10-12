@@ -1008,6 +1008,102 @@ describe('ModelManager - dispose / settled lifecycle', () => {
 
         model.dispose();
     });
+
+    test.each([
+        ['setFields', 0],
+        ['setFields', 5],
+        ['validateAll', 0],
+        ['validateAll', 5],
+        ['strict setFields', 0],
+    ] as const)(
+        'settled covers the whole %s batch and its actions (debounce %i)',
+        async (operation, debounceReactions) => {
+            let valid = true;
+            let releaseAction!: () => void;
+            let signalActionStarted!: () => void;
+            const actionGate = new Promise<void>((resolve) => {
+                releaseAction = resolve;
+            });
+            const actionStarted = new Promise<void>((resolve) => {
+                signalActionStarted = resolve;
+            });
+            const model = createModel({
+                source: {
+                    type: 'number',
+                    default: 0,
+                    validator: [{
+                        type: 'allowed',
+                        message: 'not allowed yet',
+                        validate: () => valid,
+                    }],
+                },
+                derived: {
+                    type: 'number',
+                    default: 0,
+                    reaction: {
+                        fields: ['source'],
+                        computed: ({ source }) => source * 2,
+                    },
+                },
+                final: {
+                    type: 'number',
+                    default: 0,
+                    reaction: {
+                        fields: ['derived'],
+                        computed: ({ derived }) => derived + 1,
+                        action: async ({ computed }) => {
+                            if (computed !== 3) return;
+                            signalActionStarted();
+                            await actionGate;
+                        },
+                    },
+                },
+            }, { debounceReactions, strictMode: true });
+            await model.settled();
+
+            if (operation === 'validateAll') {
+                valid = false;
+                await model.setField('source', 1);
+                valid = true;
+            }
+
+            const batch = operation === 'validateAll'
+                ? model.validateAll()
+                : operation === 'strict setFields'
+                    // @ts-expect-error exercise partial success with an unknown field
+                    ? model.setFields({ source: 1, missing: 1 })
+                    : model.setFields({ source: 1 });
+            // Observe the rejection immediately, even while waiting for actions.
+            const batchResult = batch.then(
+                (value) => value,
+                (error: unknown) => error
+            );
+            let idle = false;
+            const settled = model.settled().then(() => {
+                idle = true;
+                return model.data;
+            });
+
+            try {
+                await actionStarted;
+                expect(idle).toBe(false);
+                releaseAction();
+                expect(await settled).toEqual({
+                    source: 1, derived: 2, final: 3,
+                });
+                if (operation === 'strict setFields') {
+                    expect(await batchResult).toBeInstanceOf(Error);
+                } else {
+                    expect(await batchResult).toBe(true);
+                }
+            } finally {
+                releaseAction();
+                await batchResult;
+                await model.settled();
+                model.dispose();
+            }
+        }
+    );
 });
 
 describe('ModelManager - Direct (internal collaborators)', () => {

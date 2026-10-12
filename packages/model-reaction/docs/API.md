@@ -72,6 +72,10 @@ Replace the whole field value with `setField()` or `setFields()` when it changes
 The outer `data` and dirty-data records are shallow-frozen; field values
 themselves are not frozen.
 
+Replacement values are compared structurally for plain objects, arrays,
+`Date`, and `RegExp`. Other objects, including `Map`, `Set`, and class
+instances, are compared by reference: a new instance is treated as a change.
+
 ### Write
 
 | Method | Description |

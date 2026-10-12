@@ -14,6 +14,19 @@ function toDisplay<V>(value: V, format: (value: V) => string): string {
     return format(value);
 }
 
+function seedDraft<T extends Record<string, any>, K extends keyof T>(
+    model: ModelReturn<T>,
+    field: K,
+    committed: T[K],
+    display: (value: T[K]) => string
+): string {
+    const dirtyData = model.getDirtyData();
+    const value = Object.prototype.hasOwnProperty.call(dirtyData, field)
+        ? dirtyData[field]
+        : committed;
+    return display(value as T[K]);
+}
+
 /** What {@link useDraftField} hands back to a controlled input. */
 export interface DraftField<V> {
     /** Text shown in the input; updates on every keystroke regardless of validity. */
@@ -82,36 +95,25 @@ export function useDraftField<
     );
 
     // Seed on mount: pending dirty value if any, else committed value.
-    const [draft, setDraft] = useState(() => {
-        const dirtyData = model.getDirtyData() as Partial<T>;
-        const value = Object.prototype.hasOwnProperty.call(dirtyData, field)
-            ? dirtyData[field]
-            : committed;
-        return display(value as T[K]);
-    });
+    const [draft, setDraft] = useState(() => seedDraft(model, field, committed, display));
     const [touched, setTouched] = useState(false);
 
     // A model/field change starts a new editing session. Re-seed from that
     // field's pending value and clear UI-only state before tracking commits.
-    const identity = useRef({ model, field });
-    const lastCommitted = useRef(committed);
+    const previous = useRef({ model, field, committed });
     useEffect(() => {
-        if (identity.current.model !== model || identity.current.field !== field) {
-            identity.current = { model, field };
-            lastCommitted.current = committed;
-            const dirtyData = model.getDirtyData() as Partial<T>;
-            const value = Object.prototype.hasOwnProperty.call(dirtyData, field)
-                ? dirtyData[field]
-                : committed;
-            setDraft(display(value as T[K]));
+        const last = previous.current;
+        if (last.model !== model || last.field !== field) {
+            previous.current = { model, field, committed };
+            setDraft(seedDraft(model, field, committed, display));
             setTouched(false);
             return;
         }
 
         // Reflect outside-driven commits (a reaction, a setField elsewhere).
         // On mount the committed value matches, so the seeded draft survives.
-        if (Object.is(lastCommitted.current, committed)) return;
-        lastCommitted.current = committed;
+        if (Object.is(last.committed, committed)) return;
+        previous.current = { model, field, committed };
         setDraft(display(committed));
     }, [model, field, committed, display]);
 

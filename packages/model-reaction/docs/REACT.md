@@ -15,8 +15,6 @@ only when its watched slice actually changes.
 - [Controlled Inputs Under Strict / Async Validation](#controlled-inputs-under-strict--async-validation)
 - [Model Lifecycle in React](#model-lifecycle-in-react)
 - [`useModelSelector` vs `useModelComputed`](#usemodelselector-vs-usemodelcomputed)
-- [Decision Tree](#decision-tree)
-- [Performance Hot-spots](#performance-hot-spots)
 
 ---
 
@@ -357,115 +355,43 @@ with a `useEffect` cleanup — never to a module's top-level scope.
 
 ## `useModelSelector` vs `useModelComputed`
 
-Both hooks return a derived value with custom equality, but they treat
-the `selector` reference very differently:
+Both hooks select from committed `model.data`, default to `Object.is`, and
+cache snapshots. Their subscriptions handle selector identity differently:
 
 | Aspect | `useModelSelector` | `useModelComputed` |
 | --- | --- | --- |
-| Selector identity | Captured in the `subscribe` deps. A new reference triggers **unsubscribe + resubscribe + extra render**. | Stored in a ref refreshed every render. Reference changes are **free**. |
-| Recommended pattern | Wrap the selector in `useCallback` (or hoist it to module scope). | Inline arrow functions are fine. |
-| Per-render closure variables | Need to be added to `useCallback` deps (otherwise stale). | Always reflect the latest render automatically. |
-| Equality check site | Inside the model subscription — model can dedupe before reaching React. | Inside `getSnapshot` — model fans out every change, hook caches/dedupes per render. |
-| Selector cost | Runs once per **commit**. | Runs once per **render** (because `getSnapshot` is called on every render). |
-| Selector returning a **new reference each call** (default `Object.is`) | Safe — the snapshot only updates on model events, so `getSnapshot` returns a stable reference between commits. | ⚠️ **Infinite re-render.** `getSnapshot` recomputes a fresh reference every render and `Object.is` never matches → React aborts with *"Maximum update depth exceeded"*. You **must** pass a structural `isEqual` (e.g. the exported `shallow`). |
-| Best for | Stable, hot-path derived values where the selector body is fixed. | Selectors that depend on per-render variables (`id`, `index`, paging cursor, …) or short-lived components where ceremony matters more than per-render selector cost. |
+| Subscription dependencies | Model, selector, and equality function; changing any of them resubscribes. | Model only; changing the selector does not resubscribe. |
+| Recommended selector | Hoisted function or `useCallback` with complete dependencies. | Inline function, including closures over props such as `id` or `index`. |
+| Change filtering | Model subscription filters by equality; the snapshot getter also retains equivalent results. | Every field change notifies the hook; the snapshot getter filters by equality. |
+| Typical use | Reusable selectors or frequent updates where model-side filtering helps. | Selectors that depend on render values without managing `useCallback` dependencies. |
 
 ```tsx
-// useModelSelector — selector must be stable.
+// Keep the selector stable to avoid resubscribing.
 const selectTotal = useCallback((d: Cart) => d.qty * d.price, []);
 const total = useModelSelector(cart, selectTotal);
 
-// useModelComputed — inline arrow is fine, and `id` stays fresh.
+// The current render supplies `id`; no useCallback is needed.
 function Row({ id }: { id: string }) {
     const item = useModelComputed(cart, (d) => d.items[id]);
     return <span>{item?.name}</span>;
 }
 ```
 
-> ⚠️ **`useModelComputed` needs a stable snapshot.** If its selector returns a
-> fresh object/array on every call (`(d) => d.items.map(...)`, `(d) => ({...})`),
-> you **must** supply an `isEqual` — the exported `shallow` helper is the
-> usual choice. Without it, each render produces a new reference, the per-render
-> cache never hits, and React tears the component down with *"Maximum update
-> depth exceeded"*. Selectors returning a primitive or an already-stable
-> reference are unaffected. `useModelSelector` does **not** have this pitfall,
-> because its snapshot only changes when the model emits a `field:change`.
+Returning a new object or array does not itself cause an infinite render loop:
+both hooks cache the result for the same data snapshot and selector. Use
+`shallow` or a suitable custom equality function when equivalent results should
+keep the same reference after the model or selector changes:
 
-<details>
-<summary><strong>Why isn't <code>isEqual</code> defaulted to <code>shallow</code>?</strong></summary>
-
-Making `shallow` the default would only paper over part of the trap and is
-deliberately avoided:
-
-- **It fixes only flat selectors.** `shallow` compares one level deep, so
-  `(d) => ({ rows: d.items.map(...) })` still returns a fresh nested `rows`
-  reference each render and would keep looping. A default `shallow` turns a
-  reliable crash into an intermittent one — harder to diagnose than the
-  explicit requirement.
-- **It breaks symmetry.** `useModelSelector`, `useModelComputed`,
-  `model.subscribe`, and `subscribeField` all default to `Object.is`. Changing
-  one hook's default makes "same signature, different default" — less
-  predictable, not more.
-- **It diverges from the ecosystem.** react-redux `useSelector` and zustand
-  selectors default to reference equality; shallow comparison is always
-  opt-in (e.g. zustand's `useShallow`).
-
-The chosen trade-off is to keep `Object.is` and make the failure **visible**
-(this warning + the hook's JSDoc) rather than hide it behind a partial default.
-</details>
-
-Rule of thumb: prefer `useModelSelector` for "global" derivations, switch
-to `useModelComputed` whenever the selector closes over a value that
-changes between renders.
-
-## Decision Tree
-
-```
-1. Does the selector close over a value that changes between renders
-   (e.g. `id`, `index`, paging cursor, search keyword)?
-   ├── Yes → useModelComputed
-   │         (correctness: avoids stale closures without useCallback)
-   │         ⚠ if it also returns a fresh object/array, pass `isEqual`
-   │            (e.g. `shallow`) or it will loop on "Maximum update depth"
-   └── No  → continue ↓
-
-2. Is the selector body expensive
-   (deep map / aggregate / serialise / per-row diff)?
-   ├── Yes → useModelSelector + stable reference
-   │         (selector runs once per commit, not once per render)
-   └── No  → continue ↓
-
-3. Are you on a hot update path
-   (high-frequency field, large fan-out: many subscribers,
-    parent re-renders unrelated to this model)?
-   ├── Yes → useModelSelector + stable reference
-   │         (model-level isEqual prevents the change from entering
-   │          React scheduling at all)
-   └── No  → continue ↓
-
-4. Will the selector be reused across components?
-   ├── Yes → useModelSelector
-   │         (hoist a stable selector and share it)
-   └── No  → continue ↓
-
-5. Are you willing to wrap the selector in useCallback?
-   ├── Yes → useModelSelector
-   └── No  → useModelComputed
-             (convenience: stable subscription, no useCallback needed)
+```tsx
+const summary = useModelComputed(
+    cart,
+    (d) => ({ total: d.qty * d.price, count: Object.keys(d.items).length }),
+    shallow,
+);
 ```
 
-## Performance Hot-spots
-
-| Scenario | Why it matters | Pick |
-| --- | --- | --- |
-| 100+ list rows each subscribing to a derived value | `useModelComputed`'s selector runs **on every parent render** for every row | `useModelSelector` |
-| Expensive selector body (deep map / clone / aggregate) | `getSnapshot` is invoked every render and twice under concurrent / strict mode | `useModelSelector` |
-| High-frequency field (animation, mouse, debounce) feeding unrelated subscribers | Model-level `isEqual` keeps unrelated changes out of React scheduling | `useModelSelector` |
-| Selector closes over `id` / `index` / per-render variables | `useModelSelector` would either go stale or resubscribe every render | `useModelComputed` |
-| One-off prototype / short-lived component, light selector | The ceremony of `useCallback` outweighs the per-render `getSnapshot` cost | `useModelComputed` |
-| Selector reused across components | A hoisted selector avoids repeated closures and keeps one definition | `useModelSelector` |
-
-> One-liner: `useModelSelector` is the performance ceiling
-> (model-layer dedup, runs per **commit**); `useModelComputed` is the
-> convenience floor (render-layer dedup, runs per **render**). They are
-> **not** interchangeable. Selectors passed to either hook must remain pure.
+`shallow` compares one level; nested objects are compared by reference.
+Equality is opt-in and does not avoid computing the next result. Neither hook
+guarantees exactly one selector call per commit or render: subscriptions and
+snapshot reads can both evaluate it. Keep selectors pure, and measure expensive
+derivations before adding memoization.

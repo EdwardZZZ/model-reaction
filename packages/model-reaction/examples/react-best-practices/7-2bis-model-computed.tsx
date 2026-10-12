@@ -7,13 +7,8 @@
  *   - per-render closure variables (e.g. `id`) always reflect the latest
  *     render without resubscribing.
  *
- * Trade-off: the selector runs on every render (inside `getSnapshot`),
- * so keep it cheap.
- *
- * ⚠️ If the selector returns a *fresh* object/array each call, pair it with
- * a structural `isEqual` such as `shallow` (see example 3). Without it the
- * default `Object.is` never matches, the per-render cache never hits, and
- * React aborts with "Maximum update depth exceeded".
+ * Snapshots are cached. Use `shallow` when equivalent new containers should
+ * retain their reference across updates; see docs/REACT.md.
  */
 import * as React from 'react';
 void React;
@@ -46,9 +41,7 @@ export function Row({ id }: { id: string }) {
     return <span>{item?.name ?? '—'}</span>;
 }
 
-// 3. Selector that builds a *fresh* object each call. MUST pass `shallow`
-//    (or another structural `isEqual`) — otherwise the default `Object.is`
-//    sees a new reference every render and loops on "Maximum update depth".
+// 3. Shallow equality preserves equivalent summaries across model updates.
 export function Summary() {
     const { total, count } = useModelComputed(
         cart,

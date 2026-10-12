@@ -1,8 +1,6 @@
-import path from 'path';
 import resolve from '@rollup/plugin-node-resolve';
 import commonjs from '@rollup/plugin-commonjs';
 import typescript from '@rollup/plugin-typescript';
-import replace from '@rollup/plugin-replace';
 import terser from '@rollup/plugin-terser';
 
 const sharedPlugins = (declarationDir) => [
@@ -12,13 +10,6 @@ const sharedPlugins = (declarationDir) => [
     tsconfig: './tsconfig.build.json',
     declarationDir,
     compilerOptions: { module: 'esnext' },
-  }),
-  replace({
-    'process.env.NODE_ENV': JSON.stringify(process.env.NODE_ENV || 'development'),
-    preventAssignment: true,
-  }),
-  require('@rollup/plugin-alias')({
-    entries: [{ find: '@', replacement: path.resolve(__dirname, 'src') }],
   }),
 ];
 

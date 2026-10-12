@@ -64,6 +64,9 @@ createModel<S extends Record<string, FieldSchema>>(
 原地修改不会被观察，也不会触发校验、reactions 或订阅。值变化时请用 `setField()`
 或 `setFields()` 整体替换。`data` 和脏数据记录的外层对象会浅冻结，字段值本身不会被冻结。
 
+替换值为普通对象、数组、`Date` 或 `RegExp` 时按结构判等。`Map`、`Set` 和类实例等
+其他对象按引用判等：传入新的实例会被视为变化。
+
 ### 写入
 
 | 方法 | 说明 |

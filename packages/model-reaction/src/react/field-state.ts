@@ -135,41 +135,38 @@ export function useModelFieldState<
     );
 
     const [validationState, setValidationState] = useState(() => ({
-        model,
-        field,
+        session: { model, field },
         count: 0,
     }));
+    const { session } = validationState;
+    if (session.model !== model || session.field !== field) {
+        // React retries this render with a fresh session before committing.
+        // State keeps abandoned renders from changing the active session.
+        setValidationState({ session: { model, field }, count: 0 });
+    }
     const validating =
-        validationState.model === model &&
-        validationState.field === field &&
+        session.model === model &&
+        session.field === field &&
         validationState.count > 0;
 
     const setter = useCallback<FieldSetter<T[K]>>(
         async (next) => {
-            setValidationState((current) => ({
-                model,
-                field,
-                count:
-                    current.model === model && current.field === field
-                        ? current.count + 1
-                        : 1,
-            }));
+            setValidationState((current) =>
+                current.session === session
+                    ? { session, count: current.count + 1 }
+                    : current
+            );
             try {
                 return await model.setField(field, next);
             } finally {
-                setValidationState((current) => {
-                    if (current.model !== model || current.field !== field) {
-                        return current;
-                    }
-                    return {
-                        model,
-                        field,
-                        count: Math.max(0, current.count - 1),
-                    };
-                });
+                setValidationState((current) =>
+                    current.session === session
+                        ? { session, count: current.count - 1 }
+                        : current
+                );
             }
         },
-        [model, field]
+        [model, field, session]
     );
 
     const meta: FieldMeta = {
