@@ -251,6 +251,110 @@ describe('ModelManager - Batch Operations (setFields)', () => {
         expect(strictModel.getField('derived')).toBe(4);
         strictModel.dispose();
     });
+
+    test('transforms batch input once and revalidates the prepared values', async () => {
+        const transform = jest.fn((value: number) => value + 1);
+        const validate = jest.fn((value: number, data?: Record<string, any>) =>
+            value === data?.source
+        );
+        const local = createModel({
+            source: { type: 'number', default: 0, transform },
+            matching: {
+                type: 'number',
+                default: 0,
+                validator: [{
+                    type: 'matches',
+                    message: 'must match transformed source',
+                    validate,
+                }],
+            },
+        });
+
+        try {
+            expect(await local.setFields({ source: 1, matching: 2 })).toBe(true);
+            expect(await local.validateAll()).toBe(true);
+            expect(transform).toHaveBeenCalledTimes(1);
+            expect(validate).toHaveBeenCalledTimes(2);
+            expect(validate.mock.calls.map(([, data]) => data)).toEqual([
+                { source: 2, matching: 2 },
+                { source: 2, matching: 2 },
+            ]);
+            expect(local.data).toEqual({ source: 2, matching: 2 });
+        } finally {
+            local.dispose();
+        }
+    });
+
+    test('releases the batch task when a transform throws before validation', async () => {
+        const failure = new Error('cannot transform');
+        const local = createModel({
+            source: {
+                type: 'number',
+                default: 0,
+                transform: () => { throw failure; },
+            },
+        });
+
+        try {
+            await expect(local.setFields({ source: 1 })).rejects.toBe(failure);
+            await local.settled();
+            expect(local.data.source).toBe(0);
+        } finally {
+            local.dispose();
+        }
+    });
+
+    test.each(['setFields', 'validateAll'] as const)(
+        '%s returns after registering reactions while actions remain pending',
+        async (operation) => {
+            let valid = true;
+            let release!: () => void;
+            const actionGate = new Promise<void>((resolve) => { release = resolve; });
+            const action = jest.fn(() => actionGate);
+            const local = createModel({
+                source: {
+                    type: 'number',
+                    validator: [{
+                        type: 'allowed',
+                        message: 'not yet',
+                        validate: () => valid,
+                    }],
+                },
+                derived: {
+                    type: 'number',
+                    reaction: {
+                        fields: ['source'],
+                        computed: ({ source }) => source * 2,
+                        action,
+                    },
+                },
+            });
+
+            try {
+                if (operation === 'validateAll') {
+                    valid = false;
+                    expect(await local.setField('source', 2)).toBe(false);
+                    valid = true;
+                }
+                const result = operation === 'setFields'
+                    ? local.setFields({ source: 2 })
+                    : local.validateAll();
+                expect(await result).toBe(true);
+                let idle = false;
+                const settled = local.settled().then(() => { idle = true; });
+                await Promise.resolve();
+                expect(idle).toBe(false);
+                release();
+                await settled;
+                expect(action).toHaveBeenCalledTimes(1);
+                expect(local.data.derived).toBe(4);
+            } finally {
+                release();
+                await local.settled();
+                local.dispose();
+            }
+        }
+    );
 });
 
 describe('ModelManager - validateAll', () => {
@@ -1148,6 +1252,103 @@ describe('ModelManager - Direct (internal collaborators)', () => {
         expect(manager.validationErrors.field?.length).toBe(2);
         manager.dispose();
     });
+});
+
+describe('ModelManager - validation error ownership', () => {
+    test('stores each error before notifying and isolates event payloads from snapshots', async () => {
+        const local = createModel({
+            field: {
+                type: 'string',
+                default: 'valid',
+                validator: [
+                    {
+                        type: 'condition',
+                        message: 'unused',
+                        condition: () => { throw new Error('condition boom'); },
+                        validate: () => true,
+                    },
+                    { type: 'first', message: 'first failure', validate: () => false },
+                    { type: 'second', message: 'second failure', validate: async () => false },
+                ],
+            },
+        });
+        const initial = local.validationErrors;
+        const snapshots: typeof local.validationErrors[] = [];
+        local.on(ModelEvents.VALIDATION_ERROR, (error) => {
+            snapshots.push(local.validationErrors);
+            error.message = 'listener mutation';
+        });
+
+        try {
+            expect(await local.setField('field', 'invalid')).toBe(false);
+            expect(initial).toEqual({});
+            expect(snapshots.map((snapshot) => snapshot.field?.length)).toEqual([1, 2, 3]);
+            expect(snapshots[0]?.field?.[0]?.message).toBe(
+                'Validation condition failed: condition boom'
+            );
+            expect(local.validationErrors.field?.map((error) => error.message)).toEqual([
+                'Validation condition failed: condition boom',
+                'first failure',
+                'second failure',
+            ]);
+            expect(local.validationErrors).toBe(snapshots[2]);
+        } finally {
+            local.dispose();
+        }
+    });
+
+    test('an error listener can replace the request without recording later stale errors', async () => {
+        let replacement!: Promise<boolean>;
+        const local = createModel({
+            field: {
+                type: 'string',
+                default: 'initial',
+                validator: [
+                    { type: 'first', message: 'first failure', validate: (value) => value === 'new' },
+                    { type: 'second', message: 'second failure', validate: async (value) => value === 'new' },
+                ],
+            },
+        });
+        const errors = jest.fn(() => { replacement = local.setField('field', 'new'); });
+        local.on(ModelEvents.VALIDATION_ERROR, errors);
+
+        try {
+            expect(await local.setField('field', 'old')).toBe(false);
+            expect(await replacement).toBe(true);
+            expect(errors).toHaveBeenCalledTimes(1);
+            expect(local.validationErrors.field).toEqual([]);
+            expect(local.getDirtyData()).toEqual({});
+            expect(local.data.field).toBe('new');
+        } finally {
+            local.dispose();
+        }
+    });
+
+    test.each(['failure', 'rejection'] as const)(
+        'ignores a late validation %s after disposal',
+        async (outcome) => {
+            let resolve!: (value: boolean) => void;
+            let reject!: (error: Error) => void;
+            const gate = new Promise<boolean>((yes, no) => { resolve = yes; reject = no; });
+            const local = createModel({
+                field: {
+                    type: 'string',
+                    validator: [{ type: 'async', message: 'late', validate: () => gate }],
+                },
+            });
+            const errors = jest.fn();
+            local.on(ModelEvents.VALIDATION_ERROR, errors);
+            const request = local.setField('field', 'pending');
+            local.dispose();
+
+            if (outcome === 'failure') resolve(false);
+            else reject(new Error('late rejection'));
+            expect(await request).toBe(false);
+            expect(errors).not.toHaveBeenCalled();
+            expect(local.validationErrors).toEqual({});
+            expect(local.getDirtyData()).toEqual({});
+        }
+    );
 });
 
 // =============================================================================

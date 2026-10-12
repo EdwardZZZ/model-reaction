@@ -9,13 +9,13 @@ import {
  *
  * Supports both sync and async validators, optional cross-field `data`,
  * `condition` predicates, `failFast` short-circuit, and a per-request
- * `isCurrent()` race-guard so a stale validator can't pollute current errors.
+ * `isCurrent()` race-guard. Reports errors to the caller without owning or
+ * mutating the model's error store.
  */
 export async function validateField(
     options: {
         schema: FieldSchema;
         value: unknown;
-        errors: Record<string, ValidationError[]>;
         field: string;
         timeout?: number;
         failFast?: boolean;
@@ -27,7 +27,6 @@ export async function validateField(
     const {
         schema,
         value,
-        errors,
         field,
         timeout = 5000,
         failFast = false,
@@ -50,11 +49,10 @@ export async function validateField(
             conditionFailed = true;
             if (!isCurrent || isCurrent()) {
                 const detail = err instanceof Error ? err.message : String(err);
-                pushValidationError(
+                reportValidationError(
                     field,
                     'condition_error',
                     `Validation condition failed: ${detail}`,
-                    errors,
                     onError
                 );
             }
@@ -71,7 +69,6 @@ export async function validateField(
                 value,
                 field,
                 timeout,
-                errors,
                 ctxData,
                 isCurrent,
                 onError
@@ -89,7 +86,6 @@ export async function validateField(
                     value,
                     field,
                     timeout,
-                    errors,
                     ctxData,
                     isCurrent,
                     onError
@@ -107,7 +103,6 @@ async function runValidator(
     value: unknown,
     field: string,
     timeout: number,
-    errors: Record<string, ValidationError[]>,
     data: Record<string, any>,
     isCurrent?: () => boolean,
     onError?: (error: ValidationError) => void
@@ -121,22 +116,20 @@ async function runValidator(
         if (ok) return true;
 
         if (isCurrent && !isCurrent()) return false;
-        pushValidationError(
+        reportValidationError(
             field,
             validator.type,
             validator.message,
-            errors,
             onError
         );
         return false;
     } catch (err) {
         if (isCurrent && !isCurrent()) return false;
         const msg = err instanceof Error ? err.message : String(err);
-        pushValidationError(
+        reportValidationError(
             field,
             'validation_error',
             `Validation failed: ${msg}`,
-            errors,
             onError
         );
         return false;
@@ -165,15 +158,11 @@ async function raceTimeout(
     }
 }
 
-function pushValidationError(
+function reportValidationError(
     field: string,
     rule: string,
     message: string,
-    errors: Record<string, ValidationError[]>,
     onError?: (error: ValidationError) => void
 ): void {
-    if (!errors[field]) errors[field] = [];
-    const error = { field, rule, message };
-    errors[field].push(error);
-    onError?.({ ...error });
+    onError?.({ field, rule, message });
 }

@@ -62,14 +62,7 @@ export class ModelManager<
                 getValue: (field) => this.getField(field as keyof T),
                 setValue: (field, value, opts) =>
                     this.updateField(field, value, opts),
-                setError: (field, error) => {
-                    if (this.disposed) return;
-                    if (!this.errors[field]) {
-                        this.errors[field] = [];
-                    }
-                    this.errors[field].push(error);
-                    this.errorsSnapshot = null;
-                },
+                setError: (field, error) => this.recordError(field, error),
                 reportError: (event, error) =>
                     this.emit(event, error),
             },
@@ -154,10 +147,7 @@ export class ModelManager<
     };
 
     setFields = async (fields: Partial<T>): Promise<boolean> => {
-        this.ensureNotDisposed();
-        // Hold the batch until its follow-up reactions have been registered.
-        const endBatch = this.pendingTasks.begin();
-        try {
+        return this.runBatch((options) => {
             const entries = Object.entries(fields);
             const prepared = entries.map(([field, value]) => {
                 const schema = this.schema[field];
@@ -173,21 +163,18 @@ export class ModelManager<
             prepared.forEach(({ field, schema, value }) => {
                 if (schema) validationData[field] = value;
             });
-            // Collect only fields whose committed value actually changed.
-            const changedFields = new Set<string>();
-            const options: CommitOptions = {
-                suppressReactions: true,
-                changedFields,
+            const commitOptions: CommitOptions = {
+                ...options,
                 validationData,
             };
-            const results = await Promise.allSettled(
+            return Promise.allSettled(
                 prepared.map(({ field, schema, value }) =>
                     schema
-                        ? this.validateAndCommit(field, schema, value, options)
-                        : this.updateField(field, value, options)
+                        ? this.validateAndCommit(field, schema, value, commitOptions)
+                        : this.updateField(field, value, commitOptions)
                 )
             );
-            this.reactionSystem.triggerReactionsForFields([...changedFields]);
+        }, (results) => {
             const rejection = results.find(
                 (result): result is PromiseRejectedResult =>
                     result.status === 'rejected'
@@ -197,41 +184,50 @@ export class ModelManager<
             return results.every(
                 (result) => result.status === 'fulfilled' && result.value
             );
-        } finally {
-            endBatch();
-        }
+        });
     };
 
     validateAll = async (): Promise<boolean> => {
-        this.ensureNotDisposed();
-        const endBatch = this.pendingTasks.begin();
-        try {
+        return this.runBatch((options) => {
             const fields = Object.keys(this.schema);
-            const changedFields = new Set<string>();
             const validationData = {
                 ...(this.modelData as Record<string, any>),
                 ...(this.dirtyData as Record<string, any>),
             };
-            const results = await Promise.all(
-                fields.map((field) =>
-                    this.revalidateField(field, {
-                        suppressReactions: true,
-                        changedFields,
-                        validationData,
-                    })
-                )
+            const commitOptions: CommitOptions = { ...options, validationData };
+            return Promise.all(
+                fields.map((field) => this.revalidateField(field, commitOptions))
             );
+        }, (results) => {
             const allValid = results.every(Boolean);
-
-            // Single batched reaction trigger for fields that actually committed.
-            this.reactionSystem.triggerReactionsForFields([...changedFields]);
-
             this.emit(ModelEvents.VALIDATION_COMPLETE, { isValid: allValid });
             return allValid;
+        });
+    };
+
+    /**
+     * Hold a batch through validation, reaction registration, and completion.
+     * Callers choose their promise aggregation and result handling; only actual
+     * committed changes enter the shared reaction pass.
+     */
+    private async runBatch<R>(
+        validate: (options: CommitOptions) => Promise<R>,
+        complete: (results: R) => boolean
+    ): Promise<boolean> {
+        this.ensureNotDisposed();
+        const endBatch = this.pendingTasks.begin();
+        const changedFields = new Set<string>();
+        try {
+            const results = await validate({
+                suppressReactions: true,
+                changedFields,
+            });
+            this.reactionSystem.triggerReactionsForFields([...changedFields]);
+            return complete(results);
         } finally {
             endBatch();
         }
-    };
+    }
 
     // -------------------------------------------------------------------------
     // Selector / field subscriptions (UI binding layer)
@@ -439,6 +435,14 @@ export class ModelManager<
         }
     }
 
+    /** Store an error before its owner emits the corresponding typed event. */
+    private recordError(field: string, error: ValidationError): void {
+        if (this.disposed) return;
+        if (!this.errors[field]) this.errors[field] = [];
+        this.errors[field].push({ ...error });
+        this.errorsSnapshot = null;
+    }
+
     private runValidators(
         schema: FieldSchema,
         value: unknown,
@@ -446,20 +450,22 @@ export class ModelManager<
         requestId: number,
         validationData?: Record<string, any>
     ): Promise<boolean> {
+        const isCurrent = () =>
+            !this.disposed && this.validationRequestIds[field] === requestId;
         return validateField({
             schema,
             value,
-            errors: this.errors,
             field,
             timeout: this.asyncValidationTimeout,
             failFast: this.options.failFast ?? false,
             data: {
                 ...(validationData ?? (this.modelData as Record<string, any>)),
             },
-            isCurrent: () => this.validationRequestIds[field] === requestId,
+            isCurrent,
             onError: (error) => {
-                this.errorsSnapshot = null;
-                this.emit(ModelEvents.VALIDATION_ERROR, error);
+                if (!isCurrent()) return;
+                this.recordError(field, error);
+                this.emit(ModelEvents.VALIDATION_ERROR, { ...error });
             },
         });
     }

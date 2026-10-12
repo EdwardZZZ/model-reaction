@@ -1,5 +1,5 @@
 import { validateField } from '../validation/validate-field';
-import { FieldSchema } from '../types';
+import { FieldSchema, ValidationError } from '../types';
 import { Rule, ValidationRules } from '../validation/rules';
 import { createModel, Model } from '../index';
 import { runInNewContext } from 'vm';
@@ -15,21 +15,22 @@ describe('validateField (unit)', () => {
 
     test('returns true when schema has no validators', async () => {
         const schema: FieldSchema = { type: 'string' };
-        const errors: Record<string, any[]> = {};
+        const onError = jest.fn();
 
         const result = await validateField({
             schema,
             value: 'value',
-            errors,
+            onError,
             field: 'testField',
             timeout: 1000,
         });
 
         expect(result).toBe(true);
+        expect(onError).not.toHaveBeenCalled();
     });
 
     test('skips validators that lack a validate method', async () => {
-        const errors: Record<string, any[]> = {};
+        const onError = jest.fn();
         const schema: FieldSchema = {
             type: 'string',
             validator: [
@@ -45,16 +46,16 @@ describe('validateField (unit)', () => {
         const result = await validateField({
             schema,
             value: 'value',
-            errors,
+            onError,
             field: 'testField',
             timeout: 1000,
         });
         expect(result).toBe(true);
+        expect(onError).not.toHaveBeenCalled();
     });
 
     test('catches synchronous validator throwing an Error', async () => {
         const onError = jest.fn();
-        const errors: Record<string, any[]> = {};
 
         const schema: FieldSchema = {
             type: 'string',
@@ -72,20 +73,22 @@ describe('validateField (unit)', () => {
         const result = await validateField({
             schema,
             value: 'value',
-            errors,
             field: 'testField',
             timeout: 1000,
             onError,
         });
 
         expect(result).toBe(false);
-        expect(errors.testField?.[0]?.rule).toBe('validation_error');
-        expect(errors.testField?.[0]?.message).toContain('Validation failed: sync boom');
-        expect(onError).toHaveBeenCalledWith(errors.testField?.[0]);
+        expect(onError).toHaveBeenCalledTimes(1);
+        expect(onError).toHaveBeenCalledWith({
+            field: 'testField',
+            rule: 'validation_error',
+            message: 'Validation failed: sync boom',
+        });
     });
 
     test('catches synchronous validator throwing a non-Error value', async () => {
-        const errors: Record<string, any[]> = {};
+        const onError = jest.fn();
         const schema: FieldSchema = {
             type: 'string',
             validator: [
@@ -102,19 +105,21 @@ describe('validateField (unit)', () => {
         const result = await validateField({
             schema,
             value: 'value',
-            errors,
+            onError,
             field: 'testField',
             timeout: 1000,
         });
 
         expect(result).toBe(false);
-        expect(errors.testField?.[0]?.message).toContain(
-            'Validation failed: sync string'
-        );
+        expect(onError).toHaveBeenCalledWith({
+            field: 'testField',
+            rule: 'validation_error',
+            message: 'Validation failed: sync string',
+        });
     });
 
     test('catches async validator rejection with non-Error value', async () => {
-        const errors: Record<string, any[]> = {};
+        const onError = jest.fn();
         const schema: FieldSchema = {
             type: 'string',
             validator: [
@@ -129,19 +134,21 @@ describe('validateField (unit)', () => {
         const result = await validateField({
             schema,
             value: 'value',
-            errors,
+            onError,
             field: 'testField',
             timeout: 1000,
         });
 
         expect(result).toBe(false);
-        expect(errors.testField?.[0]?.message).toContain(
-            'Validation failed: async string'
-        );
+        expect(onError).toHaveBeenCalledWith({
+            field: 'testField',
+            rule: 'validation_error',
+            message: 'Validation failed: async string',
+        });
     });
 
     test('awaits a Promise returned from another realm', async () => {
-        const errors: Record<string, any[]> = {};
+        const onError = jest.fn();
         const crossRealmResult = runInNewContext(
             'Promise.resolve(false)'
         ) as Promise<boolean>;
@@ -159,28 +166,49 @@ describe('validateField (unit)', () => {
         const result = await validateField({
             schema,
             value: 'value',
-            errors,
+            onError,
             field: 'testField',
             timeout: 1000,
         });
 
         expect(result).toBe(false);
-        expect(errors.testField).toEqual([
-            {
-                field: 'testField',
-                rule: 'cross-realm',
-                message: 'cross-realm failure',
-            },
+        expect(onError).toHaveBeenCalledWith({
+            field: 'testField',
+            rule: 'cross-realm',
+            message: 'cross-realm failure',
+        });
+    });
+
+    test('leaves collection and storage of reported errors to the caller', async () => {
+        const errors: ValidationError[] = [
+            { field: 'testField', rule: 'existing', message: 'existing' },
+        ];
+        const onError = jest.fn((error: ValidationError) => errors.push(error));
+
+        const schema: FieldSchema = {
+            type: 'string',
+            validator: [
+                { type: 'required', message: 'required', validate: () => false },
+            ],
+        };
+
+        const result = await validateField({
+            schema,
+            value: '',
+            onError,
+            field: 'testField',
+            timeout: 1000,
+        });
+
+        expect(result).toBe(false);
+        expect(onError).toHaveBeenCalledTimes(1);
+        expect(errors).toEqual([
+            { field: 'testField', rule: 'existing', message: 'existing' },
+            { field: 'testField', rule: 'required', message: 'required' },
         ]);
     });
 
-    test('reuses existing error array for validation failures', async () => {
-        const errors: Record<string, any[]> = {
-            testField: [
-                { field: 'testField', rule: 'existing', message: 'existing' },
-            ],
-        };
-
+    test('returns false without an error reporter when validation fails', async () => {
         const schema: FieldSchema = {
             type: 'string',
             validator: [
@@ -191,39 +219,15 @@ describe('validateField (unit)', () => {
         const result = await validateField({
             schema,
             value: '',
-            errors,
             field: 'testField',
             timeout: 1000,
         });
 
         expect(result).toBe(false);
-        expect(errors.testField?.length).toBe(2);
-        expect(errors.testField?.[0]?.rule).toBe('existing');
-    });
-
-    test('initialises error array when validation fails', async () => {
-        const errors: Record<string, any[]> = {};
-        const schema: FieldSchema = {
-            type: 'string',
-            validator: [
-                { type: 'required', message: 'required', validate: () => false },
-            ],
-        };
-
-        const result = await validateField({
-            schema,
-            value: '',
-            errors,
-            field: 'testField',
-            timeout: 1000,
-        });
-
-        expect(result).toBe(false);
-        expect(errors.testField?.length).toBe(1);
     });
 
     test('uses default timeout / failFast when not provided', async () => {
-        const errors: Record<string, any[]> = {};
+        const onError = jest.fn();
         const schema: FieldSchema = {
             type: 'string',
             validator: [{ type: 'ok', message: 'ok', validate: () => true }],
@@ -232,16 +236,16 @@ describe('validateField (unit)', () => {
         const result = await validateField({
             schema,
             value: 'value',
-            errors,
+            onError,
             field: 'testField',
         });
 
         expect(result).toBe(true);
-        expect(errors.testField).toBeUndefined();
+        expect(onError).not.toHaveBeenCalled();
     });
 
     test('async validator that exceeds timeout records timeout error', async () => {
-        const errors: Record<string, any[]> = {};
+        const onError = jest.fn();
         const schema: FieldSchema = {
             type: 'string',
             validator: [
@@ -256,17 +260,21 @@ describe('validateField (unit)', () => {
         const result = await validateField({
             schema,
             value: 'v',
-            errors,
+            onError,
             field: 'f',
             timeout: 20,
         });
 
         expect(result).toBe(false);
-        expect(errors.f?.[0]?.message).toContain('Validation timeout');
+        expect(onError).toHaveBeenCalledWith({
+            field: 'f',
+            rule: 'validation_error',
+            message: 'Validation failed: Validation timeout: f',
+        });
     });
 
     test('isCurrent guard suppresses stale sync failures', async () => {
-        const errors: Record<string, any[]> = {};
+        const onError = jest.fn();
         const schema: FieldSchema = {
             type: 'string',
             validator: [
@@ -277,18 +285,17 @@ describe('validateField (unit)', () => {
         const result = await validateField({
             schema,
             value: 'v',
-            errors,
+            onError,
             field: 'f',
             isCurrent: () => false,
         });
 
         expect(result).toBe(false);
-        // No error should have been pushed because the request is stale.
-        expect(errors.f).toBeUndefined();
+        expect(onError).not.toHaveBeenCalled();
     });
 
     test('isCurrent guard suppresses stale async failures', async () => {
-        const errors: Record<string, any[]> = {};
+        const onError = jest.fn();
         const schema: FieldSchema = {
             type: 'string',
             validator: [
@@ -303,19 +310,19 @@ describe('validateField (unit)', () => {
         const result = await validateField({
             schema,
             value: 'v',
-            errors,
+            onError,
             field: 'f',
             isCurrent: () => false,
         });
 
         expect(result).toBe(false);
-        expect(errors.f).toBeUndefined();
+        expect(onError).not.toHaveBeenCalled();
     });
 
     test('isCurrent guard suppresses stale async *rejections*', async () => {
         // Distinct from the "returns false" case above: here the async
         // validator throws, exercising the catch branch's stale-request guard.
-        const errors: Record<string, any[]> = {};
+        const onError = jest.fn();
         const schema: FieldSchema = {
             type: 'string',
             validator: [
@@ -332,20 +339,19 @@ describe('validateField (unit)', () => {
         const result = await validateField({
             schema,
             value: 'v',
-            errors,
+            onError,
             field: 'f',
             isCurrent: () => false,
         });
 
         expect(result).toBe(false);
-        // Stale request → the rejection must be swallowed, no error recorded.
-        expect(errors.f).toBeUndefined();
+        expect(onError).not.toHaveBeenCalled();
     });
 
     test('records async rejection error when the request is still current', async () => {
         // Complements the stale-guard test: with isCurrent true (the default),
         // a rejection is turned into a recorded validation error.
-        const errors: Record<string, any[]> = {};
+        const onError = jest.fn();
         const schema: FieldSchema = {
             type: 'string',
             validator: [
@@ -362,13 +368,17 @@ describe('validateField (unit)', () => {
         const result = await validateField({
             schema,
             value: 'v',
-            errors,
+            onError,
             field: 'f',
             isCurrent: () => true,
         });
 
         expect(result).toBe(false);
-        expect(errors.f?.[0]?.message).toContain('network down');
+        expect(onError).toHaveBeenCalledWith({
+            field: 'f',
+            rule: 'validation_error',
+            message: 'Validation failed: network down',
+        });
     });
 
     test('passes cross-field data to validator', async () => {
@@ -390,7 +400,6 @@ describe('validateField (unit)', () => {
         await validateField({
             schema,
             value: 'v',
-            errors: {},
             field: 'f',
             data: { other: 'value' },
         });
@@ -399,7 +408,7 @@ describe('validateField (unit)', () => {
     });
 
     test('skips validators whose condition returns false', async () => {
-        const errors: Record<string, any[]> = {};
+        const onError = jest.fn();
         const schema: FieldSchema = {
             type: 'string',
             validator: [
@@ -414,11 +423,119 @@ describe('validateField (unit)', () => {
         const result = await validateField({
             schema,
             value: 'v',
-            errors,
+            onError,
             field: 'f',
         });
         expect(result).toBe(true);
-        expect(errors.f).toBeUndefined();
+        expect(onError).not.toHaveBeenCalled();
+    });
+
+    test('filters all conditions before running applicable validators', async () => {
+        const order: string[] = [];
+        const onError = jest.fn();
+        const result = await validateField({
+            schema: {
+                type: 'string',
+                validator: [
+                    {
+                        type: 'applicable',
+                        message: 'failure',
+                        condition: () => { order.push('first condition'); return true; },
+                        validate: () => { order.push('validate'); return false; },
+                    },
+                    {
+                        type: 'broken condition',
+                        message: 'unused',
+                        condition: () => { order.push('second condition'); throw new Error('boom'); },
+                        validate: () => { throw new Error('must not run'); },
+                    },
+                ],
+            },
+            field: 'f',
+            value: 'v',
+            onError,
+        });
+
+        expect(result).toBe(false);
+        expect(order).toEqual(['first condition', 'second condition', 'validate']);
+        expect(onError.mock.calls.map(([error]) => error.rule)).toEqual([
+            'condition_error', 'applicable',
+        ]);
+    });
+
+    test.each([false, true])(
+        'a failed condition stops failFast validation without reporting stale errors (current: %s)',
+        async (current) => {
+            const validate = jest.fn(() => false);
+            const onError = jest.fn();
+            const result = await validateField({
+                schema: {
+                    type: 'string',
+                    validator: [
+                        { type: 'first', message: 'first', validate },
+                        {
+                            type: 'condition',
+                            message: 'unused',
+                            condition: () => { throw new Error('boom'); },
+                            validate,
+                        },
+                    ],
+                },
+                field: 'f',
+                value: 'v',
+                failFast: true,
+                isCurrent: () => current,
+                onError,
+            });
+
+            expect(result).toBe(false);
+            expect(validate).not.toHaveBeenCalled();
+            expect(onError).toHaveBeenCalledTimes(current ? 1 : 0);
+            if (current) {
+                expect(onError).toHaveBeenCalledWith({
+                    field: 'f',
+                    rule: 'condition_error',
+                    message: 'Validation condition failed: boom',
+                });
+            }
+        }
+    );
+
+    test('runs validators concurrently and reports errors in completion order', async () => {
+        let release!: (value: boolean) => void;
+        let signalFast!: () => void;
+        const slow = new Promise<boolean>((resolve) => { release = resolve; });
+        const fastReported = new Promise<void>((resolve) => { signalFast = resolve; });
+        const onError = jest.fn((error: ValidationError) => {
+            if (error.rule === 'fast') signalFast();
+        });
+        const validateSlow = jest.fn(() => slow);
+        const validateFast = jest.fn(() => false);
+        const result = validateField({
+            schema: {
+                type: 'string',
+                validator: [
+                    { type: 'slow', message: 'slow', validate: validateSlow },
+                    { type: 'fast', message: 'fast', validate: validateFast },
+                ],
+            },
+            field: 'f',
+            value: 'v',
+            onError,
+        });
+
+        try {
+            expect(validateSlow).toHaveBeenCalledTimes(1);
+            expect(validateFast).toHaveBeenCalledTimes(1);
+            await fastReported;
+            expect(onError.mock.calls.map(([error]) => error.rule)).toEqual(['fast']);
+            release(false);
+            expect(await result).toBe(false);
+            expect(onError.mock.calls.map(([error]) => error.rule)).toEqual(['fast', 'slow']);
+        } finally {
+            release(false);
+            await result;
+        }
     });
 
     describe('failFast strategy', () => {

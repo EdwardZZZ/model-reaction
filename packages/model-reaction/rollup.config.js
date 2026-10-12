@@ -3,18 +3,21 @@ import commonjs from '@rollup/plugin-commonjs';
 import typescript from '@rollup/plugin-typescript';
 import terser from '@rollup/plugin-terser';
 
-const sharedPlugins = (declarationDir) => [
+const sharedPlugins = (emitDeclarations = false) => [
   resolve({ browser: true, preferBuiltins: false }),
   commonjs({ include: /node_modules/ }),
   typescript({
     tsconfig: './tsconfig.build.json',
-    declarationDir,
-    compilerOptions: { module: 'esnext' },
+    compilerOptions: {
+      module: 'esnext',
+      declaration: emitDeclarations,
+      ...(emitDeclarations ? { declarationDir: 'dist/types' } : {}),
+    },
   }),
 ];
 
 export default [
-  // Core entry
+  // Core entry emits declarations once for every source in the build tsconfig.
   {
     input: 'src/index.ts',
     output: [
@@ -28,7 +31,7 @@ export default [
         plugins: [terser()],
       },
     ],
-    plugins: sharedPlugins('dist/types'),
+    plugins: sharedPlugins(true),
   },
   // React adapter (peer dependency on react)
   {
@@ -38,7 +41,7 @@ export default [
       { file: 'dist/react.mjs', format: 'esm', sourcemap: true },
       { file: 'dist/react.cjs.js', format: 'cjs', sourcemap: true },
     ],
-    plugins: sharedPlugins('dist/types'),
+    plugins: sharedPlugins(),
   },
   // DevTools-enabled entry (opt-in via `model-reaction/devtools`).
   {
@@ -47,6 +50,6 @@ export default [
       { file: 'dist/devtools.mjs', format: 'esm', sourcemap: true },
       { file: 'dist/devtools.cjs.js', format: 'cjs', sourcemap: true },
     ],
-    plugins: sharedPlugins('dist/types'),
+    plugins: sharedPlugins(),
   },
 ];
