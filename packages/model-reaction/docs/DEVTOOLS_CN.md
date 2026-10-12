@@ -61,7 +61,7 @@ background.js   （MV3 service worker，按 tab 路由）
 panel           （React UI：数据树 · 依赖关系图 · 时间线）
 ```
 
-按需开启的包装入口见 [src/devtools.ts](../src/devtools.ts)，其 hook 契约见
+按需开启的包装入口见 [src/devtools/index.ts](../src/devtools/index.ts)，其 hook 契约见
 [src/devtools/devtools-hook.ts](../src/devtools/devtools-hook.ts)；扩展位于
 [packages/devtools](../../devtools)。包根（`model-reaction`）不引用 DevTools
 集成代码。

@@ -65,7 +65,7 @@ background.js   (MV3 service worker, routes by tab)
 panel           (React UI: data tree · dependency graph · timeline)
 ```
 
-The opt-in wrapper lives in [src/devtools.ts](../src/devtools.ts), and its hook
+The opt-in wrapper lives in [src/devtools/index.ts](../src/devtools/index.ts), and its hook
 contract lives in
 [src/devtools/devtools-hook.ts](../src/devtools/devtools-hook.ts). The extension
 lives under [packages/devtools](../../devtools). The package root

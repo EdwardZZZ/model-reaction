@@ -12,18 +12,18 @@
       "default": "./dist/index.js"
     },
     "./validation": {
-      "types": "./dist/types/validation.d.ts",
+      "types": "./dist/types/validation/index.d.ts",
       "import": "./dist/validation.mjs",
       "require": "./dist/validation.cjs.js",
       "default": "./dist/validation.js"
     },
     "./react": {
-      "types": "./dist/types/react.d.ts",
+      "types": "./dist/types/react/index.d.ts",
       "import": "./dist/react.mjs",
       "require": "./dist/react.cjs.js"
     },
     "./devtools": {
-      "types": "./dist/types/devtools.d.ts",
+      "types": "./dist/types/devtools/index.d.ts",
       "import": "./dist/devtools.mjs",
       "require": "./dist/devtools.cjs.js"
     }

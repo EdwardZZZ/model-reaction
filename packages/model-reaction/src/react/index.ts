@@ -14,18 +14,18 @@ export {
     useModelSelector,
     useModelComputed,
     useModelFields,
-} from './react/selectors';
+} from './selectors';
 export {
     useModelField,
     useModelFieldState,
     type FieldMeta,
     type FieldSetter,
-} from './react/field-state';
+} from './field-state';
 export {
     useDraftField,
     type DraftField,
     type UseDraftFieldOptions,
-} from './react/draft-field';
+} from './draft-field';
 export {
     ModelProvider,
     useModel,
@@ -33,4 +33,4 @@ export {
     type ModelProviderProps,
     type FieldProps,
     type FieldRenderProps,
-} from './react/context';
+} from './context';

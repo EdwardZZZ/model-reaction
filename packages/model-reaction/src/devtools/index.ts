@@ -19,20 +19,20 @@
  * (`data` / `getDirtyData()` / `validationErrors` / `on`) plus the schema it was
  * handed, so it needs no privileged access to `ModelManager` internals.
  */
-import { createModel as baseCreateModel } from './index';
+import { createModel as baseCreateModel } from '../index';
 import type {
     FieldSchema,
     Model,
     ModelOptions,
     ModelReturn,
-} from './types';
-import { ModelEvents } from './types';
+} from '../types';
+import { ModelEvents } from '../types';
 import {
     attachToDevtools,
     buildDependencyGraph,
     buildFieldInfo,
     getDevtoolsHook,
-} from './devtools/devtools-hook';
+} from './devtools-hook';
 
 export const createModel: typeof baseCreateModel = (
     schema: Record<string, FieldSchema>,

@@ -35,7 +35,7 @@ export default [
   },
   // Optional rule builders and error formatting; no core runtime dependency.
   {
-    input: 'src/validation.ts',
+    input: 'src/validation/index.ts',
     output: [
       { file: 'dist/validation.mjs', format: 'esm', sourcemap: true },
       { file: 'dist/validation.cjs.js', format: 'cjs', sourcemap: true },
@@ -51,7 +51,7 @@ export default [
   },
   // React adapter (peer dependency on react)
   {
-    input: 'src/react.ts',
+    input: 'src/react/index.ts',
     external: ['react'],
     output: [
       { file: 'dist/react.mjs', format: 'esm', sourcemap: true },
@@ -61,7 +61,7 @@ export default [
   },
   // DevTools-enabled entry (opt-in via `model-reaction/devtools`).
   {
-    input: 'src/devtools.ts',
+    input: 'src/devtools/index.ts',
     output: [
       { file: 'dist/devtools.mjs', format: 'esm', sourcemap: true },
       { file: 'dist/devtools.cjs.js', format: 'cjs', sourcemap: true },

@@ -14,9 +14,9 @@ export default defineConfig({
     plugins: [react()],
     resolve: {
         alias: {
-            'model-reaction/devtools': lib('devtools.ts'),
-            'model-reaction/react': lib('react.ts'),
-            'model-reaction/validation': lib('validation.ts'),
+            'model-reaction/devtools': lib('devtools/index.ts'),
+            'model-reaction/react': lib('react/index.ts'),
+            'model-reaction/validation': lib('validation/index.ts'),
             'model-reaction': lib('index.ts'),
         },
     },
