@@ -84,10 +84,6 @@ export class ReactionSystem {
         });
     }
 
-    public triggerReactions(changedField: string, reactionStack: string[] = []): void {
-        this.triggerReactionsForFields([changedField], reactionStack);
-    }
-
     public triggerReactionsForFields(
         changedFields: string[],
         reactionStack: string[] = []

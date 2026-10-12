@@ -5,7 +5,12 @@ const require = createRequire(import.meta.url);
 const entries = [
   ['model-reaction', 'createModel', 'function'],
   ['model-reaction', 'SKIP_REACTION', 'symbol'],
+  ['model-reaction/validation', 'Rule', 'function'],
+  ['model-reaction/validation', 'ValidationRules', 'object'],
+  ['model-reaction/validation', 'formatValidationErrors', 'function'],
   ['model-reaction/react', 'useDraftField', 'function'],
+  ['model-reaction/react', 'useModelSelector', 'function'],
+  ['model-reaction/react', 'useModelComputed', 'function'],
   ['model-reaction/react', 'useModelFieldState', 'function'],
   ['model-reaction/devtools', 'createModel', 'function'],
 ];
@@ -22,6 +27,27 @@ const esmRoot = await import('model-reaction');
 const cjsRoot = require('model-reaction');
 const esmDevtools = await import('model-reaction/devtools');
 const cjsDevtools = require('model-reaction/devtools');
+
+for (const entry of [esmRoot, cjsRoot, esmDevtools, cjsDevtools]) {
+  for (const name of ['Rule', 'ValidationRules', 'formatValidationErrors']) {
+    assert.equal(name in entry, false, `${name} is available only via validation`);
+  }
+  const model = entry.createModel({ value: { type: 'string', default: '' } });
+  assert.equal('subscribeField' in model, false, 'removed field subscription API');
+  model.dispose();
+}
+for (const entry of [await import('model-reaction/validation'), require('model-reaction/validation')]) {
+  const model = esmRoot.createModel({
+    value: {
+      type: 'string',
+      default: 'valid',
+      validator: [entry.ValidationRules.required.withMessage('required')],
+    },
+  });
+  assert.equal(await model.setField('value', ''), false, 'validation helpers compose with core');
+  assert.equal(entry.formatValidationErrors(model.validationErrors), 'value: required');
+  model.dispose();
+}
 
 assert.equal(
   esmRoot.SKIP_REACTION,

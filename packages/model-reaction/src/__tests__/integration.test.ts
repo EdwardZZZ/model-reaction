@@ -22,13 +22,8 @@
  */
 import * as fs from 'fs';
 import * as path from 'path';
-import {
-    createModel,
-    formatValidationErrors,
-    ModelEvents,
-    ValidationRules,
-    Rule,
-} from '../index';
+import { createModel, ModelEvents } from '../index';
+import { formatValidationErrors, ValidationRules, Rule } from '../validation';
 import type { ModelReturn } from '../types';
 
 const repoRoot = path.resolve(__dirname, '../..');

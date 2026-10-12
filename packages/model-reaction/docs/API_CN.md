@@ -16,6 +16,7 @@
 - [验证规则](#验证规则)
 - [错误格式化](#错误格式化)
 - [类型定义](#类型定义)
+- [API 精简迁移](#api-精简迁移unreleased)
 
 ---
 
@@ -59,6 +60,9 @@ createModel<S extends Record<string, FieldSchema>>(
 | `getField(field)` | 读取某个字段的当前值 |
 | `get data` | 读取字段映射的稳定浅冻结副本；没有默认值的字段可能为 `undefined` |
 | `get validationErrors` | 读取按字段分组的只读验证错误 |
+
+错误快照会保留读取时的结果。每个字段的冻结错误数组在该字段的错误被清空或替换前
+保持引用稳定；其他字段更新不会重新创建它。
 
 本库只支持浅层数据，按字段替换跟踪变化。对象、数组和 Date 等可变内建对象字段值对模型来说是整体：
 原地修改不会被观察，也不会触发校验、reactions 或订阅。值变化时请用 `setField()`
@@ -129,28 +133,21 @@ reaction 决定；如果它校验失败，结果会进入 `dirtyData`，不会�
 
 | 方法 | 说明 |
 | --- | --- |
-| `subscribeField(field, callback)` | 订阅单个字段变化，返回取消订阅函数 |
-| `subscribe(selector, callback, isEqual?)` | 订阅派生值；默认使用 `Object.is` 比较，返回取消订阅函数 |
-| `on(event, callback)` | 订阅模型事件（见 [事件](#事件)）。返回取消订阅函数，与 `subscribe` / `subscribeField` 一致 |
+| `subscribe(selector, callback, isEqual?)` | 观察选中值；默认使用 `Object.is` 比较，回调收到 `(next, prev)`，返回取消订阅函数 |
+| `on(event, callback)` | 按事件名观察类型化 payload，包括错误、校验和字段变更事件；返回取消订阅函数 |
 
-#### 两个层级：事件 vs. 数据订阅
+单字段与派生值共用 `subscribe`：
 
-这三个方法处于**两个不同的抽象层级**，互为补充而非冗余：
+```ts
+const off = model.subscribe((data) => data.name, (next, prev) => {
+  console.log(prev, '→', next);
+});
+off();
+```
 
-- **`on` —— 类型化模型事件。** 底层。它按**事件名**订阅，收到对应事件的
-  类型化 payload，并返回取消订阅函数。它是观察非值类事件的**唯一途径**，例如 `validation:error`、
-  `validation:complete`、`reaction:error`、`dependency:error`、
-  `field:not-found`（见 [事件](#事件)）。
-
-- **`subscribe` / `subscribeField` —— 数据订阅。** 构建在 `on('field:change', …)`
-  之上的便利层。两者都观察**值变化**，且仅在被观察值真正改变时才触发：
-  - `subscribeField(field, cb)` —— 过滤到单个字段；回调收到 `(value)`。
-  - `subscribe(selector, cb, isEqual?)` —— 观察派生值；回调收到 `(next, prev)`，
-    通过 `isEqual`（默认 `Object.is`）去重。
-
-**如何选择：** 响应式地观察值变化时用 `subscribeField` / `subscribe`（常见场景，
-也是 React 适配器所用）；需要错误/校验事件或对原始事件流的完全控制时，再降到
-`on`。
+需要按字段筛选原始事件时，用 `on('field:change', handler)` 检查 payload 的
+`field`。`useModelSelector` 使用模型层过滤，`useModelComputed` 直接订阅字段事件；
+两者共享快照比较逻辑。
 
 ### 生命周期
 
@@ -195,10 +192,10 @@ interface ModelOptions {
 ## 验证规则
 
 `ValidationRules` 是一组可复用的内置规则，`Rule` 则是它们背后的类。两者都从
-包入口导出：
+独立入口 `model-reaction/validation` 导出：
 
 ```typescript
-import { ValidationRules, Rule } from 'model-reaction';
+import { ValidationRules, Rule } from 'model-reaction/validation';
 ```
 
 每条规则都实现了 `Validator` 接口，可直接放进字段的 `validator` 数组。
@@ -248,6 +245,8 @@ createModel({
 错误展示与模型状态解耦：
 
 ```typescript
+import { formatValidationErrors } from 'model-reaction/validation';
+
 const summary = formatValidationErrors(model.validationErrors);
 const custom = formatValidationErrors(
   model.validationErrors,
@@ -261,7 +260,20 @@ const custom = formatValidationErrors(
 `Validator`、`Reaction`、`FieldSchema`、`ValidationError`、`ModelError`、
 `ModelErrorCode`、`ModelEventMap`、`InferFieldType` 和 `InferModelData`。
 
-从包入口导出的运行时值包括 `createModel`、`ValidationRules`、`Rule`、
-`ModelEvents`、`SKIP_REACTION` 和 `formatValidationErrors`。
+核心入口导出 `createModel`、`ModelEvents` 和 `SKIP_REACTION`。
+`model-reaction/validation` 导出 `ValidationRules`、`Rule`、
+`formatValidationErrors` 和类型 `ValidationErrorFormatter`。
 
 完整类型定义请见 [`src/types.ts`](../src/types.ts)。
+
+## API 精简迁移（Unreleased）
+
+这组变更不向后兼容，升级时需要修改调用处：
+
+- `ValidationRules`、`Rule`、`formatValidationErrors` 和类型
+  `ValidationErrorFormatter` 改从 `model-reaction/validation` 导入。
+  使用浏览器 UMD 时，额外加载 `dist/validation.js`，工具位于
+  `ModelReactionValidation` 全局对象。
+- `model.subscribeField(field, callback)` 改为
+  `model.subscribe(data => data[field], callback)`，回调会额外收到上一个值。
+  若必须按原始字段事件触发，用 `on('field:change', handler)` 并筛选字段名。

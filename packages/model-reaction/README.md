@@ -33,16 +33,20 @@ npm install model-reaction react    # + React bindings (peer dep, react >= 18)
 ```
 
 ```ts
-import { createModel, ValidationRules } from 'model-reaction';
+import { createModel } from 'model-reaction';
+import { ValidationRules } from 'model-reaction/validation';
 import { useDraftField } from 'model-reaction/react'; // optional
 ```
 
-> The default entry has zero React dependency. Only `model-reaction/react` imports React.
+> The core entry includes validation execution but no built-in rules or React.
+> Import optional rules and formatting from `model-reaction/validation`;
+> only `model-reaction/react` imports React.
 
 ## Quick Start
 
 ```typescript
-import { createModel, ValidationRules } from 'model-reaction';
+import { createModel } from 'model-reaction';
+import { ValidationRules } from 'model-reaction/validation';
 
 interface User {
   name: string;
@@ -129,7 +133,7 @@ user.clearDirtyData(); // reset
 ```typescript
 user.on('validation:error', (e) => console.error(e.field, e.message));
 
-// `on` returns an unsubscribe function (like `subscribe` / `subscribeField`):
+// `on` returns an unsubscribe function (like `subscribe`):
 const off = user.on('field:change', (e) => console.log(e.field, '=', e.value));
 off(); // stop listening
 ```
@@ -144,7 +148,8 @@ See [docs/API.md](docs/API.md#events) for the full event list.
 
 ```tsx
 import { useEffect, useState, type ReactNode } from 'react';
-import { createModel, ValidationRules, type ModelReturn } from 'model-reaction';
+import { createModel, type ModelReturn } from 'model-reaction';
+import { ValidationRules } from 'model-reaction/validation';
 import { ModelProvider, useModel, useModelFieldState, useDraftField } from 'model-reaction/react';
 
 function NameInput() {
@@ -197,7 +202,7 @@ function App() {
 For React lifecycles, prefer a **Provider owner** (shared state scoped to a subtree)
 or a **per-route model** (fresh instance per route / modal); avoid module-level
 singletons. For the full hook list, lifecycle examples, the `useModelSelector` vs
-`useModelComputed` decision tree, and performance guidance, see [docs/REACT.md](docs/REACT.md).
+`useModelComputed` comparison, and performance guidance, see [docs/REACT.md](docs/REACT.md).
 
 ### Text Form Fields — `useDraftField`
 
@@ -230,6 +235,9 @@ last committed value. Use the lower-level `useModelFieldState` for non-text
 controls such as checkboxes, selects, and date pickers, or when committed-value
 semantics are explicitly required. See
 [docs/REACT.md](docs/REACT.md#controlled-inputs-under-strict--async-validation).
+
+For the breaking API changes in the unreleased version, see the
+[migration guide](docs/API.md#api-simplification-migration-unreleased).
 
 ## Documentation
 

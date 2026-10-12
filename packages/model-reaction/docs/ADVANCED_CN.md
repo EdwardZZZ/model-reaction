@@ -21,7 +21,8 @@
 ## 异步验证
 
 ```typescript
-import { createModel, Rule, ValidationRules } from 'model-reaction';
+import { createModel } from 'model-reaction';
+import { Rule, ValidationRules } from 'model-reaction/validation';
 
 interface AsyncUser {
   name: string;
@@ -63,7 +64,8 @@ console.log(asyncUserModel.getDirtyData());
 ## 自定义验证规则与消息
 
 ```typescript
-import { createModel, Rule } from 'model-reaction';
+import { createModel } from 'model-reaction';
+import { Rule } from 'model-reaction/validation';
 
 const customRule = new Rule(
   'custom',
@@ -83,7 +85,8 @@ const model = createModel({
 ## 类型化错误事件
 
 ```typescript
-import { createModel, ModelEvents, ValidationRules } from 'model-reaction';
+import { createModel, ModelEvents } from 'model-reaction';
+import { ValidationRules } from 'model-reaction/validation';
 
 const model = createModel({
   name: {
@@ -111,7 +114,8 @@ unsubscribeMissing();
 可以定义仅在满足特定条件时才执行的规则，也可以通过 `data` 参数读取其他字段的值进行交叉验证。
 
 ```typescript
-import { createModel, ValidationRules, Rule } from 'model-reaction';
+import { createModel } from 'model-reaction';
+import { ValidationRules, Rule } from 'model-reaction/validation';
 
 const model = createModel({
   hasDiscount: { type: 'boolean', default: false },
@@ -141,7 +145,8 @@ const model = createModel({
 ## 字段转换与异步验证
 
 ```typescript
-import { createModel, Rule } from 'model-reaction';
+import { createModel } from 'model-reaction';
+import { Rule } from 'model-reaction/validation';
 
 const asyncModel = createModel({
   field: {

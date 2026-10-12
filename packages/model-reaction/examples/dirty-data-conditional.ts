@@ -1,8 +1,5 @@
-import {
-  createModel,
-  formatValidationErrors,
-  ValidationRules,
-} from '../src/index';
+import { createModel } from '../src/index';
+import { formatValidationErrors, ValidationRules } from '../src/validation';
 
 /**
  * 脏数据 + 条件校验示例。

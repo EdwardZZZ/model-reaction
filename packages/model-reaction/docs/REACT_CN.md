@@ -37,7 +37,8 @@
 
 ```tsx
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
-import { createModel, ValidationRules } from 'model-reaction';
+import { createModel } from 'model-reaction';
+import { ValidationRules } from 'model-reaction/validation';
 import {
     Field,
     ModelProvider,
@@ -258,7 +259,7 @@ export const userModel = createModel({ /* ... */ });
 在真正拥有生命周期的组件的 effect 中创建 model，并在 cleanup 中释放同一个
 实例，再用 context 向下传递。这也能正确处理 StrictMode 在开发环境增加的
 setup/cleanup 周期：每次 setup 创建新 model，对应 cleanup 释放该实例。
-这个 owner 模式用于客户端渲染；SSR 请按[SSR 与并发渲染](#79-ssr-与并发渲染)
+这个 owner 模式用于客户端渲染；SSR 请按[SSR 与并发渲染](BEST_PRACTICES_CN.md#79-ssr-与并发渲染)
 创建请求作用域的 model，因为服务端渲染不会运行 effect。
 
 ```tsx

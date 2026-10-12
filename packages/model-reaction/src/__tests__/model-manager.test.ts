@@ -1,12 +1,6 @@
 import { ModelManager } from '../core/model-manager';
-import {
-    createModel,
-    formatValidationErrors,
-    Model,
-    ModelReturn,
-    ValidationRules,
-    ModelEvents,
-} from '../index';
+import { createModel, Model, ModelReturn, ValidationError, ModelEvents } from '../index';
+import { formatValidationErrors, ValidationRules } from '../validation';
 
 describe('ModelManager - Basic Operations', () => {
     interface User {
@@ -1228,7 +1222,7 @@ describe('ModelManager - Direct (internal collaborators)', () => {
         model.dispose();
     });
 
-    test('reaction setError reuses existing validation error array', () => {
+    test('reaction setError replaces its field array and preserves previous snapshots', () => {
         interface Schema {
             field: string;
         }
@@ -1243,6 +1237,7 @@ describe('ModelManager - Direct (internal collaborators)', () => {
             rule: 'reaction_error',
             message: 'first',
         });
+        const previous = manager.validationErrors;
         internal.reactionSystem.callbacks.setError('field', {
             field: 'field',
             rule: 'reaction_error',
@@ -1250,11 +1245,76 @@ describe('ModelManager - Direct (internal collaborators)', () => {
         });
 
         expect(manager.validationErrors.field?.length).toBe(2);
+        expect(previous.field).toEqual([{
+            field: 'field',
+            rule: 'reaction_error',
+            message: 'first',
+        }]);
+        expect(manager.validationErrors.field).not.toBe(previous.field);
         manager.dispose();
     });
 });
 
 describe('ModelManager - validation error ownership', () => {
+    test('keeps unchanged field errors stable while replacing and clearing another field', async () => {
+        const local = createModel({
+            a: { type: 'string', validator: [ValidationRules.required] },
+            b: { type: 'string', validator: [ValidationRules.required] },
+        });
+
+        try {
+            await local.setFields({ a: '', b: '' });
+            const original = local.validationErrors;
+            const originalB = original.b;
+            expect(Object.isFrozen(originalB)).toBe(true);
+            expect(Object.isFrozen(originalB?.[0])).toBe(true);
+            expect(() => { (originalB as ValidationError[]).push({ field: 'b', message: 'mutation' }); })
+                .toThrow(TypeError);
+
+            await local.setField('a', 'valid');
+            const cleared = local.validationErrors;
+            expect(cleared.a).toEqual([]);
+            expect(cleared.b).toBe(originalB);
+            expect(original.a).toHaveLength(1);
+
+            await local.setField('a', '');
+            const replaced = local.validationErrors;
+            expect(replaced.a).toHaveLength(1);
+            expect(replaced.b).toBe(originalB);
+            expect(cleared.a).toEqual([]);
+        } finally {
+            local.dispose();
+        }
+    });
+
+    test('consecutive synchronous writes discard superseded errors before notifying', async () => {
+        const local = createModel({
+            field: {
+                type: 'string',
+                validator: [{ type: 'allowed', message: 'invalid', validate: (value) => value === 'valid' }],
+            },
+        });
+        const errors = jest.fn();
+        const completion = jest.fn();
+        local.on(ModelEvents.VALIDATION_ERROR, errors);
+        local.on(ModelEvents.FIELD_VALIDATION_COMPLETE, completion);
+
+        try {
+            const superseded = local.setField('field', 'invalid');
+            const current = local.setField('field', 'valid');
+            expect(await superseded).toBe(false);
+            expect(await current).toBe(true);
+            expect(errors).not.toHaveBeenCalled();
+            expect(completion).toHaveBeenCalledTimes(1);
+            expect(completion).toHaveBeenCalledWith({ field: 'field', isValid: true, dirty: false });
+            expect(local.data.field).toBe('valid');
+            expect(local.validationErrors.field).toEqual([]);
+            expect(local.getDirtyData()).toEqual({});
+        } finally {
+            local.dispose();
+        }
+    });
+
     test('stores each error before notifying and isolates event payloads from snapshots', async () => {
         const local = createModel({
             field: {
@@ -1393,21 +1453,21 @@ describe('ModelManager - selector subscriptions', () => {
     });
     afterEach(() => model.dispose());
 
-    test('subscribeField fires only for the matching field', async () => {
+    test('single-field selector fires only for the matching field', async () => {
         const cb = jest.fn();
-        model.subscribeField('qty', cb);
+        model.subscribe((data) => data.qty, cb);
 
         await model.setField('coupon', 'X');
         expect(cb).not.toHaveBeenCalled();
 
         await model.setField('qty', 5);
         expect(cb).toHaveBeenCalledTimes(1);
-        expect(cb).toHaveBeenCalledWith(5);
+        expect(cb).toHaveBeenCalledWith(5, 1);
     });
 
-    test('subscribeField returns an unsubscribe function', async () => {
+    test('single-field selector returns an unsubscribe function', async () => {
         const cb = jest.fn();
-        const unsub = model.subscribeField('qty', cb);
+        const unsub = model.subscribe((data) => data.qty, cb);
         unsub();
         await model.setField('qty', 5);
         expect(cb).not.toHaveBeenCalled();

@@ -37,6 +37,7 @@ unsubscribe();
 - 优先用一个包含完整依赖的 reaction，避免多个 reaction 竞争写入同一目标。
 
 ### 条件验证
+- 从 `model-reaction/validation` 导入规则构建和格式化工具。
 - 条件规则使用 `Rule.when(...)`。
 - 通过 validator 的 `data` 参数读取其他字段。
 - 将共享领域检查提取为具名规则或验证服务。
@@ -102,7 +103,7 @@ unsubscribe();
 ### 7.2 selector 引用要稳定
 
 `useModelSelector` 在订阅时一次性捕获 `selector` 与 `isEqual`。每次渲染
-传入新函数会触发重新订阅并多渲染一次：
+传入新函数会触发重新订阅：
 
 ```tsx
 // ❌ 每次渲染都会重新订阅
@@ -113,7 +114,7 @@ const selectTotal = useCallback((d: Cart) => d.qty * d.price, []);
 const total = useModelSelector(cart, selectTotal);
 ```
 
-selector 返回新容器时，请配合 `shallow`——selector 仍需保持引用稳定：
+selector 返回新容器时，请配合 `shallow`；保持 selector 引用稳定可避免重新订阅：
 
 ```tsx
 const selectSlice = useCallback(
@@ -121,6 +122,17 @@ const selectSlice = useCallback(
     [],
 );
 const slice = useModelSelector(cart, selectSlice, shallow);
+```
+
+### 7.2bis 内联 selector 使用 `useModelComputed`
+
+selector 需要闭包当前 props 且不希望重新订阅时，用 `useModelComputed`。
+它的订阅只依赖 model；每次字段变化都会通知 React，由共享快照 getter 比较选中值。
+两个 Hook 都会在字段变化时求值，比较函数本身不会省掉下一次计算。
+
+```tsx
+const item = useModelComputed(cart, (data) => data.items[id]);
+const slice = useModelComputed(cart, (data) => ({ qty: data.qty, price: data.price }), shallow);
 ```
 
 ### 7.3 用 `<ModelProvider>` 避免 prop 透传

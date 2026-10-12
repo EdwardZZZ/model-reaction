@@ -1,4 +1,5 @@
-import { createModel, ValidationRules } from '../src/index';
+import { createModel } from '../src/index';
+import { ValidationRules } from '../src/validation';
 
 interface Form {
   name: string;

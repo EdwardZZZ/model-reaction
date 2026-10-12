@@ -51,23 +51,23 @@ export class Rule {
 
 /** Reusable, type-safe built-in rules. */
 export const ValidationRules = {
-    required: new Rule(
+    required: /* @__PURE__ */ new Rule(
         'required',
         'This field is required',
         (v) => v !== undefined && v !== null && v !== ''
     ),
-    number: new Rule('number', 'Must be a number', (v) => isFiniteNumber(v)),
-    integer: new Rule(
+    number: /* @__PURE__ */ new Rule('number', 'Must be a number', (v) => isFiniteNumber(v)),
+    integer: /* @__PURE__ */ new Rule(
         'integer',
         'Must be an integer',
         (v) => isFiniteNumber(v) && Number.isInteger(v)
     ),
-    boolean: new Rule(
+    boolean: /* @__PURE__ */ new Rule(
         'boolean',
         'Must be a boolean',
         (v) => typeof v === 'boolean'
     ),
-    string: new Rule('string', 'Must be a string', (v) => isString(v)),
+    string: /* @__PURE__ */ new Rule('string', 'Must be a string', (v) => isString(v)),
     min: (min: number) =>
         new Rule(
             'min',
@@ -101,7 +101,7 @@ export const ValidationRules = {
             stableRegex.lastIndex = 0;
             return stableRegex.test(v);
         }),
-    email: new Rule(
+    email: /* @__PURE__ */ new Rule(
         'email',
         'Invalid email format',
         (v) =>

@@ -7,7 +7,8 @@
 import * as React from 'react';
 void React;
 
-import { createModel, ValidationRules } from '../../src/index';
+import { createModel } from '../../src/index';
+import { ValidationRules } from '../../src/validation';
 import {
     ModelProvider,
     useModel,

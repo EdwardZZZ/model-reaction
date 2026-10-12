@@ -7,7 +7,8 @@ import {
     type DevtoolsModelInstance,
     type ModelReactionDevtoolsHook,
 } from '../devtools/devtools-hook';
-import { Model, ValidationRules } from '../index';
+import { Model } from '../index';
+import { ValidationRules } from '../validation';
 
 /** Restore the global hook slot after each test, whatever it was. */
 function clearHook(): void {

@@ -21,7 +21,8 @@ Patterns beyond the README quick start.
 ## Asynchronous Validation
 
 ```typescript
-import { createModel, Rule, ValidationRules } from 'model-reaction';
+import { createModel } from 'model-reaction';
+import { Rule, ValidationRules } from 'model-reaction/validation';
 
 interface AsyncUser {
   name: string;
@@ -63,7 +64,8 @@ console.log(asyncUserModel.getDirtyData());
 ## Custom Validation Rules and Messages
 
 ```typescript
-import { createModel, Rule } from 'model-reaction';
+import { createModel } from 'model-reaction';
+import { Rule } from 'model-reaction/validation';
 
 const customRule = new Rule(
   'custom',
@@ -83,7 +85,8 @@ const model = createModel({
 ## Typed Error Events
 
 ```typescript
-import { createModel, ModelEvents, ValidationRules } from 'model-reaction';
+import { createModel, ModelEvents } from 'model-reaction';
+import { ValidationRules } from 'model-reaction/validation';
 
 const model = createModel({
   name: {
@@ -112,7 +115,8 @@ Define rules that only run under specific conditions, or that validate one
 field based on another via the `data` parameter.
 
 ```typescript
-import { createModel, ValidationRules, Rule } from 'model-reaction';
+import { createModel } from 'model-reaction';
+import { ValidationRules, Rule } from 'model-reaction/validation';
 
 const model = createModel({
   hasDiscount: { type: 'boolean', default: false },
@@ -142,7 +146,8 @@ const model = createModel({
 ## Transformation and Asynchronous Validation
 
 ```typescript
-import { createModel, Rule } from 'model-reaction';
+import { createModel } from 'model-reaction';
+import { Rule } from 'model-reaction/validation';
 
 const asyncModel = createModel({
   field: {

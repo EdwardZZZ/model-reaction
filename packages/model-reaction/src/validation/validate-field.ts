@@ -111,7 +111,9 @@ async function runValidator(
 
     try {
         const result = validator.validate(value, data);
-        const ok = await raceTimeout(Promise.resolve(result), field, timeout);
+        const ok = await (typeof result === 'boolean'
+            ? result
+            : raceTimeout(Promise.resolve(result), field, timeout));
 
         if (ok) return true;
 

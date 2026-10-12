@@ -177,11 +177,6 @@ export interface ModelReturn<T = Record<string, any>> {
     /** Wait for pending reactions and validations to complete. */
     settled: () => Promise<void>;
     dispose: () => void;
-    /** Subscribe to a single field; returns an unsubscribe function. */
-    subscribeField: <K extends keyof T>(
-        field: K,
-        callback: (value: T[K]) => void
-    ) => () => void;
     /**
      * Subscribe to a derived value via a selector. The callback fires only
      * when the selected value changes (compared with `isEqual`, default Object.is).
@@ -205,7 +200,6 @@ export interface ModelReturn<T = Record<string, any>> {
  */
 export interface CommitOptions {
     reactionStack?: string[];
-    suppressReactions?: boolean;
     changedFields?: Set<string>;
     validationData?: Record<string, any>;
 }

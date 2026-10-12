@@ -16,6 +16,7 @@ Reference for the public `model-reaction` API surface.
 - [Validation Rules](#validation-rules)
 - [Error Formatting](#error-formatting)
 - [Type Definitions](#type-definitions)
+- [API simplification migration](#api-simplification-migration-unreleased)
 
 ---
 
@@ -63,6 +64,10 @@ top level.
 | `getField(field)` | Read the current value of one field. |
 | `get data` | Read a stable, shallow-frozen copy of the field map. Fields without defaults may be `undefined`. |
 | `get validationErrors` | Read frozen validation errors grouped by field. |
+
+Error snapshots preserve earlier results. Each field's frozen error array keeps
+its reference until that field's errors are cleared or replaced; updates to
+another field do not recreate it.
 
 This library supports shallow model data and tracks field-level replacements.
 Object, array, and mutable built-in
@@ -147,33 +152,22 @@ using multiple reactions to compete for the same target.
 
 | Method | Description |
 | --- | --- |
-| `subscribeField(field, callback)` | Subscribe to a single field's value changes. Returns an unsubscribe function. |
-| `subscribe(selector, callback, isEqual?)` | Subscribe to a derived value. Default equality is `Object.is`. Returns an unsubscribe function. |
-| `on(event, callback)` | Subscribe to a model event (see [Events](#events)). Returns an unsubscribe function, like `subscribe` / `subscribeField`. |
+| `subscribe(selector, callback, isEqual?)` | Observe a selected value, compared with `Object.is` by default. The callback receives `(next, prev)`; returns an unsubscribe function. |
+| `on(event, callback)` | Observe typed event payloads, including errors, validation, and field changes; returns an unsubscribe function. |
 
-#### Two layers: events vs. data subscription
+Single fields and derived values share `subscribe`:
 
-These three methods live at **two different abstraction levels** — they are
-complementary, not redundant:
+```ts
+const off = model.subscribe((data) => data.name, (next, prev) => {
+  console.log(prev, '→', next);
+});
+off();
+```
 
-- **`on` — typed model events.** The low-level layer. It subscribes by
-  **event name**, receives that event's typed payload, and returns an
-  unsubscribe function. It is the *only* way to
-  observe non-value events such as `validation:error`, `validation:complete`,
-  `reaction:error`, `dependency:error`, and `field:not-found` (see
-  [Events](#events)).
-
-- **`subscribe` / `subscribeField` — data subscription.** A convenience layer
-  built on top of `on('field:change', …)`. Both observe **value changes** and
-  only fire when the observed value actually changes:
-  - `subscribeField(field, cb)` — filters to one field; callback gets `(value)`.
-  - `subscribe(selector, cb, isEqual?)` — observes a derived value; callback
-    gets `(next, prev)`, deduped via `isEqual` (default `Object.is`).
-
-**Which to use:** reach for `subscribeField` / `subscribe` for reactive value
-watching (the common case, and what the React adapter uses); drop down to
-`on` when you need error/validation events or full control over the raw event
-stream.
+Use `on('field:change', handler)` and check the payload's `field` when raw
+field events are needed. `useModelSelector` uses model-side filtering;
+`useModelComputed` subscribes directly to field events. Both share snapshot
+comparison logic.
 
 ### Lifecycle
 
@@ -218,10 +212,10 @@ interface ModelOptions {
 ## Validation Rules
 
 `ValidationRules` is a collection of reusable built-in rules, and `Rule` is the
-class behind them. Both are exported from the package entry point:
+class behind them. Both are exported from `model-reaction/validation`:
 
 ```typescript
-import { ValidationRules, Rule } from 'model-reaction';
+import { ValidationRules, Rule } from 'model-reaction/validation';
 ```
 
 Each rule implements the `Validator` interface, so it can be dropped straight
@@ -272,6 +266,8 @@ createModel({
 Formatting is independent from model state:
 
 ```typescript
+import { formatValidationErrors } from 'model-reaction/validation';
+
 const summary = formatValidationErrors(model.validationErrors);
 const custom = formatValidationErrors(
   model.validationErrors,
@@ -285,8 +281,21 @@ Publicly exported types include `Model`, `ModelOptions`, `ModelReturn`,
 `Validator`, `Reaction`, `FieldSchema`, `ValidationError`, `ModelError`,
 `ModelErrorCode`, `ModelEventMap`, `InferFieldType`, and `InferModelData`.
 
-Runtime values exported from the package entry point are `createModel`,
-`ValidationRules`, `Rule`, `ModelEvents`, `SKIP_REACTION`, and
-`formatValidationErrors`.
+The core entry exports `createModel`, `ModelEvents`, and `SKIP_REACTION`.
+`model-reaction/validation` exports `ValidationRules`, `Rule`,
+`formatValidationErrors`, and the `ValidationErrorFormatter` type.
 
 For full type definitions, see [`src/types.ts`](../src/types.ts).
+
+## API simplification migration (Unreleased)
+
+These changes are breaking and require updating consumers:
+
+- Import `ValidationRules`, `Rule`, `formatValidationErrors`, and the
+  `ValidationErrorFormatter` type from `model-reaction/validation`.
+  Browser UMD consumers also load `dist/validation.js`; helpers are on the
+  `ModelReactionValidation` global.
+- Replace `model.subscribeField(field, callback)` with
+  `model.subscribe(data => data[field], callback)`. The callback also receives
+  the previous value. Use `on('field:change', handler)` with field filtering
+  when callbacks must follow raw field events.

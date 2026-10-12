@@ -1,6 +1,25 @@
 import { cloneDefault } from '../utils/clone-default';
 
 describe('cloneDefault', () => {
+    test('allocates a clone map only for arrays and plain object graphs', () => {
+        const NativeWeakMap = globalThis.WeakMap;
+        const allocations = jest.spyOn(globalThis, 'WeakMap')
+            .mockImplementation(() => new NativeWeakMap());
+
+        cloneDefault('value');
+        cloneDefault(null);
+        cloneDefault(new Date(0));
+        cloneDefault(/value/);
+        cloneDefault(new Map());
+        expect(allocations).not.toHaveBeenCalled();
+
+        const original = { nested: [{ value: 1 }] };
+        const copy = cloneDefault(original);
+        expect(copy).toEqual(original);
+        expect(copy.nested).not.toBe(original.nested);
+        expect(allocations).toHaveBeenCalledTimes(1);
+    });
+
     // -------------------------------------------------------------------------
     // Primitives — returned as-is
     // -------------------------------------------------------------------------

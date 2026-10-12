@@ -9,7 +9,7 @@
  * side) cannot catch.
  */
 import { createModel } from 'model-reaction/devtools';
-import { ValidationRules } from 'model-reaction';
+import { ValidationRules } from 'model-reaction/validation';
 import { installAgent } from '../page-agent';
 import {
     AGENT_SOURCE,

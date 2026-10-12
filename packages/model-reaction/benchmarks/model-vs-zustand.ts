@@ -7,7 +7,8 @@
  * 仅作为本机参考数据，不同硬件会有差异。
  */
 import { createStore } from 'zustand/vanilla';
-import { createModel, ValidationRules } from '../src/index';
+import { createModel } from '../src/index';
+import { ValidationRules } from '../src/validation';
 
 // 静音 model-reaction 校验/反应失败的 console.error 噪音
 const _origError = console.error;
@@ -172,7 +173,7 @@ async function bench_singleSubscribe() {
     });
 
     const m = await bench(
-        'model-reaction subscribeField x1000',
+        'model-reaction single-field selector x1000',
         RUNS,
         async () => {
             const mm = createModel<{ a: number; b: number }>({
@@ -180,7 +181,7 @@ async function bench_singleSubscribe() {
                 b: { type: 'number', default: 0 },
             });
             let count = 0;
-            const unsub = mm.subscribeField('a', () => {
+            const unsub = mm.subscribe((data) => data.a, () => {
                 count++;
             });
             for (let i = 0; i < N; i++) await mm.setField('a', i);
@@ -231,7 +232,7 @@ async function bench_isolation() {
             });
             const unsubs: Array<() => void> = [];
             for (let i = 0; i < N; i++) {
-                unsubs.push(mm.subscribeField('a', () => {}));
+                unsubs.push(mm.subscribe((data) => data.a, () => {}));
             }
             for (let i = 0; i < N; i++) await mm.setField('b', i);
             unsubs.forEach((u) => u());

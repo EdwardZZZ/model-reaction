@@ -1,5 +1,5 @@
 import { createModel } from 'model-reaction/devtools';
-import { ValidationRules } from 'model-reaction';
+import { ValidationRules } from 'model-reaction/validation';
 import { ModelProvider, useModel, useModelField } from 'model-reaction/react';
 import type { ModelReturn } from 'model-reaction';
 import { TextField } from '../TextField';

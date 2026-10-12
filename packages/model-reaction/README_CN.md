@@ -32,16 +32,19 @@ npm install model-reaction react    # + React 绑定（peer 依赖，react >= 18
 ```
 
 ```ts
-import { createModel, ValidationRules } from 'model-reaction';
+import { createModel } from 'model-reaction';
+import { ValidationRules } from 'model-reaction/validation';
 import { useDraftField } from 'model-reaction/react'; // 可选
 ```
 
-> 默认入口零 React 依赖；只有 `model-reaction/react` 才会引入 React。
+> 核心入口包含校验执行逻辑，不包含内置规则或 React。规则构建和错误格式化工具
+> 从 `model-reaction/validation` 按需导入；只有 `model-reaction/react` 引入 React。
 
 ## 快速上手
 
 ```typescript
-import { createModel, ValidationRules } from 'model-reaction';
+import { createModel } from 'model-reaction';
+import { ValidationRules } from 'model-reaction/validation';
 
 interface User {
   name: string;
@@ -122,7 +125,7 @@ user.clearDirtyData(); // 清空
 ```typescript
 user.on('validation:error', (e) => console.error(e.field, e.message));
 
-// `on` 返回取消订阅函数（与 `subscribe` / `subscribeField` 一致）：
+// `on` 返回取消订阅函数（与 `subscribe` 一致）：
 const off = user.on('field:change', (e) => console.log(e.field, '=', e.value));
 off(); // 停止监听
 ```
@@ -136,7 +139,8 @@ off(); // 停止监听
 
 ```tsx
 import { useEffect, useState, type ReactNode } from 'react';
-import { createModel, ValidationRules, type ModelReturn } from 'model-reaction';
+import { createModel, type ModelReturn } from 'model-reaction';
+import { ValidationRules } from 'model-reaction/validation';
 import { ModelProvider, useModel, useModelFieldState, useDraftField } from 'model-reaction/react';
 
 function NameInput() {
@@ -188,7 +192,7 @@ function App() {
 
 React 生命周期推荐两种模式：**Provider owner**（共享状态限定在某个子树内）
 或 **per-route model**（每个路由 / 弹窗创建新实例）；避免模块级 singleton。
-完整 hook 列表、生命周期示例、`useModelSelector` vs `useModelComputed` 选择决策树与性能建议，见 [docs/REACT_CN.md](docs/REACT_CN.md)。
+完整 hook 列表、生命周期示例、`useModelSelector` 与 `useModelComputed` 的取舍和性能建议，见 [docs/REACT_CN.md](docs/REACT_CN.md)。
 
 ### 文本表单字段 —— `useDraftField`
 
@@ -219,6 +223,9 @@ function NameField() {
 checkbox、select、date picker 等非文本控件，或明确需要 committed value 语义时，
 使用更低层的 `useModelFieldState`。详见
 [docs/REACT_CN.md](docs/REACT_CN.md#严格--异步校验下的受控输入)。
+
+未发布版本包含 API 不兼容变更，升级时请参考
+[迁移说明](docs/API_CN.md#api-精简迁移unreleased)。
 
 ## 文档
 

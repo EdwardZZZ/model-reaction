@@ -691,7 +691,7 @@ describe('ReactionSystem - settled() waits for chained reactions and async actio
                 },
             },
         });
-        model.subscribeField('target', targetSubscriber);
+        model.subscribe((data) => data.target, targetSubscriber);
         model.on('reaction:error', reactionError);
 
         await model.setField('source', 'update');
@@ -978,7 +978,7 @@ describe('ReactionSystem - lifecycle and rejected actions', () => {
                 reaction: { fields: ['source'], computed: () => 1, action },
             },
         });
-        model.subscribeField('target', () => model.dispose());
+        model.subscribe((data) => data.target, () => model.dispose());
         await model.setField('source', 1);
         await new Promise((resolve) => setTimeout(resolve, 0));
         expect(action).not.toHaveBeenCalled();
@@ -1098,7 +1098,7 @@ describe('ReactionSystem - direct unit tests', () => {
             new PendingTasks()
         );
 
-        system.triggerReactions('a');
+        system.triggerReactionsForFields(['a']);
 
         expect(setError).toHaveBeenCalledWith(
             'b',
@@ -1143,7 +1143,7 @@ describe('ReactionSystem - direct unit tests', () => {
             new PendingTasks()
         );
 
-        system.triggerReactions('input');
+        system.triggerReactionsForFields(['input']);
         system.dispose();
 
         expect(clearSpy).toHaveBeenCalled();
@@ -1177,8 +1177,8 @@ describe('ReactionSystem - direct unit tests', () => {
             new PendingTasks()
         );
 
-        system.triggerReactions('input');
-        system.triggerReactions('input');
+        system.triggerReactionsForFields(['input']);
+        system.triggerReactionsForFields(['input']);
 
         expect(clearSpy).toHaveBeenCalled();
 

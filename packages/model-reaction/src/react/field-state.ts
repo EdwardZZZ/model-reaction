@@ -16,7 +16,9 @@ export function useModelField<T extends Record<string, any>, K extends keyof T>(
     field: K
 ): T[K] {
     const subscribe = useCallback(
-        (notify: () => void) => model.subscribeField(field, notify),
+        (notify: () => void) => model.on(ModelEvents.FIELD_CHANGE, (event) => {
+            if (event.field === field) notify();
+        }),
         [model, field]
     );
     const getSnapshot = useCallback(

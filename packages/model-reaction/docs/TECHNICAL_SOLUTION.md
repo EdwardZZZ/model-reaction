@@ -96,12 +96,8 @@ const model = createModel({
 ### 3.2 Schema 片段与统一初始化
 
 ```ts
-import {
-  createModel,
-  Rule,
-  ValidationRules,
-  type Model,
-} from 'model-reaction';
+import { createModel, type Model } from 'model-reaction';
+import { Rule, ValidationRules } from 'model-reaction/validation';
 
 type AdStatus = 'draft' | 'pending' | 'approved' | 'rejected' | 'active' | 'paused';
 
@@ -311,7 +307,7 @@ export function createAdDraftModel() {
 对于广告业务，建议优先把同步、可本地判断的约束写进 schema，避免组件中重复写判断逻辑。
 
 ```ts
-import { Rule } from 'model-reaction';
+import { Rule } from 'model-reaction/validation';
 
 const afterStartDate = new Rule(
   'afterStartDate',
@@ -513,11 +509,13 @@ function TitleField() {
 | 非文本控件或 committed value 绑定 | `useModelFieldState(model, field)` |
 | 多字段切片 | `useModelFields(model, fields)` |
 | 派生展示值 | `useModelSelector(model, selector)` |
-| 内联 selector 且依赖组件 props | `useModelComputed(model, selector)`（需要保留等价新对象/数组的引用时，可传 `isEqual`，如 `shallow`；详见 [REACT_CN.md](./REACT_CN.md#usemodelselector-vs-usemodelcomputed)） |
+| 内联 selector 且依赖组件 props | `useModelComputed(model, selector)`（订阅只依赖 model；等价新对象/数组需要保留引用时可传 `shallow`；详见 [REACT_CN.md](./REACT_CN.md#usemodelselector-vs-usemodelcomputed)） |
 
 ### 5.2 提交流程
 
 ```ts
+import { formatValidationErrors } from 'model-reaction/validation';
+
 async function handleSubmit() {
   const ok = await module.submitForAudit();
 
@@ -588,7 +586,7 @@ AdCreationPage
 - 将可由已有字段计算出的数据定义为 reaction 字段，例如 `ready`、`blockReason`、`totalDays`。
 - `computed` 只做同步纯计算，不返回 Promise、不发请求、不写日志、不修改外部变量。
 - 对频繁输入字段触发的派生计算配置 `debounceReactions`。
-- 需要监听派生结果时，使用 `subscribeField` 或 React selector，不在组件中重复计算。
+- 需要监听派生结果时，使用 `subscribe((data) => data[field], callback)` 或 React selector，不在组件中重复计算。
 
 ### 6.3 服务端校验与前端校验分工
 

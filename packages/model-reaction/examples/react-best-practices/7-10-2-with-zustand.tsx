@@ -16,11 +16,8 @@ void React;
 
 import { create } from 'zustand';
 
-import {
-    createModel,
-    ValidationRules,
-    type ModelReturn,
-} from '../../src/index';
+import { createModel, type ModelReturn } from '../../src/index';
+import { ValidationRules } from '../../src/validation';
 import { ModelProvider } from '../../src/react';
 
 interface User {

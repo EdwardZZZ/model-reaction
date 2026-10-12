@@ -1,5 +1,5 @@
-import { Rule, ValidationRules } from '../validation/rules';
-import { createModel, formatValidationErrors, Model } from '../index';
+import { createModel, Model } from '../index';
+import { Rule, ValidationRules, formatValidationErrors } from '../validation';
 import type { ModelReturn } from '../types';
 
 describe('Rule class', () => {

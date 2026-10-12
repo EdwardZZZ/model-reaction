@@ -92,9 +92,10 @@ function useSelectionSnapshot<T extends Record<string, any>, R>(
  * Subscribe a component to a derived value. The component re-renders only
  * when `selector(data)` changes (compared via `isEqual`, default Object.is).
  *
- * A new selector reference is evaluated immediately against the current
- * snapshot. Wrap expensive selectors in `useCallback`; use `useModelComputed`
- * when you want to pass an inline selector that closes over render values.
+ * The model subscription filters changes before notifying React. Changing the
+ * selector or equality reference rebuilds that subscription and immediately
+ * evaluates the current snapshot. Keep reusable selectors stable with
+ * `useCallback`; use `useModelComputed` for inline selectors with render values.
  */
 export function useModelSelector<T extends Record<string, any>, R>(
     model: ModelReturn<T>,
@@ -105,45 +106,24 @@ export function useModelSelector<T extends Record<string, any>, R>(
 
     const subscribe = useCallback(
         (notify: () => void) =>
-            model.subscribe(
-                selector,
-                () => notify(),
-                isEqual
-            ),
+            model.subscribe(selector, () => notify(), isEqual),
         [model, selector, isEqual]
     );
     return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 }
 
 /**
- * Same shape as {@link useModelSelector}, but the subscription stays stable
- * while the selector is read from the latest render snapshot.
+ * Select a derived value using the current render's selector while subscribing
+ * only by model identity. Inline selectors may close over current props without
+ * resubscribing. Each field change notifies React; the shared snapshot getter
+ * retains equivalent selections via `isEqual` (default Object.is).
  *
- * Use this variant when:
- *   - The selector is an inline arrow function and you don't want to pay
- *     for `useCallback` ceremony.
- *   - The selector closes over per-render variables (e.g. `id`, `index`)
- *     and you want those updates to be reflected without resubscribing.
- *
- * Trade-offs vs. {@link useModelSelector}:
- *   - The selector is re-run when the model snapshot or selector changes, so
- *     keep it cheap — heavy selectors should still memoise inputs.
- *   - Notifications fire on any field change; the equality check happens
- *     in `getSnapshot` instead of inside the model subscription, so the
- *     model layer can't dedupe before reaching React.
- *
- * If the selector returns a **fresh object/array** (`(d) => d.items.map(...)`,
- * `(d) => ({...})`), pass an `isEqual` (e.g. `shallow`) when equivalent
- * selections should keep the same reference across model updates. With the
- * default `Object.is`, each changed snapshot produces a new selection.
+ * Use `shallow` or domain equality for fresh objects/arrays when equivalent
+ * results should retain their reference across updates. Keep selectors pure;
+ * stable references can reuse computation for unchanged snapshots.
  *
  * ```tsx
- * function Row({ id }: { id: string }) {
- *     // No useCallback needed; closure variable `id` always reflects the
- *     // latest render.
- *     const item = useModelComputed(cart, (d) => d.items[id]);
- *     return <span>{item?.name}</span>;
- * }
+ * const item = useModelComputed(cart, (data) => data.items[id]);
  * ```
  */
 export function useModelComputed<T extends Record<string, any>, R>(

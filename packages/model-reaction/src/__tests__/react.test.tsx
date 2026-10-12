@@ -3,14 +3,14 @@
  *
  * Tests for the React adapter (`src/react.ts`):
  * - `useModelSelector`: selector + custom `isEqual` re-render suppression
- * - `useModelComputed`: stable-subscription variant that accepts changing
- *   selector identities.
+ * - `useModelComputed`: stable subscriptions across selector identities.
  */
 import * as React from 'react';
 import { useCallback, useRef, useState } from 'react';
 import { act, render, renderHook } from '@testing-library/react';
 
-import { createModel, ValidationRules } from '../index';
+import { createModel } from '../index';
+import { ValidationRules } from '../validation';
 import {
     Field,
     ModelProvider,
@@ -74,11 +74,12 @@ function makeOrderModel() {
 function useTracked<T extends Record<string, any>, R>(
     model: ModelReturn<T>,
     selector: (d: Readonly<T>) => R,
-    isEqual?: (a: R, b: R) => boolean
+    isEqual?: (a: R, b: R) => boolean,
+    useSelection: typeof useModelSelector = useModelSelector
 ) {
     const renders = useRef(0);
     renders.current += 1;
-    const value = useModelSelector(model, selector, isEqual);
+    const value = useSelection(model, selector, isEqual);
     return { value, renders: renders.current };
 }
 
@@ -123,12 +124,7 @@ describe('useModelSelector', () => {
 
     it('updates the snapshot when the selector reference changes', async () => {
         const cart = makeCart();
-        let subscribeCalls = 0;
-        const originalSubscribe = cart.subscribe;
-        cart.subscribe = ((...args: Parameters<typeof originalSubscribe>) => {
-            subscribeCalls++;
-            return originalSubscribe(...args);
-        }) as typeof originalSubscribe;
+        const subscribeSpy = jest.spyOn(cart, 'subscribe');
 
         let setBump: (v: number) => void = () => undefined;
 
@@ -147,14 +143,14 @@ describe('useModelSelector', () => {
 
         const { getByText } = render(<Total />);
         expect(getByText('100')).toBeTruthy();
-        const before = subscribeCalls;
+        const before = subscribeSpy.mock.calls.length;
         expect(before).toBeGreaterThan(0);
 
         await act(async () => {
             setBump(1);
         });
         expect(getByText('101')).toBeTruthy();
-        expect(subscribeCalls).toBeGreaterThan(before);
+        expect(subscribeSpy.mock.calls.length).toBeGreaterThan(before);
 
         cart.dispose();
     });
@@ -321,7 +317,7 @@ describe('useModelSelector — isEqual suppression for complex derived values', 
 });
 
 // ---------------------------------------------------------------------------
-// useModelComputed
+// useModelComputed — render-local selectors and stable subscriptions
 // ---------------------------------------------------------------------------
 
 describe('useModelComputed', () => {
@@ -460,6 +456,101 @@ describe('useModelComputed', () => {
         expect(lastSliceRef).toEqual({ qty: 9, price: 100 });
 
         cart.dispose();
+    });
+});
+
+describe.each([
+    { name: 'useModelSelector', useSelection: useModelSelector },
+    { name: 'useModelComputed', useSelection: useModelComputed },
+])('$name — shared snapshot behaviour', ({ useSelection }) => {
+    it('switches models and cleans up the previous subscription', async () => {
+        const first = makeCart();
+        const second = makeCart();
+        await second.setField('qty', 2);
+        const { result, rerender, unmount } = renderHook(
+            ({ model }) => useTracked(model, (d) => d.qty, undefined, useSelection),
+            { initialProps: { model: first } }
+        );
+        try {
+            expect(result.current.value).toBe(1);
+            rerender({ model: second });
+            expect(result.current.value).toBe(2);
+            const before = result.current.renders;
+            await act(async () => { await first.setField('qty', 3); });
+            expect(result.current.renders).toBe(before);
+            await act(async () => { await second.setField('qty', 4); });
+            expect(result.current.value).toBe(4);
+        } finally {
+            unmount();
+            first.dispose();
+            second.dispose();
+        }
+    });
+
+    it('updates equality while preserving its subscription policy', async () => {
+        const cart = makeCart();
+        const onSpy = jest.spyOn(cart, 'on');
+        const { result, rerender, unmount } = renderHook(
+            ({ isEqual }) => {
+                const selector = useCallback((data: Cart) => ({ qty: data.qty }), []);
+                return useSelection(cart, selector, isEqual);
+            },
+            { initialProps: { isEqual: shallow as (a: { qty: number }, b: { qty: number }) => boolean } }
+        );
+        try {
+            const first = result.current;
+            const subscriptions = onSpy.mock.calls.length;
+            rerender({ isEqual: Object.is });
+            expect(result.current).not.toBe(first);
+            if (useSelection === useModelComputed) {
+                expect(onSpy).toHaveBeenCalledTimes(subscriptions);
+            } else {
+                expect(onSpy.mock.calls.length).toBeGreaterThan(subscriptions);
+            }
+            const second = result.current;
+            await act(async () => { await cart.setField('coupon', 'X'); });
+            expect(result.current).not.toBe(second);
+            rerender({ isEqual: shallow });
+            const third = result.current;
+            await act(async () => { await cart.setField('coupon', 'Y'); });
+            expect(result.current).toBe(third);
+        } finally {
+            unmount();
+            cart.dispose();
+        }
+    });
+
+    it('keeps the committed selector active when a new selector render suspends', async () => {
+        const cart = makeCart();
+        const suspended = new Promise<void>(() => {});
+        const attempts = jest.fn();
+        let changeId!: (id: 'a' | 'b') => void;
+        function Row({ id }: { id: 'a' | 'b' }) {
+            const name = useSelection(cart, (d) => d.items[id]?.name);
+            attempts(id);
+            if (id === 'b') throw suspended;
+            return <span>{name}</span>;
+        }
+        function App() {
+            const [id, setId] = useState<'a' | 'b'>('a');
+            changeId = setId;
+            return <React.Suspense fallback="loading"><Row id={id} /></React.Suspense>;
+        }
+        const { getByText, unmount } = render(<App />);
+        try {
+            act(() => { React.startTransition(() => changeId('b')); });
+            expect(attempts).toHaveBeenCalledWith('b');
+            expect(getByText('A')).toBeTruthy();
+            await act(async () => {
+                await cart.setField('items', { a: { name: 'Updated A' }, b: { name: 'B' } });
+            });
+            expect(getByText('Updated A')).toBeTruthy();
+            act(() => changeId('a'));
+            expect(getByText('Updated A')).toBeTruthy();
+        } finally {
+            unmount();
+            cart.dispose();
+        }
     });
 });
 

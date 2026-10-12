@@ -14,6 +14,23 @@ describe('deepEqual', () => {
         expect(deepEqual(null, undefined)).toBe(false);
     });
 
+    test('allocates a cycle guard only when comparing distinct object structures', () => {
+        const NativeWeakSet = globalThis.WeakSet;
+        const allocations = jest.spyOn(globalThis, 'WeakSet')
+            .mockImplementation(() => new NativeWeakSet());
+        const same = { value: 1 };
+
+        deepEqual(1, 2);
+        deepEqual(same, same);
+        deepEqual(new Date(0), new Date(0));
+        deepEqual(/value/, /value/);
+        expect(allocations).not.toHaveBeenCalled();
+
+        expect(deepEqual({ nested: { value: 1 } }, { nested: { value: 1 } })).toBe(true);
+        expect(allocations).toHaveBeenCalledTimes(1);
+        expect(allocations.mock.results[0]!.value).toBeInstanceOf(NativeWeakSet);
+    });
+
     test('should handle arrays correctly', () => {
         expect(deepEqual([], [])).toBe(true);
         expect(deepEqual([1, 2], [1, 2])).toBe(true);
@@ -139,22 +156,19 @@ describe('deepEqual', () => {
         });
         try {
             await model.settled();
-            const onField = jest.fn();
             const onSelection = jest.fn();
-            model.subscribeField('value', onField);
             model.subscribe((data) => data.value, onSelection);
 
             expect(await model.setField('value', next)).toBe(true);
             await model.settled();
             expect(model.getField('value')).toBe(next);
             expect(model.getField('mirror')).toBe(next);
-            expect(onField).toHaveBeenCalledTimes(1);
-            expect(onField).toHaveBeenCalledWith(next);
+            expect(onSelection).toHaveBeenCalledTimes(1);
             expect(onSelection).toHaveBeenCalledWith(next, previous);
 
             await model.setField('value', next);
             await model.settled();
-            expect(onField).toHaveBeenCalledTimes(1);
+            expect(onSelection).toHaveBeenCalledTimes(1);
         } finally {
             model.dispose();
         }

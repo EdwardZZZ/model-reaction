@@ -102,8 +102,8 @@ model-reaction:  setField -> [transform] -> [validate] -> commit -> [reaction] -
   `dirtyData` + `validationErrors` + `formatValidationErrors`.
 - **Reactions built-in**: `fields → computed → action`, with automatic
   scheduling from declared dependencies and circular-dependency detection.
-- **Field-level subscriptions**: `subscribeField` / `useModelField` provide a
-  direct single-field path without writing selectors.
+- **Field-level subscriptions**: `useModelField` watches one field in React;
+  outside React, `subscribe((data) => data[field], callback)` observes its value.
 - **Async coordination**: `settled()` waits for *all* pending reactions
   and validations in one line.
 - **Error classification**: typed model error events — cleaner
@@ -115,7 +115,7 @@ model-reaction:  setField -> [transform] -> [validate] -> commit -> [reaction] -
 - **Thin ecosystem**: a dedicated DevTools extension exists, but there is no
   persistence or middleware ecosystem.
 - **Weak multi-store coordination**: cross-model orchestration is manual
-  (wired by hand via `subscribeField`). Note this refers to linking
+  (wired by hand via `subscribe`). Note this refers to linking
   **multiple independent models**, not "large forms must be split into
   models" — the right approach for a large form is a **single model composed
   from schema fragments** (`{ ...baseSchema, ...contactSchema }`), so the
@@ -243,6 +243,10 @@ Real projects often combine them:
   magnitude**.
 
 ### 8.2 Measured Numbers
+
+These historical measurements predate the subscription API simplification.
+The current benchmark uses `subscribe(data => data.a, callback)` for its
+single-field scenarios; re-run it before comparing current performance.
 
 | Scenario | zustand | model-reaction | Ratio |
 | --- | --- | --- | --- |

@@ -2,7 +2,7 @@
  * BEST_PRACTICES §7.2 — Stable selector references
  *
  * Pass a stable `selector` reference to `useModelSelector` to avoid extra
- * subscriptions and renders. When the selector returns a fresh container,
+ * subscriptions. When the selector returns a fresh container,
  * pair it with `shallow`.
  */
 import * as React from 'react';

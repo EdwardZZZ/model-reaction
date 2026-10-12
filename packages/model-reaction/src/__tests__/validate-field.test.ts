@@ -29,6 +29,57 @@ describe('validateField (unit)', () => {
         expect(onError).not.toHaveBeenCalled();
     });
 
+    test.each([false, true])(
+        'boolean validators report asynchronously without timeout tasks (valid: %s)',
+        async (valid) => {
+            const timeout = jest.spyOn(globalThis, 'setTimeout');
+            const onError = jest.fn();
+            const result = validateField({
+                schema: {
+                    type: 'string',
+                    validator: [{ type: 'sync', message: 'sync failure', validate: () => valid }],
+                },
+                field: 'field',
+                value: 'value',
+                onError,
+            });
+
+            expect(onError).not.toHaveBeenCalled();
+            expect(await result).toBe(valid);
+            expect(timeout).not.toHaveBeenCalled();
+            expect(onError).toHaveBeenCalledTimes(valid ? 0 : 1);
+        }
+    );
+
+    test('only async validators allocate and release timeout tasks in a mixed field', async () => {
+        let release!: (valid: boolean) => void;
+        const pending = new Promise<boolean>((resolve) => { release = resolve; });
+        const timeout = jest.spyOn(globalThis, 'setTimeout');
+        const clear = jest.spyOn(globalThis, 'clearTimeout');
+        const result = validateField({
+            schema: {
+                type: 'string',
+                validator: [
+                    { type: 'sync', message: 'sync', validate: () => true },
+                    { type: 'async', message: 'async', validate: () => pending },
+                ],
+            },
+            field: 'field',
+            value: 'value',
+        });
+
+        try {
+            expect(timeout).toHaveBeenCalledTimes(1);
+            expect(clear).not.toHaveBeenCalled();
+            release(true);
+            expect(await result).toBe(true);
+            expect(clear).toHaveBeenCalledWith(timeout.mock.results[0]!.value);
+        } finally {
+            release(true);
+            await result;
+        }
+    });
+
     test('skips validators that lack a validate method', async () => {
         const onError = jest.fn();
         const schema: FieldSchema = {

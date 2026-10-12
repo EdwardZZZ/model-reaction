@@ -20,7 +20,8 @@ import * as React from 'react';
 import { useCallback, useEffect, useState } from 'react';
 // `React` is required for the JSX runtime even if not directly referenced.
 void React;
-import { createModel, ValidationRules, type ModelReturn } from '../src/index';
+import { createModel, type ModelReturn } from '../src/index';
+import { ValidationRules } from '../src/validation';
 import {
     Field,
     ModelProvider,
@@ -77,8 +78,8 @@ function QtyValue() {
 //    Mutating `coupon` or `name` will NOT cause this to re-render.
 function Total() {
     const cart = useModel<Cart>();
-    // `useModelSelector` captures the selector at subscribe time, so wrap
-    // inline arrows in `useCallback` to avoid resubscribing every render.
+    // Keep selector identity stable to avoid rebuilding the model subscription.
+    // Use useModelComputed for inline selectors that close over current props.
     const selectTotal = useCallback((d: Cart) => d.qty * d.price, []);
     const total = useModelSelector(cart, selectTotal);
     return <span>Total: {total}</span>;
@@ -258,7 +259,7 @@ async function runExample(): Promise<void> {
             console.log('[inferred] tax * rate →', v);
         }
     );
-    cart.subscribeField('name', (v) => {
+    cart.subscribe((data) => data.name, (v) => {
         console.log('[non-React subscriber] name changed →', v);
     });
     cart.subscribe(

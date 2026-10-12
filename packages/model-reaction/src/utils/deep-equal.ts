@@ -19,7 +19,7 @@
 export function deepEqual(
     a: unknown,
     b: unknown,
-    seen: WeakSet<object> = new WeakSet<object>()
+    seen?: WeakSet<object>
 ): boolean {
     if (a === b) return true;
 
@@ -43,6 +43,7 @@ export function deepEqual(
 
     // This node is already on the current path — we've hit a cycle. Fall back
     // to reference identity to stop the recursion.
+    seen ??= new WeakSet<object>();
     if (seen.has(a) || seen.has(b)) return a === b;
     seen.add(a);
     seen.add(b);

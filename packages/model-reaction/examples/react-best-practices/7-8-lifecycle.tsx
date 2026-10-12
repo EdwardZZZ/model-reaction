@@ -8,7 +8,8 @@ import * as React from 'react';
 import { useEffect, useState } from 'react';
 void React;
 
-import { createModel, ValidationRules, type ModelReturn } from '../../src/index';
+import { createModel, type ModelReturn } from '../../src/index';
+import { ValidationRules } from '../../src/validation';
 import { ModelProvider } from '../../src/react';
 
 interface User {

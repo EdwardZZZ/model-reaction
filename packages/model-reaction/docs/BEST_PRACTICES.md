@@ -44,6 +44,7 @@ unsubscribe();
   that write the same target.
 
 ### Conditional Validation
+- Import rule builders and formatting helpers from `model-reaction/validation`.
 - Use `Rule.when(...)` for conditional rules.
 - Read other fields through the validator's `data` parameter.
 - Extract shared domain checks into named rules or validation services.
@@ -114,7 +115,7 @@ binding a text input with validation directly to committed model data.
 
 `useModelSelector` captures the `selector` and `isEqual` arguments at
 subscription time. Passing a fresh function each render means a fresh
-subscription and an extra render:
+subscription:
 
 ```tsx
 // ❌ Re-subscribes every render.
@@ -126,7 +127,7 @@ const total = useModelSelector(cart, selectTotal);
 ```
 
 If the selector returns a fresh container, pair it with `shallow` —
-the selector still needs a stable reference:
+use a stable selector reference to avoid resubscribing:
 
 ```tsx
 const selectSlice = useCallback(
@@ -134,6 +135,19 @@ const selectSlice = useCallback(
     [],
 );
 const slice = useModelSelector(cart, selectSlice, shallow);
+```
+
+### 7.2bis Inline selectors with `useModelComputed`
+
+Use `useModelComputed` for selectors that close over current props without
+resubscribing. Its subscription depends only on the model; every field change
+notifies React and the shared snapshot getter compares the selected result.
+Both hooks evaluate selectors on field changes, so neither avoids the next
+computation merely by applying equality.
+
+```tsx
+const item = useModelComputed(cart, (data) => data.items[id]);
+const slice = useModelComputed(cart, (data) => ({ qty: data.qty, price: data.price }), shallow);
 ```
 
 ### 7.3 Avoid prop drilling with `<ModelProvider>`

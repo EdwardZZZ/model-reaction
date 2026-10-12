@@ -32,7 +32,8 @@ npm install model-reaction react
 ### Quick start
 
 ```ts
-import { createModel, ValidationRules } from 'model-reaction';
+import { createModel } from 'model-reaction';
+import { ValidationRules } from 'model-reaction/validation';
 
 const user = createModel({
   firstName: {

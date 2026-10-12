@@ -42,7 +42,7 @@ m.dispose();                                  // ALWAYS call this in cleanup
 | Set many fields in one validation+reaction pass | `setFields({ a, b })` |
 | Read current value | `getField(name)` or `m.data.name` |
 | Get failed input back | `getDirtyData()` |
-| React to change outside React | `subscribeField` / `subscribe` |
+| React to change outside React | `subscribe(selector, callback)` |
 | Inspect schema for tooling | iterate the schema literal directly (it's a plain object) |
 
 ---
@@ -75,7 +75,8 @@ m.dispose();                                  // ALWAYS call this in cleanup
 ### 4.1 Form model
 
 ```ts
-import { createModel, ValidationRules } from 'model-reaction';
+import { createModel } from 'model-reaction';
+import { ValidationRules } from 'model-reaction/validation';
 
 export const userModel = createModel({
   name: {

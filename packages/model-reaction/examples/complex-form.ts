@@ -1,9 +1,5 @@
-import {
-  createModel,
-  formatValidationErrors,
-  Rule,
-  ValidationRules,
-} from '../src/index';
+import { createModel } from '../src/index';
+import { formatValidationErrors, Rule, ValidationRules } from '../src/validation';
 
 interface UserInfo {
     name: string;

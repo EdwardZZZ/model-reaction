@@ -11,6 +11,12 @@
       "require": "./dist/index.cjs.js",
       "default": "./dist/index.js"
     },
+    "./validation": {
+      "types": "./dist/types/validation.d.ts",
+      "import": "./dist/validation.mjs",
+      "require": "./dist/validation.cjs.js",
+      "default": "./dist/validation.js"
+    },
     "./react": {
       "types": "./dist/types/react.d.ts",
       "import": "./dist/react.mjs",

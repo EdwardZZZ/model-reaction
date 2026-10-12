@@ -29,7 +29,7 @@ export class ModelManager<
     T extends Record<string, any> = Record<string, any>,
 > implements ModelReturn<T> {
     private modelData: T = {} as T;
-    private errors: Record<string, ValidationError[]> = {};
+    private errors: Record<string, readonly ValidationError[]> = {};
     /** Last value provided for a field whose validation failed. */
     private dirtyData: Partial<T> = {};
     private dataSnapshot: Readonly<T> | null = null;
@@ -154,7 +154,7 @@ export class ModelManager<
                 return {
                     field,
                     schema,
-                    value: schema ? this.transformValue(schema, value) : value,
+                    value: schema?.transform ? schema.transform(value) : value,
                 };
             });
             const validationData = {
@@ -196,7 +196,14 @@ export class ModelManager<
             };
             const commitOptions: CommitOptions = { ...options, validationData };
             return Promise.all(
-                fields.map((field) => this.revalidateField(field, commitOptions))
+                fields.map((field) => this.validateAndCommit(
+                    field,
+                    this.schema[field] as FieldSchema,
+                    field in this.dirtyData
+                        ? this.dirtyData[field as keyof T]
+                        : this.modelData[field as keyof T],
+                    commitOptions
+                ))
             );
         }, (results) => {
             const allValid = results.every(Boolean);
@@ -218,10 +225,7 @@ export class ModelManager<
         const endBatch = this.pendingTasks.begin();
         const changedFields = new Set<string>();
         try {
-            const results = await validate({
-                suppressReactions: true,
-                changedFields,
-            });
+            const results = await validate({ changedFields });
             this.reactionSystem.triggerReactionsForFields([...changedFields]);
             return complete(results);
         } finally {
@@ -230,21 +234,8 @@ export class ModelManager<
     }
 
     // -------------------------------------------------------------------------
-    // Selector / field subscriptions (UI binding layer)
+    // Selector subscriptions
     // -------------------------------------------------------------------------
-
-    /**
-     * Subscribe to a single field. Callback fires only when that field's
-     * committed value changes. Returns an unsubscribe function.
-     */
-    subscribeField = <K extends keyof T>(
-        field: K,
-        callback: (value: T[K]) => void
-    ): (() => void) => {
-        return this.on(ModelEvents.FIELD_CHANGE, (e) => {
-            if (e.field === field) callback(e.value as T[K]);
-        });
-    };
 
     /**
      * Subscribe to a derived value. Callback fires only when `selector(data)`
@@ -279,13 +270,7 @@ export class ModelManager<
 
     get validationErrors(): Readonly<Record<string, readonly ValidationError[]>> {
         if (this.errorsSnapshot === null) {
-            const snapshot: Record<string, readonly ValidationError[]> = {};
-            for (const [field, errors] of Object.entries(this.errors)) {
-                snapshot[field] = Object.freeze(
-                    errors.map((error) => Object.freeze({ ...error }))
-                );
-            }
-            this.errorsSnapshot = Object.freeze(snapshot);
+            this.errorsSnapshot = Object.freeze({ ...this.errors });
         }
         return this.errorsSnapshot;
     }
@@ -361,35 +346,9 @@ export class ModelManager<
             return false;
         }
 
-        const transformed = this.transformValue(schema, value);
+        const transformed = schema.transform ? schema.transform(value) : value;
 
         return this.validateAndCommit(field, schema, transformed, options);
-    }
-
-    private transformValue(schema: FieldSchema, value: any): any {
-        return schema.transform ? schema.transform(value) : value;
-    }
-
-    /**
-     * Re-validate the *current* committed (or last-attempted) value of a field.
-     * Used by `validateAll`.
-     */
-    private async revalidateField(
-        field: string,
-        opts: CommitOptions
-    ): Promise<boolean> {
-        const fieldKey = field as keyof T;
-        const value =
-            field in this.dirtyData
-                ? this.dirtyData[fieldKey]
-                : this.modelData[fieldKey];
-
-        return this.validateAndCommit(
-            field,
-            this.schema[field] as FieldSchema,
-            value,
-            opts
-        );
     }
 
     private async validateAndCommit(
@@ -402,21 +361,30 @@ export class ModelManager<
         const endTask = this.pendingTasks.begin();
         try {
             const requestId = ++this.requestIdCounter;
+            const isCurrent = () =>
+                !this.disposed && this.validationRequestIds[field] === requestId;
             this.validationRequestIds[field] = requestId;
-            this.errors[field] = [];
+            this.errors[field] = Object.freeze([]);
             this.errorsSnapshot = null;
 
-            const isValid = await this.runValidators(
+            const isValid = await validateField({
                 schema,
                 value,
                 field,
-                requestId,
-                options.validationData
-            );
+                timeout: this.asyncValidationTimeout,
+                failFast: this.options.failFast ?? false,
+                data: {
+                    ...(options.validationData ?? this.modelData),
+                },
+                isCurrent,
+                onError: (error) => {
+                    if (!isCurrent()) return;
+                    this.recordError(field, error);
+                    this.emit(ModelEvents.VALIDATION_ERROR, { ...error });
+                },
+            });
 
-            if (this.disposed || this.validationRequestIds[field] !== requestId) {
-                return false;
-            }
+            if (!isCurrent()) return false;
 
             if (isValid) {
                 this.commitValid(field, value, options);
@@ -438,36 +406,11 @@ export class ModelManager<
     /** Store an error before its owner emits the corresponding typed event. */
     private recordError(field: string, error: ValidationError): void {
         if (this.disposed) return;
-        if (!this.errors[field]) this.errors[field] = [];
-        this.errors[field].push({ ...error });
+        this.errors[field] = Object.freeze([
+            ...(this.errors[field] ?? []),
+            Object.freeze({ ...error }),
+        ]);
         this.errorsSnapshot = null;
-    }
-
-    private runValidators(
-        schema: FieldSchema,
-        value: unknown,
-        field: string,
-        requestId: number,
-        validationData?: Record<string, any>
-    ): Promise<boolean> {
-        const isCurrent = () =>
-            !this.disposed && this.validationRequestIds[field] === requestId;
-        return validateField({
-            schema,
-            value,
-            field,
-            timeout: this.asyncValidationTimeout,
-            failFast: this.options.failFast ?? false,
-            data: {
-                ...(validationData ?? (this.modelData as Record<string, any>)),
-            },
-            isCurrent,
-            onError: (error) => {
-                if (!isCurrent()) return;
-                this.recordError(field, error);
-                this.emit(ModelEvents.VALIDATION_ERROR, { ...error });
-            },
-        });
     }
 
     /**
@@ -485,8 +428,7 @@ export class ModelManager<
         value: any,
         options: CommitOptions
     ): void {
-        const { reactionStack = [], suppressReactions = false, changedFields } =
-            options;
+        const { reactionStack = [], changedFields } = options;
         const fieldKey = field as keyof T;
         const dataChanged = !deepEqual(this.modelData[fieldKey], value);
         const hadDirty = field in this.dirtyData;
@@ -510,8 +452,8 @@ export class ModelManager<
                 field,
                 value,
             });
-            if (!suppressReactions) {
-                this.reactionSystem.triggerReactions(field, reactionStack);
+            if (!changedFields) {
+                this.reactionSystem.triggerReactionsForFields([field], reactionStack);
             }
         }
     }

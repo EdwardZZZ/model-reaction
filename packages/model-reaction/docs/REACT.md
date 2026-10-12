@@ -40,7 +40,8 @@ it in your app if you use this entry point.
 
 ```tsx
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
-import { createModel, ValidationRules } from 'model-reaction';
+import { createModel } from 'model-reaction';
+import { ValidationRules } from 'model-reaction/validation';
 import {
     Field,
     ModelProvider,
@@ -278,7 +279,7 @@ instance in the cleanup, and pass it down through context. This also handles
 StrictMode's extra development setup/cleanup cycle: each setup gets a fresh
 model, and its matching cleanup disposes it.
 This owner pattern is for client-rendered UI; for SSR, use a request-scoped
-model as described in [SSR and concurrent rendering](#79-ssr-and-concurrent-rendering),
+model as described in [SSR and concurrent rendering](BEST_PRACTICES.md#79-ssr-and-concurrent-rendering),
 because effects do not run during server rendering.
 
 ```tsx

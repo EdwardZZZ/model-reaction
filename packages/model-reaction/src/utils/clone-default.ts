@@ -7,23 +7,27 @@
  * leaves here, matching how `deepEqual` compares them. Cyclic structures are
  * guarded via a `WeakMap`.
  */
-export function cloneDefault<V>(value: V, seen: WeakMap<object, any> = new WeakMap()): V {
+export function cloneDefault<V>(value: V, seen?: WeakMap<object, any>): V {
     if (value === null || typeof value !== 'object') return value;
     if (value instanceof Date || value instanceof RegExp) return value;
 
+    // Only clone plain objects and arrays; leave class instances by reference.
+    const isArray = Array.isArray(value);
+    if (!isArray) {
+        const proto = Object.getPrototypeOf(value);
+        if (proto !== Object.prototype && proto !== null) return value;
+    }
+
+    seen ??= new WeakMap();
     const existing = seen.get(value as object);
     if (existing) return existing;
 
-    if (Array.isArray(value)) {
+    if (isArray) {
         const copy: unknown[] = [];
         seen.set(value as object, copy);
         for (const item of value) copy.push(cloneDefault(item, seen));
         return copy as unknown as V;
     }
-
-    // Only clone plain objects; leave class instances untouched by reference.
-    const proto = Object.getPrototypeOf(value);
-    if (proto !== Object.prototype && proto !== null) return value;
 
     const copy: Record<string, unknown> = {};
     seen.set(value as object, copy);

@@ -89,14 +89,14 @@ model-reaction:  setField -> [transform] -> [validate] -> commit -> [reaction] -
 - **Schema-first**：字段类型 / 校验 / 默认值 / 反应 / 转换集中声明，一目了然。
 - **校验内置**：同步 / 异步 / 条件 / 跨字段，附 `dirtyData` + `validationErrors` + `formatValidationErrors`。
 - **Reaction 内置**：`fields → computed → action`，按声明的依赖自动调度并检测循环依赖。
-- **字段级订阅**：`subscribeField` / `useModelField` 提供无需编写 selector 的单字段路径。
+- **字段级订阅**：React 中用 `useModelField`；React 外用 `subscribe((data) => data[field], callback)` 观察单字段值。
 - **异步协调**：`settled()` 一行等齐所有 reaction + validation。
 - **错误分类**：类型化模型错误事件，比 reducer 里 try-catch 整洁。
 
 **劣势**
 - **不是通用 store**：不适合管 UI 状态 / 路由 / 全局共享。
 - **生态薄**：已有专用 DevTools 扩展，但没有持久化或中间件生态。
-- **多 store 协调弱**：跨 model 联动需自行编排（`subscribeField` 手动串）。
+- **多 store 协调弱**：跨 model 联动需自行编排（`subscribe` 手动串）。
   注意这指的是**多个独立 model 之间**的联动，不等于「大型表单要拆 model」——
   大型表单的正确姿势是**单个 model + schema 片段解构组合**（`{ ...baseSchema, ...contactSchema }`），
   这样 `reaction` 的跨字段依赖图仍在同一 model 内自动管理，反而绕开了本条弱项；
@@ -214,6 +214,9 @@ const { draft, setDraft, meta, onBlur, showError } =
   机器波动，**仅作为相对量级参考**。
 
 ### 8.2 真实数据
+
+以下是订阅 API 精简前的历史数据。当前脚本的单字段场景使用
+`subscribe(data => data.a, callback)`；比较当前性能前应重新运行。
 
 | 场景 | zustand | model-reaction | 比值 |
 | --- | --- | --- | --- |

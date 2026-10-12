@@ -1,14 +1,9 @@
 /**
  * BEST_PRACTICES §7.2bis — `useModelComputed`
  *
- * Variant of `useModelSelector` whose subscription does not depend on selector
- * identity. The current render's selector is used for snapshots, so:
- *   - inline arrow functions are fine (no `useCallback` needed);
- *   - per-render closure variables (e.g. `id`) always reflect the latest
- *     render without resubscribing.
- *
- * Snapshots are cached. Use `shallow` when equivalent new containers should
- * retain their reference across updates; see docs/REACT.md.
+ * The subscription depends only on the model. Snapshot reads use the current
+ * render's selector, so inline selectors can close over props. Use `shallow`
+ * when equivalent container results should retain their reference.
  */
 import * as React from 'react';
 void React;
@@ -28,20 +23,16 @@ const cart = createModel<Cart>({
     price: { type: 'number', default: 100 },
 });
 
-// 1. Inline selector — no `useCallback` ceremony required.
 export function Total() {
     const total = useModelComputed(cart, (d) => d.qty * d.price);
     return <span>Total: {total}</span>;
 }
 
-// 2. Per-render closure variable. With `useModelSelector` this would
-//    require `useCallback(..., [id])`; with `useModelComputed` it Just Works.
 export function Row({ id }: { id: string }) {
     const item = useModelComputed(cart, (d) => d.items[id]);
     return <span>{item?.name ?? '—'}</span>;
 }
 
-// 3. Shallow equality preserves equivalent summaries across model updates.
 export function Summary() {
     const { total, count } = useModelComputed(
         cart,

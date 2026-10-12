@@ -30,6 +30,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and the `packages/devtools/` workspace package.
 
 ### Changed
+- **Breaking:** moved `ValidationRules`, `Rule`, `formatValidationErrors`, and
+  the `ValidationErrorFormatter` type from the root to
+  `model-reaction/validation`. The core still executes validators. Browser
+  users load the separate `dist/validation.js` UMD helpers when needed.
+- **Breaking:** removed `model.subscribeField`; use
+  `model.subscribe(data => data[field], callback)` or filter `field:change`
+  events.
+  See the migration sections in `docs/API.md` and `docs/API_CN.md`.
 - **Breaking:** `reaction.computed` is now a synchronous pure-computation
   contract. Returning a Promise reports `reaction:error` and does not commit a
   value; move asynchronous work and other side effects to `reaction.action`.
@@ -52,6 +60,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   through the `import` condition without parsing them as CommonJS.
 
 ### Internal
+- Boolean validator results skip timeout tasks while retaining asynchronous
+  reporting; Promise results keep timeout and stale-request protection.
+- Cycle guards in `deepEqual` and `cloneDefault` are allocated only when
+  traversing object structures.
+- Error objects and field error arrays are frozen when stored. Error snapshots
+  reuse unchanged field arrays and preserve earlier snapshots.
+- Removed the redundant batch reaction flag and thin validation/transform
+  wrappers; single-field and batch reactions share one trigger method.
 - Extracted `eachReactionEdge` (`src/reaction/reaction-graph.ts`) as the single
   definition of how a schema's `reaction.fields` are read as dependency edges.
   Both the runtime reaction index (`ReactionSystem.collectReactions`) and the
@@ -59,11 +75,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   asserts the primitive, the runtime index, and the graph all agree.
 
 ### Docs
-- Documented that `useModelComputed` requires a structural `isEqual` (e.g.
-  `shallow`) when its selector returns a fresh object/array each call;
-  otherwise the default `Object.is` never matches and React aborts with
-  "Maximum update depth exceeded". Clarified in `docs/REACT.md`,
-  `docs/REACT_CN.md`, and the hook's JSDoc.
+- Clarified the separate subscription policies of `useModelSelector` and
+  `useModelComputed`. Both share snapshot caching; `shallow` retains equivalent
+  container results across updates and avoids unrelated re-renders.
 - Updated the DevTools row in `docs/COMPARISON.md` / `docs/COMPARISON_CN.md`
   from "not yet" to the new browser extension.
 
