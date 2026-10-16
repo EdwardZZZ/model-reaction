@@ -128,6 +128,43 @@ written, `dirtyData` is unchanged, and no `field:change`, downstream reaction,
 or current reaction `action` is triggered. Later entries in a reaction array
 still run in declaration order.
 
+#### Result types
+
+TypeScript checks each `computed` result, including every entry of a reaction
+array, against the field's `type`: `string`, `number`, `boolean`, `Date`,
+`object`, or a readonly array, plus `SKIP_REACTION`. `enum` results are not
+checked. `values` is typed as `Record<string, any>`, so a result read straight
+from it (`(v) => v.name`) is `any` and also passes unchecked.
+
+```ts
+total: {
+    type: 'number',
+    // ❌ Type error: a number field cannot derive a string.
+    reaction: { fields: ['price'], computed: ({ price }) => `${price}` },
+}
+```
+
+The check is strict: `null` and `undefined` are rejected even when the data
+type allows them. A standalone reaction can declare its result type with
+`Reaction<T>`; it then fits only fields of that type. A bare `Reaction` (that
+is, `Reaction<any>`) is unchecked and is the escape hatch for nullable derived
+values:
+
+```ts
+import type { Reaction } from 'model-reaction';
+
+const label: Reaction = {
+    fields: ['price'],
+    computed: ({ price }) => (price > 0 ? `$${price}` : null),
+};
+```
+
+A function declared outside the schema that returns `SKIP_REACTION` infers the
+return type `symbol`; annotate it as `(): typeof SKIP_REACTION`. Schema
+fragment factories should return a single variant such as
+`FieldSchema<'string'>`, so a spread fragment keeps its tag when a reaction is
+added.
+
 When several reactions write the same target for the same changed dependency,
 the last scheduled write is authoritative; earlier writes are superseded. Thus,
 in the example, the second reaction determines `total` if its result passes
@@ -299,3 +336,9 @@ These changes are breaking and require updating consumers:
   `model.subscribe(data => data[field], callback)`. The callback also receives
   the previous value. Use `on('field:change', handler)` with field filtering
   when callbacks must follow raw field events.
+- `reaction.computed` results are now type-checked against the field `type`
+  (see [Result types](#result-types)). Nullable results need a bare
+  `Reaction`, and standalone functions returning `SKIP_REACTION` need a
+  `(): typeof SKIP_REACTION` annotation. `FieldSchema` is now a union of
+  per-tag variants, so `interface X extends FieldSchema` no longer compiles;
+  use a type intersection or a single variant such as `FieldSchema<'string'>`.

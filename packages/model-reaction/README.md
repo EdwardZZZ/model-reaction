@@ -118,6 +118,10 @@ const m = createModel({
 });
 ```
 
+TypeScript checks the result against the field's `type`, so `full` must return
+a string or `SKIP_REACTION`; see [docs/API.md](docs/API.md#reactions) for the
+rules and exceptions.
+
 ### Dirty Data
 
 Values that fail validation are recorded as "dirty" and kept separate from the

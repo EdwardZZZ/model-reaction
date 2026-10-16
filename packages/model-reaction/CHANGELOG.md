@@ -41,6 +41,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Breaking:** `reaction.computed` is now a synchronous pure-computation
   contract. Returning a Promise reports `reaction:error` and does not commit a
   value; move asynchronous work and other side effects to `reaction.action`.
+- **Breaking (types):** `reaction.computed` results are type-checked against
+  the field `type` (`string`, `number`, `boolean`, `Date`, `object`, readonly
+  array; `enum` unchecked), plus `SKIP_REACTION`. `Reaction<T>` declares a
+  standalone reaction's result type, and a bare `Reaction` stays unchecked.
+  Nullable results are rejected; use a bare `Reaction` for them. Annotate
+  standalone functions returning `SKIP_REACTION` as
+  `(): typeof SKIP_REACTION`. `FieldSchema` is now a union discriminated by
+  `type`, so `interface X extends FieldSchema` no longer compiles; use an
+  intersection or a single variant such as `FieldSchema<'string'>`. Runtime
+  behavior is unchanged.
 - The minimum supported Node.js version is now 18, aligned with the workspace
   toolchain and CI matrix.
 - **Reactions now run an initial pass at construction.** Previously a derived

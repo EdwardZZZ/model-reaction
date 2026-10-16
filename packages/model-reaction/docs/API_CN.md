@@ -112,6 +112,41 @@ computed: ({ enabled, source }) =>
 `dirtyData`，也不会触发 `field:change`、下游 reaction 或当前 reaction 的
 `action`。reaction 数组中的后续项仍会按声明顺序执行。
 
+#### 返回值类型
+
+TypeScript 会按字段的 `type` 检查每个 `computed` 的返回值（reaction 数组中的
+每一项都会检查）：分别为 `string`、`number`、`boolean`、`Date`、`object`
+或只读数组，另外都允许 `SKIP_REACTION`。`enum` 字段的返回值不检查。
+`values` 的类型是 `Record<string, any>`，所以直接返回其中的值（`(v) => v.name`）
+得到的是 `any`，同样不会被检查。
+
+```ts
+total: {
+    type: 'number',
+    // ❌ 类型错误：number 字段不能派生出字符串
+    reaction: { fields: ['price'], computed: ({ price }) => `${price}` },
+}
+```
+
+检查是严格的：即使数据类型允许，`null` 和 `undefined` 也会报错。单独定义的
+reaction 可以用 `Reaction<T>` 声明返回值类型，此时它只能用于该类型的字段。
+不带类型参数的 `Reaction`（即 `Reaction<any>`）不做检查，派生值可能为 null 时
+用它绕过：
+
+```ts
+import type { Reaction } from 'model-reaction';
+
+const label: Reaction = {
+    fields: ['price'],
+    computed: ({ price }) => (price > 0 ? `$${price}` : null),
+};
+```
+
+在 schema 外单独声明、返回 `SKIP_REACTION` 的函数，返回类型会被推断为
+`symbol`，需要标注为 `(): typeof SKIP_REACTION`。Schema 片段工厂应返回
+`FieldSchema<'string'>` 这类单一分支，这样展开片段再添加 reaction 时，
+字段仍保留原来的 `type`。
+
 多个 reaction 因同一个依赖字段变化而写入同一目标时，最后调度的写入具有最终效力，
 之前的写入会被更新的写入覆盖。因此上例中，如果第二个结果通过校验，`total` 由第二个
 reaction 决定；如果它校验失败，结果会进入 `dirtyData`，不会回退采用前一个 reaction
@@ -277,3 +312,9 @@ const custom = formatValidationErrors(
 - `model.subscribeField(field, callback)` 改为
   `model.subscribe(data => data[field], callback)`，回调会额外收到上一个值。
   若必须按原始字段事件触发，用 `on('field:change', handler)` 并筛选字段名。
+- `reaction.computed` 的返回值现在会按字段 `type` 做类型检查（见
+  [返回值类型](#返回值类型)）。可能返回 null 的 reaction 需要改用不带类型参数的
+  `Reaction`；单独声明、返回 `SKIP_REACTION` 的函数需要标注
+  `(): typeof SKIP_REACTION`。`FieldSchema` 改为按 `type` 区分的联合类型，
+  `interface X extends FieldSchema` 不再能编译；改用类型交叉，或
+  `FieldSchema<'string'>` 这类单一分支。

@@ -111,6 +111,9 @@ const m = createModel({
 });
 ```
 
+TypeScript 会按字段的 `type` 检查返回值，因此 `full` 只能返回字符串或
+`SKIP_REACTION`；具体规则与例外见 [docs/API_CN.md](docs/API_CN.md#反应)。
+
 ### 脏数据
 
 验证失败的值会被记录为"脏数据"，与已提交状态隔离保存。

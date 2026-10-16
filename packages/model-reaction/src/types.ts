@@ -69,7 +69,11 @@ export interface ModelEventMap<T = Record<string, any>> {
     [ModelEvents.DIRTY_DATA_CLEARED]: { fields: Array<keyof T & string> };
 }
 
-export interface Reaction {
+/**
+ * @typeParam T Value type `computed` must return. The `any` default leaves a
+ * bare `Reaction` unchecked, so it fits any field.
+ */
+export interface Reaction<T = any> {
     /** Top-level model fields whose values are passed to `computed`. */
     fields: string[];
     /**
@@ -78,14 +82,31 @@ export interface Reaction {
      * and other side effects in `action`. Return {@link SKIP_REACTION} to leave
      * the target unchanged and skip `action`.
      */
-    computed: (values: Record<string, any>) => any;
+    computed: (values: Record<string, any>) => T | typeof SKIP_REACTION;
     /** Optional side effect run after the computed value validates and commits. */
     action?: (data: Record<string, any>) => void | PromiseLike<void>;
 }
 
-export interface FieldSchema {
+/**
+ * Value type `reaction.computed` must return for each `type` tag. Enum
+ * members live in `values`, which this per-tag lookup cannot see, so enum
+ * results are not checked.
+ */
+interface ComputedValueMap {
+    string: string;
+    number: number;
+    boolean: boolean;
+    object: object;
+    array: readonly unknown[];
+    date: Date;
+    enum: unknown;
+}
+
+type FieldType = keyof ComputedValueMap;
+
+interface TypedFieldSchema<K extends FieldType> {
     /** Type metadata used for inference and tooling; not runtime validation. */
-    type: 'string' | 'number' | 'boolean' | 'object' | 'array' | 'date' | 'enum';
+    type: K;
     validator?: Validator[];
     /** Initial value, seeded without validation. */
     default?: unknown;
@@ -95,10 +116,21 @@ export interface FieldSchema {
      * Reaction definition. When an array is used, matching reactions are
      * scheduled in declaration order for each changed dependency field.
      */
-    reaction?: Reaction | Reaction[];
+    reaction?:
+        | Reaction<ComputedValueMap[K]>
+        | Reaction<ComputedValueMap[K]>[];
     /** Transform input before validation. */
     transform?: (value: any) => any;
 }
+
+/**
+ * Field definition, discriminated by `type`: `reaction.computed` must return
+ * the matching {@link ComputedValueMap} value or {@link SKIP_REACTION}.
+ * `FieldSchema<'number'>` selects a single variant.
+ */
+export type FieldSchema<K extends FieldType = FieldType> = {
+    [P in K]: TypedFieldSchema<P>;
+}[K];
 
 export type Model<T = Record<string, any>> = {
     [K in keyof T]-?: FieldSchema;

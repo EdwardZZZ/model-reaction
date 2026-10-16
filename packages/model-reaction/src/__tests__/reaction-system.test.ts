@@ -654,7 +654,7 @@ describe('ReactionSystem - settled() waits for chained reactions and async actio
 
     test('SKIP_REACTION bypasses validation, commit, action, and downstream reactions', async () => {
         const targetValidator = jest.fn(() => true);
-        const targetComputed = jest.fn(() => SKIP_REACTION);
+        const targetComputed = jest.fn((): typeof SKIP_REACTION => SKIP_REACTION);
         const targetAction = jest.fn();
         const downstreamComputed = jest.fn(() => 'updated');
         const targetSubscriber = jest.fn();
@@ -747,6 +747,8 @@ describe('ReactionSystem - settled() waits for chained reactions and async actio
             'reaction.computed must return synchronously; move async work to reaction.action';
         const model = createModel({
             source: { type: 'number' as const },
+            // @ts-expect-error a Promise is not a number; bypass the types to
+            // exercise the runtime guard.
             target: {
                 type: 'number' as const,
                 default: 0,
