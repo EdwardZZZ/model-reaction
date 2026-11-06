@@ -1,5 +1,5 @@
-import { createModel } from '../src/index';
-import { ValidationRules, Rule } from '../src/validation';
+import { createModel } from 'model-reaction';
+import { ValidationRules, Rule } from 'model-reaction/validation';
 
 interface User {
   username: string;

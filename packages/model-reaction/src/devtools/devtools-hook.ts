@@ -88,6 +88,8 @@ export interface DevtoolsModelInstance {
     getSnapshot(): DevtoolsSnapshot;
     /** Subscribe to committed field changes; returns an unsubscribe fn. */
     subscribe(listener: (change: DevtoolsChange) => void): () => void;
+    /** Subscribe to validation, dirty-data, and error snapshot updates. */
+    subscribeSnapshot?(listener: () => void): () => void;
 }
 
 /**
@@ -184,8 +186,9 @@ export function buildFieldInfo(schema: Model): Record<string, DevtoolsFieldInfo>
  * no second schema walk, and it shares the exact dependency reading used
  * everywhere else.
  */
-export function buildDependencyGraph(schema: Model): DevtoolsDependencyGraph {
-    const fields = buildFieldInfo(schema);
+export function buildDependencyGraph(
+    fields: Record<string, DevtoolsFieldInfo>
+): DevtoolsDependencyGraph {
     const nodes = Object.keys(fields);
     const edges: DevtoolsDependencyEdge[] = [];
     for (const [to, info] of Object.entries(fields)) {

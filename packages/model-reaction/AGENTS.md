@@ -185,14 +185,15 @@ root, run **all three** before submitting:
 
 ```bash
 pnpm --filter model-reaction run lint
-pnpm --filter model-reaction run typecheck        # source + test types (CI gate)
-pnpm --filter model-reaction exec jest --silent    # full suite, including doc scenarios
+pnpm --filter model-reaction run typecheck        # source + tests + checked examples (CI gate)
+pnpm --filter model-reaction run test --silent    # full suite, including doc scenarios
 ```
 
 (Or `cd packages/model-reaction` and use the equivalent `npm run lint` /
 `npm run typecheck` / `npx jest --silent` commands.)
 
-Then verify the README scenarios still work end-to-end:
+Then run the React example's SSR smoke check (mounted behavior is covered by
+the React suite):
 
 ```bash
 pnpm --filter model-reaction run example:react

@@ -151,13 +151,10 @@ See [docs/API.md](docs/API.md#events) for the full event list.
 ## React Bindings
 
 ```tsx
-import { useEffect, useState, type ReactNode } from 'react';
-import { createModel, type ModelReturn } from 'model-reaction';
-import { ValidationRules } from 'model-reaction/validation';
-import { ModelProvider, useModel, useModelFieldState, useDraftField } from 'model-reaction/react';
+import type { ModelReturn } from 'model-reaction';
+import { useDraftField } from 'model-reaction/react';
 
-function NameInput() {
-  const user = useModel<User>();
+function NameInput({ user }: { user: ModelReturn<{ name: string }> }) {
   const { draft, setDraft, meta, onBlur, showError } = useDraftField(user, 'name');
   return (
     <label>
@@ -173,72 +170,15 @@ function NameInput() {
   );
 }
 
-function AgeInput() {
-  const user = useModel<User>();
-  const [age, setAge, meta] = useModelFieldState(user, 'age');
-  return (
-    <>
-      <input type="number" value={age} onChange={(e) => setAge(Number(e.target.value))} />
-      {meta.error && <span>{meta.error}</span>}
-    </>
-  );
-}
-
-function UserModelOwner({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<ModelReturn<User> | null>(null);
-  useEffect(() => {
-    const owned = createModel<User>({
-      name: { type: 'string', default: '', validator: [ValidationRules.required] },
-      age:  { type: 'number', default: 18, validator: [ValidationRules.min(18)] },
-    });
-    setUser(owned);
-    return () => owned.dispose();
-  }, []);
-  if (!user) return null;
-  return <ModelProvider model={user}>{children}</ModelProvider>;
-}
-
-function App() {
-  return <UserModelOwner><NameInput /><AgeInput /></UserModelOwner>;
-}
 ```
 
-For React lifecycles, prefer a **Provider owner** (shared state scoped to a subtree)
-or a **per-route model** (fresh instance per route / modal); avoid module-level
-singletons. For the full hook list, lifecycle examples, the `useModelSelector` vs
-`useModelComputed` comparison, and performance guidance, see [docs/REACT.md](docs/REACT.md).
+The React contract and complete examples live in [docs/REACT.md](docs/REACT.md):
+hook selection, model ownership, selector subscriptions, SSR, and submission.
 
 ### Text Form Fields — `useDraftField`
 
-`useDraftField` is the recommended binding for controlled text inputs. It keeps
-the edit-in-progress text local, validates through the model, and exposes
-validation, dirty, touched, and pending state without requiring a separate
-`useState`.
-
-```tsx
-function NameField() {
-  const { draft, setDraft, meta, onBlur, showError } =
-    useDraftField(user, 'name');
-  return (
-    <label>
-      <input
-        value={draft}
-        disabled={meta.validating}
-        onChange={(e) => setDraft(e.target.value)}
-        onBlur={onBlur}
-        aria-invalid={showError}
-      />
-      {showError && <span role="alert">{meta.error}</span>}
-    </label>
-  );
-}
-```
-
-Rejected or in-flight values remain visible in `draft` while `data` keeps the
-last committed value. Use the lower-level `useModelFieldState` for non-text
-controls such as checkboxes, selects, and date pickers, or when committed-value
-semantics are explicitly required. See
-[docs/REACT.md](docs/REACT.md#controlled-inputs-under-strict--async-validation).
+For draft behavior, non-text controls, transforms, and error display, see
+[Controlled inputs](docs/REACT.md#controlled-inputs-under-strict--async-validation).
 
 For the breaking API changes in the unreleased version, see the
 [migration guide](docs/API.md#api-simplification-migration-unreleased).

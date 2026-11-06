@@ -141,13 +141,10 @@ off(); // 停止监听
 ## React 绑定
 
 ```tsx
-import { useEffect, useState, type ReactNode } from 'react';
-import { createModel, type ModelReturn } from 'model-reaction';
-import { ValidationRules } from 'model-reaction/validation';
-import { ModelProvider, useModel, useModelFieldState, useDraftField } from 'model-reaction/react';
+import type { ModelReturn } from 'model-reaction';
+import { useDraftField } from 'model-reaction/react';
 
-function NameInput() {
-  const user = useModel<User>();
+function NameInput({ user }: { user: ModelReturn<{ name: string }> }) {
   const { draft, setDraft, meta, onBlur, showError } = useDraftField(user, 'name');
   return (
     <label>
@@ -163,69 +160,15 @@ function NameInput() {
   );
 }
 
-function AgeInput() {
-  const user = useModel<User>();
-  const [age, setAge, meta] = useModelFieldState(user, 'age');
-  return (
-    <>
-      <input type="number" value={age} onChange={(e) => setAge(Number(e.target.value))} />
-      {meta.error && <span>{meta.error}</span>}
-    </>
-  );
-}
-
-function UserModelOwner({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<ModelReturn<User> | null>(null);
-  useEffect(() => {
-    const owned = createModel<User>({
-      name: { type: 'string', default: '', validator: [ValidationRules.required] },
-      age:  { type: 'number', default: 18, validator: [ValidationRules.min(18)] },
-    });
-    setUser(owned);
-    return () => owned.dispose();
-  }, []);
-  if (!user) return null;
-  return <ModelProvider model={user}>{children}</ModelProvider>;
-}
-
-function App() {
-  return <UserModelOwner><NameInput /><AgeInput /></UserModelOwner>;
-}
 ```
 
-React 生命周期推荐两种模式：**Provider owner**（共享状态限定在某个子树内）
-或 **per-route model**（每个路由 / 弹窗创建新实例）；避免模块级 singleton。
-完整 hook 列表、生命周期示例、`useModelSelector` 与 `useModelComputed` 的取舍和性能建议，见 [docs/REACT_CN.md](docs/REACT_CN.md)。
+React 的技术契约与完整示例统一维护在 [docs/REACT_CN.md](docs/REACT_CN.md)，
+包含 Hook 选择、模型所有权、selector 订阅、SSR 与提交流程。
 
 ### 文本表单字段 —— `useDraftField`
 
-`useDraftField` 是受控文本输入的默认推荐绑定。它在本地维护编辑中的文本，
-通过 model 执行校验，并直接提供 validation、dirty、touched 和 pending 状态，
-使用方不需要再维护一份 `useState`。
-
-```tsx
-function NameField() {
-  const { draft, setDraft, meta, onBlur, showError } =
-    useDraftField(user, 'name');
-  return (
-    <label>
-      <input
-        value={draft}
-        disabled={meta.validating}
-        onChange={(e) => setDraft(e.target.value)}
-        onBlur={onBlur}
-        aria-invalid={showError}
-      />
-      {showError && <span role="alert">{meta.error}</span>}
-    </label>
-  );
-}
-```
-
-被拒或仍在校验中的值会保留在 `draft`，而 `data` 继续保存最后一次提交成功的值。
-checkbox、select、date picker 等非文本控件，或明确需要 committed value 语义时，
-使用更低层的 `useModelFieldState`。详见
-[docs/REACT_CN.md](docs/REACT_CN.md#严格--异步校验下的受控输入)。
+draft 行为、非文本控件、transform 和错误展示，详见
+[受控输入](docs/REACT_CN.md#严格--异步校验下的受控输入)。
 
 未发布版本包含 API 不兼容变更，升级时请参考
 [迁移说明](docs/API_CN.md#api-精简迁移unreleased)。

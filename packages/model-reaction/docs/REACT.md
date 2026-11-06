@@ -3,6 +3,7 @@
 The package ships a React adapter at `model-reaction/react`. It exposes a
 small set of hooks and components designed so each subscriber re-renders
 only when its watched slice actually changes.
+This page is the canonical React contract; README and best practices link here.
 
 [← Back to README](../README.md)
 
@@ -15,6 +16,8 @@ only when its watched slice actually changes.
 - [Controlled Inputs Under Strict / Async Validation](#controlled-inputs-under-strict--async-validation)
 - [Model Lifecycle in React](#model-lifecycle-in-react)
 - [`useModelSelector` vs `useModelComputed`](#usemodelselector-vs-usemodelcomputed)
+- [Submission Flow](#submission-flow)
+- [SSR and Concurrent Rendering](#ssr-and-concurrent-rendering)
 
 ---
 
@@ -220,6 +223,11 @@ touched, onBlur, showError, committed }`:
 - `options.format` — how a committed/pending value renders as text on reseed
   (defaults to `String`); see the field-type contract below.
 
+With `useModelFieldState`, keep custom `touched` state in the component and
+reset it after successful submission when reusing a form. Validation metadata
+requires this hook's event subscriptions; a selector of `model.data` does not
+refresh errors when a write fails without changing committed data.
+
 An edit's own successful commit preserves its original text, including `"2."`,
 `"002"`, and `"3.50"` after a numeric transform. Outside commits use `format`
 when updating the draft. If local validations are still in flight, outside
@@ -285,7 +293,7 @@ instance in the cleanup, and pass it down through context. This also handles
 StrictMode's extra development setup/cleanup cycle: each setup gets a fresh
 model, and its matching cleanup disposes it.
 This owner pattern is for client-rendered UI; for SSR, use a request-scoped
-model as described in [SSR and concurrent rendering](BEST_PRACTICES.md#79-ssr-and-concurrent-rendering),
+model as described in [SSR and concurrent rendering](#ssr-and-concurrent-rendering),
 because effects do not run during server rendering.
 
 ```tsx
@@ -432,3 +440,38 @@ Equality is opt-in and does not avoid computing the next result. Neither hook
 guarantees exactly one selector call per commit or render: subscriptions and
 snapshot reads can both evaluate it. Keep selectors pure, and measure expensive
 derivations before adding memoization.
+
+## Submission Flow
+
+Pause editing while submission runs. Wait for current validations and reactions,
+then validate all fields, including unvalidated defaults and rejected input.
+Validation can promote dirty values and start further reactions, so wait again
+and check current errors before saving:
+
+```tsx
+async function onSubmit() {
+    await model.settled();
+    const ok = await model.validateAll();
+    await model.settled();
+    if (!ok || Object.values(model.validationErrors).some((errors) => errors.length > 0)) return;
+    await api.save(model.data);
+}
+```
+
+`settled()` waits for tracked model work; it does not lock out new edits or
+await arbitrary network work launched inside an `action`. The submitting UI
+must prevent concurrent edits and duplicate submissions.
+
+See [the submission recipe](../examples/react-best-practices/7-6-submission-flow.tsx).
+
+## SSR and Concurrent Rendering
+
+The hooks use `useSyncExternalStore`. In SSR, create one model per request,
+await its setup and `settled()`, render the subtree under `ModelProvider`,
+and call `dispose()` in `finally`. Do not share a model between requests.
+The client owner above initially renders nothing because effects do not run
+on the server.
+
+The [CLI runner](../examples/react-bindings-runner.tsx) performs an SSR smoke
+check; mounted subscription and StrictMode behavior are covered in
+[React tests](../src/__tests__/react.test.tsx).

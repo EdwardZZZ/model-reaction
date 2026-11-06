@@ -1,0 +1,21 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "paths": {
+      "model-reaction": ["./src/index.ts"],
+      "model-reaction/react": ["./src/react/index.ts"],
+      "model-reaction/validation": ["./src/validation/index.ts"],
+      "model-reaction/devtools": ["./src/devtools/index.ts"]
+    }
+  },
+  "include": ["examples/**/*"],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "examples/react-best-practices/7-10-2-with-zustand.tsx",
+    "examples/react-best-practices/7-10-3-with-redux.tsx",
+    "examples/react-best-practices/7-10-5-cheat-sheet.ts",
+    "examples/react-best-practices/index.ts"
+  ]
+}

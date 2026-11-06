@@ -9,8 +9,8 @@ import * as React from 'react';
 import { useCallback } from 'react';
 void React;
 
-import { createModel } from '../../src/index';
-import { shallow, useModelSelector } from '../../src/react';
+import { createModel } from 'model-reaction';
+import { shallow, useModelSelector } from 'model-reaction/react';
 
 interface Cart {
     qty: number;

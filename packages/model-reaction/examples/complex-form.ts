@@ -1,5 +1,5 @@
-import { createModel } from '../src/index';
-import { formatValidationErrors, Rule, ValidationRules } from '../src/validation';
+import { createModel } from 'model-reaction';
+import { formatValidationErrors, Rule, ValidationRules } from 'model-reaction/validation';
 
 interface UserInfo {
     name: string;
@@ -67,7 +67,7 @@ const orderFormModel = createModel<OrderForm>({
         '用户信息不完整',
         (value) => {
           if (!value || typeof value !== 'object') return false;
-          return value.name && value.email;
+          return Boolean(value.name && value.email);
         }
       )
     ]

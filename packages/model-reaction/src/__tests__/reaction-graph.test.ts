@@ -1,7 +1,7 @@
 import { eachReactionEdge } from '../reaction/reaction-graph';
 import { ReactionSystem } from '../reaction/reaction-system';
 import { PendingTasks } from '../core/pending-tasks';
-import { buildDependencyGraph } from '../devtools/devtools-hook';
+import { buildDependencyGraph, buildFieldInfo } from '../devtools/devtools-hook';
 import type { Model } from '../types';
 
 /**
@@ -51,7 +51,7 @@ function edgesFromRuntime(schema: Model): string[] {
 
 /** Edges as the DevTools graph projection produces them. */
 function edgesFromGraph(schema: Model): string[] {
-    return edgeKeys(buildDependencyGraph(schema).edges);
+    return edgeKeys(buildDependencyGraph(buildFieldInfo(schema)).edges);
 }
 
 describe('eachReactionEdge', () => {

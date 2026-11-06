@@ -1,16 +1,14 @@
 /**
  * BEST_PRACTICES §7.6 — Submission flow
  *
- * Validation is async, so submit handlers should always
- * `await validateAll()` and then `await model.settled()` before reading
- * `model.data`.
+ * Submission and lifecycle contract: docs/REACT.md.
  */
 import * as React from 'react';
 void React;
 
-import { createModel } from '../../src/index';
-import { ValidationRules } from '../../src/validation';
-import { useModel } from '../../src/react';
+import { createModel } from 'model-reaction';
+import { ValidationRules } from 'model-reaction/validation';
+import { useModel } from 'model-reaction/react';
 
 interface User {
     name: string;
@@ -31,9 +29,10 @@ const api = {
 export function SubmitButton() {
     const model = useModel<User>();
     async function onSubmit() {
+        await model.settled();
         const ok = await model.validateAll();
-        if (!ok) return;
-        await model.settled();      // wait for any pending reactions
+        await model.settled();
+        if (!ok || Object.values(model.validationErrors).some((errors) => errors.length > 0)) return;
         await api.save(model.data);
     }
     return <button onClick={onSubmit}>Submit</button>;

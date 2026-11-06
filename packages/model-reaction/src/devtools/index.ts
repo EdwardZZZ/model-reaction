@@ -44,10 +44,11 @@ export const createModel: typeof baseCreateModel = (
     // Avoid building integration state when no front-end is listening.
     if (!hook) return model;
 
-    const modelSchema = schema as Model;
+    const fields = buildFieldInfo(schema as Model);
+    const graph = buildDependencyGraph(fields);
     const detach = attachToDevtools(hook, {
-        getFields: () => buildFieldInfo(modelSchema),
-        getDependencyGraph: () => buildDependencyGraph(modelSchema),
+        getFields: () => fields,
+        getDependencyGraph: () => graph,
         getSnapshot: () => ({
             // The data getters return stable shallow snapshots; serialization
             // in the DevTools agent handles transport formatting and size limits.
@@ -68,6 +69,14 @@ export const createModel: typeof baseCreateModel = (
                     timestamp: Date.now(),
                 })
             ),
+        subscribeSnapshot: (listener) => {
+            const unsubscribers = [
+                model.on(ModelEvents.FIELD_VALIDATION_COMPLETE, listener),
+                model.on(ModelEvents.DIRTY_DATA_CLEARED, listener),
+                model.on(ModelEvents.REACTION_ERROR, listener),
+            ];
+            return () => unsubscribers.forEach((unsubscribe) => unsubscribe());
+        },
     });
 
     // Chain the disposer so unregistering happens on the model's own lifecycle.

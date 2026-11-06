@@ -8,9 +8,9 @@ import * as React from 'react';
 import { useEffect, useState } from 'react';
 void React;
 
-import { createModel, type ModelReturn } from '../../src/index';
-import { ValidationRules } from '../../src/validation';
-import { ModelProvider } from '../../src/react';
+import { createModel, type ModelReturn } from 'model-reaction';
+import { ValidationRules } from 'model-reaction/validation';
+import { ModelProvider } from 'model-reaction/react';
 
 interface User {
     name: string;

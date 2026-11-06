@@ -15,8 +15,8 @@
 import { createSlice } from '@reduxjs/toolkit';
 import { create } from 'zustand';
 
-import { createModel } from '../../src/index';
-import { ValidationRules } from '../../src/validation';
+import { createModel } from 'model-reaction';
+import { ValidationRules } from 'model-reaction/validation';
 
 // Redux Toolkit
 export const userSlice = createSlice({

@@ -1,6 +1,7 @@
 # React 绑定
 
 包内置了 React 适配层，入口为 `model-reaction/react`，提供一组 hook 与组件，每个订阅者只在自己关心的切片真正变化时重渲染。
+本页统一维护 React 技术契约，README 与最佳实践通过链接引用。
 
 [← 返回 README](../README_CN.md)
 
@@ -13,6 +14,8 @@
 - [严格 / 异步校验下的受控输入](#严格--异步校验下的受控输入)
 - [React 中的 Model 生命周期](#react-中的-model-生命周期)
 - [`useModelSelector` vs `useModelComputed`](#usemodelselector-vs-usemodelcomputed)
+- [提交流程](#提交流程)
+- [SSR 与并发渲染](#ssr-与并发渲染)
 
 ---
 
@@ -206,6 +209,10 @@ onBlur, showError, committed }`：
 - `meta` / `committed` —— 底层 `useModelFieldState` 的元数据与最后提交的值。
 - `options.format` —— 回填时已提交/待定值如何渲染成文本（默认 `String`），见下方字段类型契约。
 
+使用 `useModelFieldState` 自定义 touched 策略时，应将状态保存在组件内，
+复用表单时在提交成功后重置。校验元数据需要该 Hook 的事件订阅：
+只选择 `model.data` 的 selector 无法在写入被拒、已提交数据未变时刷新错误。
+
 编辑自身提交成功后会保留原始文本，包括数字 transform 后的 `"2."`、`"002"` 和
 `"3.50"`。外部提交回填 draft 时使用 `format`；若本地校验调用仍在进行，会在这些
 调用完成后同步外部更新。旧调用不会覆盖较新的编辑，也不会影响切换后的 model/字段会话。
@@ -263,7 +270,7 @@ export const userModel = createModel({ /* ... */ });
 在真正拥有生命周期的组件的 effect 中创建 model，并在 cleanup 中释放同一个
 实例，再用 context 向下传递。这也能正确处理 StrictMode 在开发环境增加的
 setup/cleanup 周期：每次 setup 创建新 model，对应 cleanup 释放该实例。
-这个 owner 模式用于客户端渲染；SSR 请按[SSR 与并发渲染](BEST_PRACTICES_CN.md#79-ssr-与并发渲染)
+这个 owner 模式用于客户端渲染；SSR 请按[SSR 与并发渲染](#ssr-与并发渲染)
 创建请求作用域的 model，因为服务端渲染不会运行 effect。
 
 ```tsx
@@ -399,3 +406,34 @@ const summary = useModelComputed(
 `shallow` 只比较一层，嵌套对象按引用比较。自定义 equality 是可选项，也不会省掉
 下一次结果的计算。两者都不保证每次 commit 或 render 恰好调用 selector 一次：
 订阅和快照读取都可能求值。selector 应保持纯函数，昂贵派生先测量再添加缓存。
+
+## 提交流程
+
+提交期间暂停编辑。先等待当前校验与 reactions 完成，再校验全部字段，包括未经
+校验的默认值和被拒输入。校验可能把 dirty 值提升到 data 并启动后续 reactions，
+因此保存前需要再次等待，并检查当前错误：
+
+```tsx
+async function onSubmit() {
+    await model.settled();
+    const ok = await model.validateAll();
+    await model.settled();
+    if (!ok || Object.values(model.validationErrors).some((errors) => errors.length > 0)) return;
+    await api.save(model.data);
+}
+```
+
+`settled()` 等待模型追踪的工作，不会锁住新编辑，也不会等待 `action` 内任意启动
+的网络任务。提交中的 UI 应阻止并发编辑和重复提交。
+
+见 [提交 Recipe](../examples/react-best-practices/7-6-submission-flow.tsx)。
+
+## SSR 与并发渲染
+
+Hooks 基于 `useSyncExternalStore`。SSR 每个请求创建独立 model，等待初始化与
+`settled()`，在 `ModelProvider` 下渲染，并在 `finally` 中调用 `dispose()`。
+不要跨请求共享 model。上面的客户端 owner 在服务器上初次渲染为空，
+因为服务器不会运行 effects。
+
+[CLI runner](../examples/react-bindings-runner.tsx) 执行 SSR 冒烟检查；
+挂载后的订阅与 StrictMode 行为由 [React 测试](../src/__tests__/react.test.tsx) 覆盖。
