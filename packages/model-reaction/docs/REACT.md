@@ -220,6 +220,12 @@ touched, onBlur, showError, committed }`:
 - `options.format` — how a committed/pending value renders as text on reseed
   (defaults to `String`); see the field-type contract below.
 
+An edit's own successful commit preserves its original text, including `"2."`,
+`"002"`, and `"3.50"` after a numeric transform. Outside commits use `format`
+when updating the draft. If local validations are still in flight, outside
+updates are reconciled when those calls finish. Older calls cannot overwrite a
+newer edit or a new model/field session.
+
 > Use the lower-level `useModelFieldState` when you need committed-value
 > semantics or are binding a non-text control. A runnable integration lives in
 > the demo app (`packages/demo/src/TextField.tsx`).

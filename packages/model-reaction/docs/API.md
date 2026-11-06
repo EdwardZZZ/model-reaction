@@ -43,6 +43,12 @@ top level.
 > can therefore start in an invalid state while `validationErrors` is empty.
 > Call `await validateAll()` before trusting initial `data`.
 >
+> **Initial reactions propagate through unchanged values.** Non-derived
+> defaults start the initial reaction pass. A successfully validated derived
+> value continues that pass even when it equals its own default, without
+> emitting a field change for that unchanged value. Initialization survives
+> rescheduling; use `await settled()` to wait for the complete chain.
+>
 > **`FieldSchema.type` is metadata, not a runtime validator.** It drives
 > TypeScript inference and tooling. Add an appropriate `ValidationRules` entry
 > or custom `Rule` when values must be checked at runtime.
@@ -87,6 +93,12 @@ instances, are compared by reference: a new instance is treated as a change.
 | --- | --- |
 | `setField(field, value): Promise<boolean>` | Set a single field; returns its validation result. |
 | `setFields(fields): Promise<boolean>` | Batch set multiple fields in one validation + reaction pass; returns the AND of every field's result. Cross-field validators see the **merged batch** — each field validates against `data` with all fields in the same call already applied, so co-dependent fields (e.g. `password` / `confirmPassword`) can be set together in one call. **Not atomic** — valid fields commit to `data` even if a sibling field fails validation. |
+
+Conditions and validators read shallow-frozen data snapshots. `setFields()`
+shares one transformed candidate snapshot across its fields; `validateAll()`
+shares one snapshot of committed data merged with dirty data. `setField()`
+captures the committed snapshot. Validators must remain pure and must not
+mutate the snapshot or its nested field values.
 
 ### Reactions
 
@@ -171,6 +183,13 @@ in the example, the second reaction determines `total` if its result passes
 validation. If it fails validation, the result goes to `dirtyData`; an earlier
 reaction's value is not used as a fallback. An `action` runs only when that
 reaction's own write commits successfully.
+
+Matching reactions compute and start validation in scheduling order. A
+`SKIP_REACTION` result makes no write and does not supersede an earlier one.
+Debounced reactions sharing a target are collected into one callback; another
+trigger for that target restarts its debounce window. Actions from already
+committed writes may overlap with later updates; `settled()` waits for all of
+them.
 
 For a `setFields()` batch that changes multiple dependencies, the order in
 which changed fields are processed also affects scheduling. If one result

@@ -42,6 +42,76 @@ describe('ModelManager - Basic Operations', () => {
         expect(model.getField('age')).toBe(18);
     });
 
+    test.each([0, 5])(
+        'initializes downstream fields when an intermediate default is unchanged (debounce: %s)',
+        async (debounceReactions) => {
+            const local = createModel({
+                source: { type: 'number', default: 1 },
+                intermediate: {
+                    type: 'number',
+                    default: 2,
+                    reaction: {
+                        fields: ['source'],
+                        computed: ({ source }) => source * 2,
+                    },
+                },
+                downstream: {
+                    type: 'number',
+                    default: 0,
+                    reaction: {
+                        fields: ['intermediate'],
+                        computed: ({ intermediate }) => intermediate + 1,
+                    },
+                },
+            }, { debounceReactions });
+            const changes = jest.fn();
+            local.on('field:change', changes);
+            try {
+                await local.settled();
+                expect(local.data).toEqual({
+                    source: 1,
+                    intermediate: 2,
+                    downstream: 3,
+                });
+                expect(changes).toHaveBeenCalledTimes(1);
+                expect(changes).toHaveBeenCalledWith({
+                    field: 'downstream',
+                    value: 3,
+                });
+                changes.mockClear();
+                await local.setField('source', 1);
+                await local.settled();
+                expect(changes).not.toHaveBeenCalled();
+            } finally {
+                local.dispose();
+            }
+        }
+    );
+
+    test('preserves initialization when a debounced input edit returns to its default', async () => {
+        const local = createModel({
+            source: { type: 'number', default: 1 },
+            intermediate: {
+                type: 'number',
+                default: 2,
+                reaction: { fields: ['source'], computed: ({ source }) => source * 2 },
+            },
+            downstream: {
+                type: 'number',
+                default: 0,
+                reaction: { fields: ['intermediate'], computed: ({ intermediate }) => intermediate + 1 },
+            },
+        }, { debounceReactions: 5 });
+        try {
+            await local.setField('source', 2);
+            await local.setField('source', 1);
+            await local.settled();
+            expect(local.data).toEqual({ source: 1, intermediate: 2, downstream: 3 });
+        } finally {
+            local.dispose();
+        }
+    });
+
     test('sets valid field values asynchronously', async () => {
         const result = await model.setField('name', 'Test User');
         expect(result).toBe(true);
@@ -195,6 +265,46 @@ describe('ModelManager - Batch Operations (setFields)', () => {
         expect(credentials.validationErrors.confirmPassword).toEqual([]);
         credentials.dispose();
     });
+
+    test.each(['setFields', 'validateAll'] as const)(
+        '%s shares a read-only candidate snapshot across conditions and validators',
+        async (operation) => {
+            const contexts: Record<string, any>[] = [];
+            const validator = {
+                type: 'matchesCandidate',
+                message: 'must match the candidate',
+                condition: (data: Record<string, any>) => {
+                    contexts.push(data);
+                    return true;
+                },
+                validate: (value: number, data?: Record<string, any>) => {
+                    contexts.push(data!);
+                    return value === data?.source;
+                },
+            };
+            const local = createModel({
+                source: { type: 'number', default: 2, validator: [validator] },
+                matching: { type: 'number', default: 2, validator: [validator] },
+            });
+            try {
+                const valid = operation === 'setFields'
+                    ? await local.setFields({ source: 3, matching: 3 })
+                    : await local.validateAll();
+                const expected = operation === 'setFields' ? 3 : 2;
+                expect(valid).toBe(true);
+                expect(contexts).toHaveLength(4);
+                for (const context of contexts) {
+                    expect(context).toBe(contexts[0]);
+                    expect(context).toEqual({ source: expected, matching: expected });
+                    expect(Object.isFrozen(context)).toBe(true);
+                    expect(Reflect.set(context, 'source', -1)).toBe(false);
+                }
+                expect(local.data).toEqual({ source: expected, matching: expected });
+            } finally {
+                local.dispose();
+            }
+        }
+    );
 
     test('strictMode waits for valid fields and triggers their reactions before rejecting', async () => {
         interface Schema {

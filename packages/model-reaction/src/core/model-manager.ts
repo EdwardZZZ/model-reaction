@@ -76,16 +76,7 @@ export class ModelManager<
     // Lifecycle helpers
     // -------------------------------------------------------------------------
 
-    /**
-     * Seed `data` from each field's `default`, then run one initial reaction
-     * pass so derived fields start with a correct value.
-     *
-     * Only non-derived defaults are reaction inputs. Treating a derived
-     * field's placeholder default as a change can run downstream work with a
-     * stale value and create a false cycle when the real value commits.
-     * Defaults bypass validation, but computed values use the normal validated
-     * commit path and the initial pass is tracked by `settled()`.
-     */
+    /** Seed defaults and bootstrap derived values; see docs/API.md. */
     private initializeDefaults(): void {
         const seededInputs: string[] = [];
         Object.entries(this.schema).forEach(([field, schema]) => {
@@ -98,7 +89,7 @@ export class ModelManager<
         });
 
         if (seededInputs.length > 0) {
-            this.reactionSystem.triggerReactionsForFields(seededInputs);
+            this.reactionSystem.triggerReactionsForFields(seededInputs, [], true);
         }
     }
 
@@ -165,7 +156,7 @@ export class ModelManager<
             });
             const commitOptions: CommitOptions = {
                 ...options,
-                validationData,
+                validationData: Object.freeze(validationData),
             };
             return Promise.allSettled(
                 prepared.map(({ field, schema, value }) =>
@@ -190,10 +181,10 @@ export class ModelManager<
     validateAll = async (): Promise<boolean> => {
         return this.runBatch((options) => {
             const fields = Object.keys(this.schema);
-            const validationData = {
+            const validationData = Object.freeze({
                 ...(this.modelData as Record<string, any>),
                 ...(this.dirtyData as Record<string, any>),
-            };
+            });
             const commitOptions: CommitOptions = { ...options, validationData };
             return Promise.all(
                 fields.map((field) => this.validateAndCommit(
@@ -373,9 +364,7 @@ export class ModelManager<
                 field,
                 timeout: this.asyncValidationTimeout,
                 failFast: this.options.failFast ?? false,
-                data: {
-                    ...(options.validationData ?? this.modelData),
-                },
+                data: options.validationData ?? this.data,
                 isCurrent,
                 onError: (error) => {
                     if (!isCurrent()) return;
@@ -428,12 +417,16 @@ export class ModelManager<
         value: any,
         options: CommitOptions
     ): void {
-        const { reactionStack = [], changedFields } = options;
+        const {
+            reactionStack = [],
+            changedFields,
+            initializeReactions = false,
+        } = options;
         const fieldKey = field as keyof T;
         const dataChanged = !deepEqual(this.modelData[fieldKey], value);
         const hadDirty = field in this.dirtyData;
 
-        if (!dataChanged && !hadDirty) return;
+        if (!dataChanged && !hadDirty && !initializeReactions) return;
 
         if (dataChanged) {
             this.modelData[fieldKey] = value;
@@ -452,9 +445,13 @@ export class ModelManager<
                 field,
                 value,
             });
-            if (!changedFields) {
-                this.reactionSystem.triggerReactionsForFields([field], reactionStack);
-            }
+        }
+        if (!changedFields && (dataChanged || initializeReactions)) {
+            this.reactionSystem.triggerReactionsForFields(
+                [field],
+                reactionStack,
+                initializeReactions
+            );
         }
     }
 }

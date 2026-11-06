@@ -206,6 +206,10 @@ onBlur, showError, committed }`：
 - `meta` / `committed` —— 底层 `useModelFieldState` 的元数据与最后提交的值。
 - `options.format` —— 回填时已提交/待定值如何渲染成文本（默认 `String`），见下方字段类型契约。
 
+编辑自身提交成功后会保留原始文本，包括数字 transform 后的 `"2."`、`"002"` 和
+`"3.50"`。外部提交回填 draft 时使用 `format`；若本地校验调用仍在进行，会在这些
+调用完成后同步外部更新。旧调用不会覆盖较新的编辑，也不会影响切换后的 model/字段会话。
+
 > 需要 committed value 语义或绑定非文本控件时，使用更低层的
 > `useModelFieldState`。可运行的集成示例见 demo 应用
 > （`packages/demo/src/TextField.tsx`）。

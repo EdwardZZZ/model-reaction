@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ModelEvents } from '../types';
 import type { ModelReturn } from '../types';
 import { useModelFieldState, type FieldMeta } from './field-state';
 
@@ -97,33 +98,71 @@ export function useDraftField<
     // Seed on mount: pending dirty value if any, else committed value.
     const [draft, setDraft] = useState(() => seedDraft(model, field, committed, display));
     const [touched, setTouched] = useState(false);
+    const session = useMemo(() => ({
+        committed: model.getField(field),
+        pending: new Set<() => void>(),
+        edit: 0,
+        acceptedEdit: 0,
+        active: false,
+    }), [model, field]);
 
     // A model/field change starts a new editing session. Re-seed from that
     // field's pending value and clear UI-only state before tracking commits.
-    const previous = useRef({ model, field, committed });
+    const previous = useRef(session);
     useEffect(() => {
-        const last = previous.current;
-        if (last.model !== model || last.field !== field) {
-            previous.current = { model, field, committed };
+        if (previous.current !== session) {
+            previous.current = session;
             setDraft(seedDraft(model, field, committed, display));
             setTouched(false);
             return;
         }
 
-        // Reflect outside-driven commits (a reaction, a setField elsewhere).
-        // On mount the committed value matches, so the seeded draft survives.
-        if (Object.is(last.committed, committed)) return;
-        previous.current = { model, field, committed };
+        // Edit/commit reconciliation: docs/REACT.md "useDraftField".
+        if (session.pending.size > 0 || Object.is(session.committed, committed)) return;
+        session.committed = committed;
         setDraft(display(committed));
-    }, [model, field, committed, display]);
+    }, [model, field, committed, display, session]);
+
+    useEffect(() => {
+        session.active = true;
+        return () => {
+            session.active = false;
+            queueMicrotask(() => {
+                if (!session.active) session.pending.forEach((unsubscribe) => unsubscribe());
+            });
+        };
+    }, [session]);
 
     const edit = useCallback(
         (next: string) => {
             setDraft(next); // show what was typed, valid or not
+            const editId = ++session.edit;
+            let ownCommitted = session.committed;
+            let observed = false;
+            const unsubscribe = model.on(ModelEvents.FIELD_VALIDATION_COMPLETE, (event) => {
+                if (event.field !== field || observed) return;
+                observed = true;
+                ownCommitted = model.getField(field);
+            });
+            session.pending.add(unsubscribe);
             // Draft is always a string; non-string fields rely on schema `transform`.
-            void setValue(next as unknown as T[K]);
+            void setValue(next as unknown as T[K]).then((accepted) => {
+                if (accepted && editId >= session.acceptedEdit) {
+                    session.acceptedEdit = editId;
+                    session.committed = ownCommitted;
+                }
+            }).finally(() => {
+                unsubscribe();
+                session.pending.delete(unsubscribe);
+                if (!session.active || previous.current !== session || session.pending.size > 0) return;
+                const current = model.getField(field);
+                if (!Object.is(session.committed, current)) {
+                    session.committed = current;
+                    setDraft(display(current));
+                }
+            });
         },
-        [setValue]
+        [model, field, setValue, display, session]
     );
 
     const onBlur = useCallback(() => setTouched(true), []);

@@ -233,5 +233,6 @@ export interface ModelReturn<T = Record<string, any>> {
 export interface CommitOptions {
     reactionStack?: string[];
     changedFields?: Set<string>;
-    validationData?: Record<string, any>;
+    validationData?: Readonly<Record<string, any>>;
+    initializeReactions?: boolean;
 }

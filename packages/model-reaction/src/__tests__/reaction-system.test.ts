@@ -340,6 +340,90 @@ describe('ReactionSystem - via createModel', () => {
         model.dispose();
     });
 
+    test.each([0, 5])(
+        'only the last competing reaction commits and runs its action (debounce: %s)',
+        async (debounceReactions) => {
+            const firstAction = jest.fn();
+            const lastAction = jest.fn();
+            const firstComputed = jest.fn(() => 1);
+            const lastComputed = jest.fn(() => 2);
+            const model = createModel({
+                source: { type: 'number' },
+                target: {
+                    type: 'number',
+                    default: 10,
+                    reaction: [
+                        { fields: ['source'], computed: firstComputed, action: firstAction },
+                        { fields: ['source'], computed: lastComputed, action: lastAction },
+                    ],
+                },
+            }, { debounceReactions });
+            const changes = jest.fn();
+            model.subscribe((data) => data.target, changes);
+            try {
+                await model.setField('source', 1);
+                await model.settled();
+                expect(firstComputed).toHaveBeenCalledTimes(1);
+                expect(lastComputed).toHaveBeenCalledTimes(1);
+                expect(model.getField('target')).toBe(2);
+                expect(changes).toHaveBeenCalledTimes(1);
+                expect(changes).toHaveBeenCalledWith(2, 10);
+                expect(firstAction).not.toHaveBeenCalled();
+                expect(lastAction).toHaveBeenCalledTimes(1);
+            } finally {
+                model.dispose();
+            }
+        }
+    );
+
+    test.each([0, 5])(
+        'does not fall back to an earlier reaction when the last write is invalid (debounce: %s)',
+        async (debounceReactions) => {
+            const firstAction = jest.fn();
+            const lastAction = jest.fn();
+            const downstreamComputed = jest.fn(({ target }) => target * 2);
+            const model = createModel({
+                source: { type: 'number' },
+                target: {
+                    type: 'number',
+                    default: 10,
+                    validator: [{
+                        type: 'positive',
+                        message: 'must be positive',
+                        validate: async (value) => value > 0,
+                    }],
+                    reaction: [
+                        { fields: ['source'], computed: () => 1, action: firstAction },
+                        { fields: ['source'], computed: () => -1, action: lastAction },
+                    ],
+                },
+                downstream: {
+                    type: 'number',
+                    default: 20,
+                    reaction: { fields: ['target'], computed: downstreamComputed },
+                },
+            }, { debounceReactions });
+            const changes = jest.fn();
+            model.subscribe((data) => data.target, changes);
+            try {
+                await model.setField('source', 1);
+                await model.settled();
+                expect(model.getField('target')).toBe(10);
+                expect(model.getDirtyData()).toEqual({ target: -1 });
+                expect(model.validationErrors.target).toEqual([
+                    { field: 'target', rule: 'positive', message: 'must be positive' },
+                ]);
+                expect(model.getField('downstream')).toBe(20);
+                expect(downstreamComputed).not.toHaveBeenCalled();
+                expect(changes).not.toHaveBeenCalled();
+                expect(firstAction).not.toHaveBeenCalled();
+                expect(lastAction).not.toHaveBeenCalled();
+            } finally {
+                model.dispose();
+            }
+        }
+    );
+
     test('reactions on different fields trigger only relevant ones', async () => {
         const spy1 = jest.fn();
         const spy2 = jest.fn();
@@ -741,6 +825,31 @@ describe('ReactionSystem - settled() waits for chained reactions and async actio
         model.dispose();
     });
 
+    test('a skipped last reaction leaves an earlier valid write authoritative', async () => {
+        const firstAction = jest.fn();
+        const skippedAction = jest.fn();
+        const model = createModel({
+            source: { type: 'number' },
+            target: {
+                type: 'number',
+                default: 0,
+                reaction: [
+                    { fields: ['source'], computed: () => 1, action: firstAction },
+                    { fields: ['source'], computed: () => SKIP_REACTION, action: skippedAction },
+                ],
+            },
+        });
+        try {
+            await model.setField('source', 1);
+            await model.settled();
+            expect(model.getField('target')).toBe(1);
+            expect(firstAction).toHaveBeenCalledTimes(1);
+            expect(skippedAction).not.toHaveBeenCalled();
+        } finally {
+            model.dispose();
+        }
+    });
+
     test('rejects an async computed value without committing it', async () => {
         const action = jest.fn();
         const errorMessage =
@@ -919,7 +1028,7 @@ describe('ReactionSystem - settled() waits for chained reactions and async actio
 
 describe('ReactionSystem - lifecycle and rejected actions', () => {
     test.each([false, true])(
-        'does not resume queued work or record a late error after dispose (reject: %s)',
+        'does not resume debounced work or record a late error after dispose (reject: %s)',
         async (rejectAction) => {
             let releaseAction!: () => void;
             let signalStarted!: () => void;
@@ -936,30 +1045,32 @@ describe('ReactionSystem - lifecycle and rejected actions', () => {
                 target: {
                     type: 'number',
                     default: 0,
-                    reaction: [
-                        {
-                            fields: ['source'],
-                            computed: () => 1,
-                            action: async () => {
-                                signalStarted();
-                                await gate;
-                                if (rejectAction) throw new Error('late failure');
-                            },
+                    reaction: {
+                        fields: ['source'],
+                        computed: () => 1,
+                        action: async () => {
+                            signalStarted();
+                            await gate;
+                            if (rejectAction) throw new Error('late failure');
                         },
-                        {
-                            fields: ['source'],
-                            computed: laterComputed,
-                            action: laterAction,
-                        },
-                    ],
+                    },
                 },
-            });
+                downstream: {
+                    type: 'number',
+                    default: 0,
+                    reaction: {
+                        fields: ['target'],
+                        computed: laterComputed,
+                        action: laterAction,
+                    },
+                },
+            }, { debounceReactions: 5 });
             await model.setField('source', 1);
             await started;
             model.dispose();
             releaseAction();
             // The owner releases settled waiters on dispose. A new event-loop
-            // turn drains these already-resolved action/queue continuations.
+            // turn drains these already-resolved action continuations.
             await new Promise((resolve) => setTimeout(resolve, 0));
 
             expect(laterComputed).not.toHaveBeenCalled();
@@ -1010,7 +1121,7 @@ describe('ReactionSystem - lifecycle and rejected actions', () => {
     });
 
     test.each(['computed', 'action'] as const)(
-        'normalizes non-Error %s failures and continues the queue',
+        'normalizes non-Error %s failures and recovers on the next update',
         async (stage) => {
             for (const reason of [null, undefined, 'offline', new Error('failed')]) {
                 const laterAction = jest.fn();
@@ -1019,21 +1130,17 @@ describe('ReactionSystem - lifecycle and rejected actions', () => {
                     target: {
                         type: 'number',
                         default: 0,
-                        reaction: [
-                            {
-                                fields: ['source'],
-                                computed: () => {
-                                    if (stage === 'computed') throw reason;
-                                    return 1;
-                                },
-                                action: () => Promise.reject(reason),
+                        reaction: {
+                            fields: ['source'],
+                            computed: ({ source }) => {
+                                if (source === 1 && stage === 'computed') throw reason;
+                                return source;
                             },
-                            {
-                                fields: ['source'],
-                                computed: () => 2,
-                                action: laterAction,
+                            action: ({ computed }) => {
+                                if (computed === 1) return Promise.reject(reason);
+                                laterAction();
                             },
-                        ],
+                        },
                     },
                 });
                 const snapshots: unknown[] = [];
@@ -1057,8 +1164,11 @@ describe('ReactionSystem - lifecycle and rejected actions', () => {
                     expect(snapshots).toEqual([[
                         { field: 'target', rule: 'reaction_error', message },
                     ]]);
+                    await model.setField('source', 2);
+                    await model.settled();
                     expect(model.getField('target')).toBe(2);
                     expect(laterAction).toHaveBeenCalledTimes(1);
+                    expect(model.validationErrors.target).toEqual([]);
                 } finally {
                     model.dispose();
                 }
