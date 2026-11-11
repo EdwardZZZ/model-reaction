@@ -7,8 +7,8 @@
 import * as React from 'react';
 void React;
 
-import { createModel } from '../../src/index';
-import { Field, ModelProvider } from '../../src/react';
+import { createModel } from 'model-reaction';
+import { Field, ModelProvider } from 'model-reaction/react';
 
 interface User {
     plan: 'free' | 'pro';

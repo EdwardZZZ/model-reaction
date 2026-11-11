@@ -1,5 +1,5 @@
-import { createModel } from '../src/index';
-import { formatValidationErrors, ValidationRules } from '../src/validation';
+import { createModel } from 'model-reaction';
+import { formatValidationErrors, ValidationRules } from 'model-reaction/validation';
 
 /**
  * 脏数据 + 条件校验示例。

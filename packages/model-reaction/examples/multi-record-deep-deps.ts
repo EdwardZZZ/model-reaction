@@ -15,7 +15,7 @@
  *   合计 50 个字段，最深依赖路径 5 层，且每个派生字段都依赖至少两个上一层字段。
  */
 
-import { createModel, FieldSchema } from '../src/index';
+import { createModel, FieldSchema } from 'model-reaction';
 
 // ---- 1. 程序化构造 50 个字段的 schema ----
 const FIELD_COUNT_PER_LAYER = 10;

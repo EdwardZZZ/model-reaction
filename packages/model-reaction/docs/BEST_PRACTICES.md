@@ -90,211 +90,54 @@ unsubscribe();
 
 ## 7. React Integration
 
-The `model-reaction/react` entry point exposes a small set of hooks and
-components built on `useSyncExternalStore`. The guidelines below help you
-get the most out of them.
+[REACT.md](REACT.md) owns the React contract and complete recipes. The links
+below preserve the existing section anchors; application-store guidance remains here.
 
 ### 7.1 Pick the right hook
 
-| Need | Use |
-| --- | --- |
-| Display one field | `useModelField` |
-| Controlled text input | `useDraftField` |
-| Non-text control or committed-value binding | `useModelFieldState` |
-| Stable derived selector | `useModelSelector` |
-| Selector that closes over current props | `useModelComputed` |
-| Several fields together | `useModelFields(model, ['a', 'b'])` |
-
-Prefer the most specific hook. `useModelField` is cheaper than
-`useModelSelector`, and `useModelFields` is cheaper than a hand-written
-selector that returns a fresh object every render. See
-[REACT.md](REACT.md#controlled-inputs-under-strict--async-validation) before
-binding a text input with validation directly to committed model data.
+See [Hooks & Components](REACT.md#hooks--components).
 
 ### 7.2 Stable selector references
 
-`useModelSelector` captures the `selector` and `isEqual` arguments at
-subscription time. Passing a fresh function each render means a fresh
-subscription:
-
-```tsx
-// ❌ Re-subscribes every render.
-const total = useModelSelector(cart, (d) => d.qty * d.price);
-
-// ✅ Stable reference.
-const selectTotal = useCallback((d: Cart) => d.qty * d.price, []);
-const total = useModelSelector(cart, selectTotal);
-```
-
-If the selector returns a fresh container, pair it with `shallow` —
-use a stable selector reference to avoid resubscribing:
-
-```tsx
-const selectSlice = useCallback(
-    (d: Cart) => ({ qty: d.qty, price: d.price }),
-    [],
-);
-const slice = useModelSelector(cart, selectSlice, shallow);
-```
+See [`useModelSelector` vs `useModelComputed`](REACT.md#usemodelselector-vs-usemodelcomputed).
 
 ### 7.2bis Inline selectors with `useModelComputed`
 
-Use `useModelComputed` for selectors that close over current props without
-resubscribing. Its subscription depends only on the model; every field change
-notifies React and the shared snapshot getter compares the selected result.
-Both hooks evaluate selectors on field changes, so neither avoids the next
-computation merely by applying equality.
-
-```tsx
-const item = useModelComputed(cart, (data) => data.items[id]);
-const slice = useModelComputed(cart, (data) => ({ qty: data.qty, price: data.price }), shallow);
-```
+See [`useModelSelector` vs `useModelComputed`](REACT.md#usemodelselector-vs-usemodelcomputed).
 
 ### 7.3 Avoid prop drilling with `<ModelProvider>`
 
-Wrap the form root once and let descendants pull the model out:
-
-```tsx
-<ModelProvider model={userModel}>
-    <NameField />
-    <AddressFields />
-    <SubmitButton />
-</ModelProvider>
-```
-
-Inside any descendant:
-
-```tsx
-const model = useModel<User>();
-const name = useDraftField(model, 'name');
-```
+See [Basic Example](REACT.md#basic-example).
 
 ### 7.4 `<Field>` for committed-value controls
 
-Use the `<Field>` render-prop form when a control can bind directly to the
-committed model value, such as a checkbox or select. Text inputs should use
-`useDraftField` so rejected intermediate edits remain visible:
-
-```tsx
-interface PlanForm {
-    plan: 'free' | 'pro';
-}
-
-function PlanField() {
-    return (
-        <Field<PlanForm, 'plan'> name="plan">
-            {({ value, setValue, meta }) => (
-                <label>
-                    <select
-                        value={value}
-                        onChange={(e) => {
-                            const plan = e.target.value;
-                            if (plan === 'free' || plan === 'pro') {
-                                void setValue(plan);
-                            }
-                        }}
-                        aria-invalid={!!meta.error}
-                    >
-                        <option value="free">Free</option>
-                        <option value="pro">Pro</option>
-                    </select>
-                    {meta.error && <span>{meta.error}</span>}
-                </label>
-            )}
-        </Field>
-    );
-}
-```
+See [Basic Example](REACT.md#basic-example).
 
 ### 7.5 Touched semantics
 
-`useDraftField` owns `touched`, `onBlur`, and `showError` for the standard text
-input flow. When using the lower-level `useModelFieldState`, keep `touched` as
-component-local state because it is a UI concern with no place on the model:
-
-```tsx
-const [touched, setTouched] = useState(false);
-<input onBlur={() => setTouched(true)} />
-{touched && meta.error && <span>{meta.error}</span>}
-```
-
-Reset it back to `false` after a successful submit if you re-use the form.
+See [Controlled Inputs](REACT.md#controlled-inputs-under-strict--async-validation).
 
 ### 7.6 Submission flow
 
-Validation is async, so submit handlers should always `await
-validateAll()`:
-
-```tsx
-async function onSubmit() {
-    const ok = await model.validateAll();
-    if (!ok) return;
-    await model.settled();      // wait for any pending reactions
-    await api.save(model.data);
-}
-```
-
-If reactions are debounced or async work cascades from validation,
-`settled()` guarantees a quiet model before reading `model.data`.
+See [Submission Flow](REACT.md#submission-flow).
 
 ### 7.7 One model per logical form
 
-Each `createModel(...)` call is independent. Recommended layout:
-
-- Page-level UI state → `zustand` / `useState` / context.
-- Domain entities and forms → one `model-reaction` model each.
-- Cross-form state (wizard step, draft id) → outer container.
-
-Don't try to stuff multiple unrelated forms into a single model just to
-reuse a provider; nest providers instead.
+Keep unrelated forms in separate owners. See [Model Lifecycle](REACT.md#model-lifecycle-in-react).
 
 ### 7.8 Lifecycle and cleanup
 
-`createModel` keeps internal listeners; in long-lived SPAs, create a model
-inside the owning effect and dispose that same instance when the route unmounts:
-
-```tsx
-import { useEffect, useState, type ReactNode } from 'react';
-import { ModelProvider } from 'model-reaction/react';
-import { createModel, type ModelReturn } from 'model-reaction';
-
-interface User {
-    name: string;
-}
-
-function createUserModel() {
-    return createModel<User>({ name: { type: 'string', default: '' } });
-}
-
-function UserRoute({ children }: { children: ReactNode }) {
-    const [model, setModel] = useState<ModelReturn<User> | null>(null);
-    useEffect(() => {
-        const owned = createUserModel();
-        setModel(owned);
-        return () => owned.dispose();
-    }, []);
-    if (!model) return null;
-    return <ModelProvider model={model}>{children}</ModelProvider>;
-}
-```
-
-Dispose the model from the same owner that unmounts its subscribers. Mutating a
-disposed model throws, while its internal state and listeners have already been
-cleared.
+See [Model Lifecycle](REACT.md#model-lifecycle-in-react).
 
 ### 7.9 SSR and concurrent rendering
 
-The hooks rely on `useSyncExternalStore`, so they are concurrent-safe.
-For SSR, treat the model as request-scoped: create it inside the request
-handler, render with `renderToString`, then `dispose()`. Do not share a
-single model instance across requests.
+See [SSR and Concurrent Rendering](REACT.md#ssr-and-concurrent-rendering).
 
 ### 7.10 Choosing between model-reaction, zustand and Redux
 
 `model-reaction` is a **model layer**, while zustand and Redux are
-**state containers**. They live at different abstraction levels and are
-not mutually exclusive — see [COMPARISON.md](COMPARISON.md) for the full
-matrix. Quick guidance for React projects:
+**state containers**. They can be used together; see [COMPARISON.md](COMPARISON.md)
+for the full matrix.
 
 | Need | Recommended |
 | --- | --- |
@@ -305,14 +148,14 @@ matrix. Quick guidance for React projects:
 
 #### 7.10.1 Don't reach for `useState` for form fields
 
-If a form has more than two coupled fields (e.g. validation, derived
-totals, async checks), prefer `model-reaction` over `useState` chains —
-you'll otherwise re-implement validation, dirty-data and effects by hand.
+For coupled fields with validation, derived totals, or async checks,
+`model-reaction` handles the domain state. Keep editing text and UI flags in
+React; [Controlled Inputs](REACT.md#controlled-inputs-under-strict--async-validation)
+explains that boundary.
 
 #### 7.10.2 Combine with zustand for global state
 
 ```tsx
-// Global UI store — zustand
 const useUI = create<{ drawerOpen: boolean; toggle: () => void }>((set) => ({
     drawerOpen: false,
     toggle: () => set((s) => ({ drawerOpen: !s.drawerOpen })),
@@ -321,67 +164,25 @@ const useUI = create<{ drawerOpen: boolean; toggle: () => void }>((set) => ({
 function UserDrawer() {
     const open = useUI((s) => s.drawerOpen);
     if (!open) return null;
-    return (
-        <UserRoute>
-            <UserForm />
-        </UserRoute>
-    );
+    return <UserRoute><UserForm /></UserRoute>;
 }
 ```
 
-Rule of thumb: zustand owns *application* state (open / closed, current
-user id, theme); `model-reaction` owns *entity* state (the user record
-being edited, including its rules). `UserRoute` follows the lifecycle
-pattern from §7.8 and disposes the model when the drawer closes.
+zustand owns application state; `model-reaction` owns the edited entity and
+its rules. `UserRoute` follows the [owner lifecycle](REACT.md#model-lifecycle-in-react).
+See the [integration snippet](../examples/react-best-practices/7-10-2-with-zustand.tsx).
 
 #### 7.10.3 Combine with Redux Toolkit
 
-In Redux apps, keep RTK as the application skeleton and drop a
-`model-reaction` model wherever you would otherwise spawn a slice purely
-for an editor / wizard / form:
+Keep RTK as the application store and use a model for an editor, wizard, or
+form. Create an owner per edited entity; after the
+[submission checks](REACT.md#submission-flow), dispatch the model's committed
+data to the application store. This avoids an action and reducer for every
+form field.
 
-```tsx
-import { useEffect, useState } from 'react';
-import { createModel, type ModelReturn } from 'model-reaction';
-
-interface User {
-    id: string;
-    name: string;
-}
-
-function EditUserPage() {
-    const [model, setModel] = useState<ModelReturn<User> | null>(null);
-    const userId = useSelector(selectCurrentUserId);
-    const dispatch = useDispatch();
-    useEffect(() => {
-        const owned = createModel<User>(userSchema);
-        setModel(owned);
-        return () => owned.dispose();
-    }, [userId]);
-
-    if (!model) return null;
-
-    async function onSave() {
-        if (!(await model.validateAll())) return;
-        await model.settled();
-        dispatch(saveUser(model.data));
-    }
-
-    return (
-        <ModelProvider model={model}>
-            <UserForm onSubmit={onSave} />
-        </ModelProvider>
-    );
-}
-```
-
-This avoids the "action / reducer per field" problem while keeping the
-rest of the app on Redux.
+See the [integration snippet](../examples/react-best-practices/7-10-3-with-redux.tsx).
 
 #### 7.10.4 Things to migrate **off** of `model-reaction`
-
-`model-reaction` deliberately stays at the model layer. Don't try to use
-it for:
 
 - Global UI flags (modals, theme, locale) → use zustand / Redux.
 - Cross-route caches / query results → use TanStack Query / RTK Query.
@@ -402,6 +203,6 @@ createModel<{ name: string }>({
 });
 ```
 
-With `model-reaction`, validators, error state, dirty tracking and field
-subscriptions are built-in; with the other two, you'd implement each
-piece by hand.
+See the [comparison snippet](../examples/react-best-practices/7-10-5-cheat-sheet.ts).
+These store integrations require optional third-party dependencies; the library
+does not install them.

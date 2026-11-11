@@ -1,4 +1,5 @@
 import {
+    CommitOptions,
     Model,
     ModelError,
     ModelErrorEvent,
@@ -14,7 +15,7 @@ import { PendingTasks } from '../core/pending-tasks';
 /** Internal contract between {@link ReactionSystem} and its owning model. */
 interface ReactionCallbacks {
     getValue: (field: string) => any;
-    setValue: (field: string, value: any, options?: { reactionStack?: string[] }) => Promise<boolean>;
+    setValue: (field: string, value: any, options?: CommitOptions) => Promise<boolean>;
     setError: (field: string, error: ValidationError) => void;
     reportError: (
         event: Exclude<ModelErrorEvent, 'field:not-found'>,
@@ -27,6 +28,11 @@ interface ReactionJob {
     reaction: Reaction;
 }
 
+interface ScheduledReaction {
+    reactionStack: string[];
+    endTask: () => void;
+}
+
 function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
     return (
         value !== null &&
@@ -37,11 +43,14 @@ function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
 
 export class ReactionSystem {
     private reactionDeps: Map<string, ReactionJob[]> = new Map();
+    private initializingFields = new Set<string>();
     private reactionTimeouts: Map<
-        ReactionJob,
-        { timeoutId: ReturnType<typeof setTimeout>; endTask: () => void }
+        string,
+        {
+            timeoutId: ReturnType<typeof setTimeout>;
+            jobs: Map<ReactionJob, ScheduledReaction>;
+        }
     > = new Map();
-    private reactionQueues: Map<string, Promise<void>> = new Map();
     private schema: Model;
     private options: ModelOptions;
     private callbacks: ReactionCallbacks;
@@ -86,7 +95,8 @@ export class ReactionSystem {
 
     public triggerReactionsForFields(
         changedFields: string[],
-        reactionStack: string[] = []
+        reactionStack: string[] = [],
+        initializeReactions = false
     ): void {
         if (this.disposed) return;
         const debounceTime = this.options.debounceReactions ?? 0;
@@ -117,10 +127,8 @@ export class ReactionSystem {
                 return;
             }
 
-            this.scheduleReaction(job, debounceTime, [
-                ...reactionStack,
-                changedField,
-            ]);
+            if (initializeReactions) this.initializingFields.add(field);
+            this.scheduleReaction(job, debounceTime, [...reactionStack, changedField]);
         });
     }
 
@@ -132,18 +140,26 @@ export class ReactionSystem {
         // Register the replacement before releasing the old task so settled()
         // never observes a false idle state during debounce rescheduling.
         const endTask = this.pendingTasks.begin();
-        const scheduled = this.reactionTimeouts.get(job);
-        if (scheduled) {
-            clearTimeout(scheduled.timeoutId);
-            scheduled.endTask();
-        }
-
         if (debounceTime > 0) {
+            const scheduled = this.reactionTimeouts.get(job.field);
+            const jobs = scheduled?.jobs ?? new Map<ReactionJob, ScheduledReaction>();
+            if (scheduled) {
+                clearTimeout(scheduled.timeoutId);
+                jobs.get(job)?.endTask();
+                jobs.delete(job);
+            }
+            jobs.set(job, { reactionStack, endTask });
             const timeoutId = setTimeout(() => {
-                this.reactionTimeouts.delete(job);
-                this.runReaction(job, reactionStack, endTask);
+                this.reactionTimeouts.delete(job.field);
+                for (const [pendingJob, pending] of jobs) {
+                    this.runReaction(
+                        pendingJob,
+                        pending.reactionStack,
+                        pending.endTask
+                    );
+                }
             }, debounceTime);
-            this.reactionTimeouts.set(job, { timeoutId, endTask });
+            this.reactionTimeouts.set(job.field, { timeoutId, jobs });
         } else {
             this.runReaction(job, reactionStack, endTask);
         }
@@ -154,19 +170,7 @@ export class ReactionSystem {
         reactionStack: string[],
         endTask: () => void
     ): void {
-        const previous = this.reactionQueues.get(job.field);
-        const work = previous
-            ? previous.then(() => this.processReaction(job, reactionStack))
-            : this.processReaction(job, reactionStack);
-        const queued = work.finally(endTask);
-        this.reactionQueues.set(job.field, queued);
-
-        const cleanup = (): void => {
-            if (this.reactionQueues.get(job.field) === queued) {
-                this.reactionQueues.delete(job.field);
-            }
-        };
-        void queued.then(cleanup, cleanup);
+        void this.processReaction(job, reactionStack).finally(endTask);
     }
 
     private async processReaction(
@@ -203,8 +207,12 @@ export class ReactionSystem {
                 );
             }
             if (this.disposed) return;
-            const committed = await this.callbacks.setValue(field, computedValue, { reactionStack });
+            const committed = await this.callbacks.setValue(field, computedValue, {
+                reactionStack,
+                initializeReactions: this.initializingFields.has(field),
+            });
             if (this.disposed) return;
+            if (committed) this.initializingFields.delete(field);
             if (committed && reaction.action) {
                 await reaction.action({
                     ...dependentValues,
@@ -238,13 +246,13 @@ export class ReactionSystem {
     public dispose(): void {
         if (this.disposed) return;
         this.disposed = true;
-        this.reactionTimeouts.forEach(({ timeoutId, endTask }) => {
+        this.reactionTimeouts.forEach(({ timeoutId, jobs }) => {
             clearTimeout(timeoutId);
-            endTask();
+            jobs.forEach(({ endTask }) => endTask());
         });
         this.reactionTimeouts.clear();
-        this.reactionQueues.clear();
         this.reactionDeps.clear();
+        this.initializingFields.clear();
         // The shared PendingTasks is owned and disposed by ModelManager.
     }
 }

@@ -8,8 +8,8 @@
 import * as React from 'react';
 void React;
 
-import { createModel } from '../../src/index';
-import { shallow, useModelComputed } from '../../src/react';
+import { createModel } from 'model-reaction';
+import { shallow, useModelComputed } from 'model-reaction/react';
 
 interface Cart {
     items: Record<string, { name: string; price: number }>;

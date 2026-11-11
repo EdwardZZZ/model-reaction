@@ -1,5 +1,5 @@
-import { createModel, Model } from '../src/index';
-import { formatValidationErrors, ValidationRules } from '../src/validation';
+import { createModel, Model } from 'model-reaction';
+import { formatValidationErrors, ValidationRules } from 'model-reaction/validation';
 
 interface User {
   name: string;

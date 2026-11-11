@@ -7,13 +7,13 @@
 import * as React from 'react';
 void React;
 
-import { createModel } from '../../src/index';
-import { ValidationRules } from '../../src/validation';
+import { createModel } from 'model-reaction';
+import { ValidationRules } from 'model-reaction/validation';
 import {
     ModelProvider,
     useModel,
     useDraftField,
-} from '../../src/react';
+} from 'model-reaction/react';
 
 interface User {
     name: string;

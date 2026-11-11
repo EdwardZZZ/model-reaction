@@ -1418,6 +1418,152 @@ describe('useDraftField', () => {
         model.dispose();
     });
 
+    it.each(['2.', '002', '3.50'])(
+        'preserves numeric edit text %s after its own commit and still accepts outside updates',
+        async (text) => {
+            const model = makeSignup();
+            const { result, unmount } = renderHook(
+                () => useDraftField(model, 'priceCents'),
+                { wrapper: React.StrictMode }
+            );
+            try {
+                await act(async () => {
+                    result.current.setDraft(text);
+                    await model.settled();
+                });
+                expect(result.current.draft).toBe(text);
+                expect(result.current.committed).toBe(Number(text));
+                await act(async () => {
+                    await model.setField('priceCents', 42);
+                });
+                expect(result.current.draft).toBe('42');
+                expect(result.current.committed).toBe(42);
+            } finally {
+                unmount();
+                model.dispose();
+            }
+        }
+    );
+
+    it('keeps the latest numeric text when validations complete out of order', async () => {
+        const releases: Array<(valid: boolean) => void> = [];
+        const model = createModel({
+            price: {
+                type: 'number',
+                default: 0,
+                transform: Number,
+                validator: [{
+                    type: 'controlled',
+                    message: 'invalid',
+                    validate: () => new Promise<boolean>((resolve) => releases.push(resolve)),
+                }],
+            },
+        });
+        const { result, unmount } = renderHook(() => useDraftField(model, 'price'));
+        act(() => { result.current.setDraft('2.'); });
+        act(() => { result.current.setDraft('3.50'); });
+        try {
+            await act(async () => { releases[1]!(true); });
+            expect(result.current.committed).toBe(3.5);
+            expect(result.current.draft).toBe('3.50');
+            await act(async () => {
+                releases[0]!(false);
+                await model.settled();
+            });
+            expect(result.current.committed).toBe(3.5);
+            expect(result.current.draft).toBe('3.50');
+            expect(result.current.meta.validating).toBe(false);
+        } finally {
+            unmount();
+            releases.forEach((release) => release(true));
+            await model.settled();
+            model.dispose();
+        }
+    });
+
+    it('reflects an outside commit that supersedes an in-flight draft edit', async () => {
+        const releases: Array<(valid: boolean) => void> = [];
+        const model = createModel({
+            price: {
+                type: 'number',
+                default: 0,
+                transform: Number,
+                validator: [{
+                    type: 'controlled',
+                    message: 'invalid',
+                    validate: () => new Promise<boolean>((resolve) => releases.push(resolve)),
+                }],
+            },
+        });
+        const { result, unmount } = renderHook(() => useDraftField(model, 'price'));
+        act(() => { result.current.setDraft('2.'); });
+        let outside!: Promise<boolean>;
+        act(() => { outside = model.setField('price', 42); });
+        try {
+            await act(async () => {
+                releases[1]!(true);
+                await outside;
+            });
+            await act(async () => {
+                releases[0]!(true);
+                await model.settled();
+            });
+            expect(result.current.committed).toBe(42);
+            expect(result.current.draft).toBe('42');
+            expect(result.current.meta.validating).toBe(false);
+        } finally {
+            unmount();
+            releases.forEach((release) => release(true));
+            await outside;
+            await model.settled();
+            model.dispose();
+        }
+    });
+
+    it('does not let an old in-flight edit overwrite a new field session', async () => {
+        let release!: (valid: boolean) => void;
+        const model = createModel({
+            price: {
+                type: 'number',
+                default: 0,
+                transform: Number,
+                validator: [{
+                    type: 'controlled',
+                    message: 'invalid',
+                    validate: () => new Promise<boolean>((resolve) => { release = resolve; }),
+                }],
+            },
+            name: { type: 'string', default: 'Ada' },
+        });
+        const { result, rerender, unmount } = renderHook(
+            ({ field }: { field: 'price' | 'name' }) => useDraftField(model, field),
+            { initialProps: { field: 'price' as 'price' | 'name' }, wrapper: React.StrictMode }
+        );
+        act(() => {
+            result.current.setDraft('2.');
+            result.current.onBlur();
+        });
+        rerender({ field: 'name' });
+        try {
+            expect(result.current.draft).toBe('Ada');
+            expect(result.current.touched).toBe(false);
+            await act(async () => {
+                result.current.setDraft('Grace');
+                release(true);
+                await model.settled();
+            });
+            expect(result.current.draft).toBe('Grace');
+            expect(result.current.committed).toBe('Grace');
+            expect(result.current.meta.validating).toBe(false);
+            expect(model.getField('price')).toBe(2);
+        } finally {
+            unmount();
+            release(true);
+            await model.settled();
+            model.dispose();
+        }
+    });
+
     it('seeds from a pending dirtyData value when the model outlives the input', async () => {
         const model = makeSignup();
         // Stash a failed input, then mount a fresh hook (simulating remount).

@@ -27,7 +27,8 @@
 ### React 绑定示例 (react-bindings.tsx)
 展示字段级与 selector 级 React 订阅、Provider 所有权、默认推荐的
 `useDraftField` 绑定、表单元数据、本地 draft 与 Schema 类型推导。包脚本会通过
-`react-dom/server` 渲染该示例。
+`react-bindings-runner.tsx` 与 `react-dom/server` 执行 SSR 冒烟检查，
+导入组件文件不会运行 CLI runner。
 
 ### 多记录深层依赖示例 (multi-record-deep-deps.ts)
 构造较大的确定性 schema，并对 100 条记录运行五层 reaction 链。
@@ -53,3 +54,14 @@ pnpm --filter model-reaction run example:react
 ```
 
 > `examples/react-best-practices/` 下的文件属于参考片段，不是独立 CLI 程序。
+
+## 验证
+
+示例统一从公开包入口导入。仓库 runner 通过 `tsconfig.examples.json` 将入口
+映射到源码；复制到应用后按正常方式使用已安装的包。
+
+`pnpm --filter model-reaction run typecheck` 检查源码、测试与独立的示例项目，
+CI 使用同一命令；lint 也覆盖 `.ts` 和 `.tsx` 示例。示例项目排除三份可选的
+zustand / Redux 片段（`7-10-2`、`7-10-3`、`7-10-5`）及其聚合 `index.ts`，
+因为本仓库没有安装对应第三方依赖和应用接入代码。
+React 技术契约见 [REACT_CN.md](../docs/REACT_CN.md)。

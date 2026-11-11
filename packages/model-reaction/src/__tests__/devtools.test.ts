@@ -98,6 +98,8 @@ describe('model-reaction/devtools createModel', () => {
             ])
         );
         expect(graph.edges).toHaveLength(2);
+        expect(inst.getFields()).toBe(inst.getFields());
+        expect(inst.getDependencyGraph()).toBe(graph);
         model.dispose();
     });
 
@@ -134,6 +136,47 @@ describe('model-reaction/devtools createModel', () => {
         const snap = inst.getSnapshot();
         expect(snap.dirtyData.age).toBe(5);
         expect(snap.errors.age!.length).toBeGreaterThan(0);
+        model.dispose();
+    });
+
+    test('snapshot notifications include rejected input, dirty clearing, and reaction errors', async () => {
+        const instances = installHook();
+        const model = createModel({
+            age: {
+                type: 'number',
+                default: 18,
+                validator: [{ type: 'min', message: 'too small', validate: (v: number) => v >= 18 }],
+            },
+            derived: {
+                type: 'number',
+                default: 0,
+                reaction: {
+                    fields: ['age'],
+                    computed: () => { throw new Error('compute failed'); },
+                },
+            },
+        });
+        await model.settled();
+        const inst = instances[0]!;
+        const snapshots: ReturnType<typeof inst.getSnapshot>[] = [];
+        const changes: DevtoolsChange[] = [];
+        const unsub = inst.subscribeSnapshot?.(() => snapshots.push(inst.getSnapshot()));
+        const unsubChanges = inst.subscribe((change) => changes.push(change));
+
+        await model.setField('age', 5);
+        expect(snapshots.some((s) => s.dirtyData.age === 5 && s.errors.age?.length)).toBe(true);
+        expect(changes).toHaveLength(0);
+        model.clearDirtyData();
+        expect(snapshots.at(-1)?.dirtyData).toEqual({});
+        await model.setField('age', 20);
+        await model.settled();
+        expect(snapshots.at(-1)?.errors.derived?.[0]?.message).toContain('compute failed');
+
+        unsub?.();
+        unsubChanges();
+        const count = snapshots.length;
+        await model.setField('age', 6);
+        expect(snapshots).toHaveLength(count);
         model.dispose();
     });
 

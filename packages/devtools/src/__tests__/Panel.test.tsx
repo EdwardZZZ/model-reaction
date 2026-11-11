@@ -68,7 +68,7 @@ describe('Panel', () => {
 
     test('renders data-tree values after an init message', () => {
         const { connect, emit } = makeFakeConnect();
-        const { container } = render(<Panel connect={connect} />);
+        const { container, getByRole, queryByRole } = render(<Panel connect={connect} />);
 
         act(() => {
             emit({ source: AGENT_SOURCE, kind: 'init', instances: [instance(1)] });
@@ -77,6 +77,17 @@ describe('Panel', () => {
         // Default tab is the data tree; committed values should be visible.
         expect(container.textContent).toContain('Ada Lovelace');
         expect(container.textContent).toContain('data');
+        act(() => {
+            emit({
+                source: AGENT_SOURCE, kind: 'snapshot', id: 1,
+                snapshot: { ...instance(1).snapshot, truncated: true },
+            });
+        });
+        expect(getByRole('status').textContent).toContain('errors may be omitted');
+        act(() => {
+            emit({ source: AGENT_SOURCE, kind: 'snapshot', id: 1, snapshot: instance(1).snapshot });
+        });
+        expect(queryByRole('status')).toBeNull();
     });
 
     test('switches to the dependency graph tab and renders nodes', () => {

@@ -17,8 +17,8 @@ void React;
 
 import { useDispatch, useSelector } from 'react-redux';
 
-import { createModel, type ModelReturn } from '../../src/index';
-import { ModelProvider } from '../../src/react';
+import { createModel, type ModelReturn } from 'model-reaction';
+import { ModelProvider } from 'model-reaction/react';
 
 interface User {
     id: string;
@@ -47,9 +47,13 @@ export function EditUserPage() {
     if (!model) return null;
 
     async function onSave() {
-        if (!(await model.validateAll())) return;
-        await model.settled();
-        dispatch(saveUser(model.data));
+        const current = model;
+        if (!current) return;
+        await current.settled();
+        const ok = await current.validateAll();
+        await current.settled();
+        if (!ok || Object.values(current.validationErrors).some((errors) => errors.length > 0)) return;
+        dispatch(saveUser(current.data));
     }
 
     return (

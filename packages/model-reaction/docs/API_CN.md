@@ -41,6 +41,10 @@ createModel<S extends Record<string, FieldSchema>>(
 > `validationErrors` 却是空的。在信任初始 `data` 之前，请先
 > `await validateAll()`。
 >
+> **初始化反应会经过未变化的值继续传播。** 非派生字段的默认值启动初始反应流程。
+> 派生值通过校验后，即使等于自身默认值，也会继续初始化下游，但不会为未变化的值
+> 发送字段变更事件。重新调度不会丢失初始化状态；使用 `await settled()` 等待整条链完成。
+>
 > **`FieldSchema.type` 是元数据，不是运行时校验器。** 它用于 TypeScript
 > 类型推导和工具展示；需要在运行时检查值类型时，请添加对应的
 > `ValidationRules` 或自定义 `Rule`。
@@ -78,6 +82,11 @@ createModel<S extends Record<string, FieldSchema>>(
 | `setField(field, value): Promise<boolean>` | 设置单个字段；返回该字段的验证结果 |
 | `setFields(fields): Promise<boolean>` | 在一次校验 + 反应流程中批量设置多个字段；返回所有字段结果的逻辑与。跨字段校验看到的是**合并后的批次数据**——每个字段针对已叠加了本次调用全部字段的 `data` 进行校验，因此相互依赖的字段（如 `password` / `confirmPassword`）可在一次调用中一起设置。**非原子**——即使某个字段校验失败，其余通过校验的字段仍会提交到 `data`。 |
 
+条件函数和验证器读取浅冻结的数据快照。`setFields()` 的所有字段共享一份经过
+transform 的候选快照；`validateAll()` 共享一份合并已提交数据与脏数据的快照。
+`setField()` 捕获当前已提交数据的快照。验证器必须保持纯函数，不能修改快照及其
+嵌套字段值。
+
 ### 反应
 
 字段可以配置一个 reaction，也可以配置 reaction 数组。`fields` 中任意依赖字段变化时，
@@ -112,10 +121,49 @@ computed: ({ enabled, source }) =>
 `dirtyData`，也不会触发 `field:change`、下游 reaction 或当前 reaction 的
 `action`。reaction 数组中的后续项仍会按声明顺序执行。
 
+#### 返回值类型
+
+TypeScript 会按字段的 `type` 检查每个 `computed` 的返回值（reaction 数组中的
+每一项都会检查）：分别为 `string`、`number`、`boolean`、`Date`、`object`
+或只读数组，另外都允许 `SKIP_REACTION`。`enum` 字段的返回值不检查。
+`values` 的类型是 `Record<string, any>`，所以直接返回其中的值（`(v) => v.name`）
+得到的是 `any`，同样不会被检查。
+
+```ts
+total: {
+    type: 'number',
+    // ❌ 类型错误：number 字段不能派生出字符串
+    reaction: { fields: ['price'], computed: ({ price }) => `${price}` },
+}
+```
+
+检查是严格的：即使数据类型允许，`null` 和 `undefined` 也会报错。单独定义的
+reaction 可以用 `Reaction<T>` 声明返回值类型，此时它只能用于该类型的字段。
+不带类型参数的 `Reaction`（即 `Reaction<any>`）不做检查，派生值可能为 null 时
+用它绕过：
+
+```ts
+import type { Reaction } from 'model-reaction';
+
+const label: Reaction = {
+    fields: ['price'],
+    computed: ({ price }) => (price > 0 ? `$${price}` : null),
+};
+```
+
+在 schema 外单独声明、返回 `SKIP_REACTION` 的函数，返回类型会被推断为
+`symbol`，需要标注为 `(): typeof SKIP_REACTION`。Schema 片段工厂应返回
+`FieldSchema<'string'>` 这类单一分支，这样展开片段再添加 reaction 时，
+字段仍保留原来的 `type`。
+
 多个 reaction 因同一个依赖字段变化而写入同一目标时，最后调度的写入具有最终效力，
 之前的写入会被更新的写入覆盖。因此上例中，如果第二个结果通过校验，`total` 由第二个
 reaction 决定；如果它校验失败，结果会进入 `dirtyData`，不会回退采用前一个 reaction
 的值。只有该 reaction 的写入成功提交后，才会执行它自己的 `action`。
+
+匹配的 reaction 按调度顺序计算并开始校验。`SKIP_REACTION` 不产生写入，也不会
+取代前一个写入。写入同一目标的防抖 reaction 会合并到一次回调中，该目标再次被触发
+时会重新计时。已提交写入的 action 可以与后续更新重叠执行；`settled()` 会等待它们全部完成。
 
 `setFields()` 批量修改多个依赖字段时，变更字段的处理顺序也会影响调度顺序。如果一个
 结果依赖多个输入，建议用一个包含这些依赖字段的 reaction 计算，避免多个 reaction 竞争
@@ -277,3 +325,9 @@ const custom = formatValidationErrors(
 - `model.subscribeField(field, callback)` 改为
   `model.subscribe(data => data[field], callback)`，回调会额外收到上一个值。
   若必须按原始字段事件触发，用 `on('field:change', handler)` 并筛选字段名。
+- `reaction.computed` 的返回值现在会按字段 `type` 做类型检查（见
+  [返回值类型](#返回值类型)）。可能返回 null 的 reaction 需要改用不带类型参数的
+  `Reaction`；单独声明、返回 `SKIP_REACTION` 的函数需要标注
+  `(): typeof SKIP_REACTION`。`FieldSchema` 改为按 `type` 区分的联合类型，
+  `interface X extends FieldSchema` 不再能编译；改用类型交叉，或
+  `FieldSchema<'string'>` 这类单一分支。

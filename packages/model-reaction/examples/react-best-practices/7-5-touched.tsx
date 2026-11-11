@@ -7,9 +7,9 @@
 import * as React from 'react';
 void React;
 
-import { createModel } from '../../src/index';
-import { ValidationRules } from '../../src/validation';
-import { useDraftField } from '../../src/react';
+import { createModel } from 'model-reaction';
+import { ValidationRules } from 'model-reaction/validation';
+import { useDraftField } from 'model-reaction/react';
 
 interface User {
     name: string;

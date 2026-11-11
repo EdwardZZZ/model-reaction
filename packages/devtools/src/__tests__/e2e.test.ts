@@ -12,11 +12,8 @@ import { createModel } from 'model-reaction/devtools';
 import { ValidationRules } from 'model-reaction/validation';
 import { installAgent } from '../page-agent';
 import {
-    AGENT_SOURCE,
-    PANEL_SOURCE,
     isAgentMessage,
     type AgentMessage,
-    type PanelMessage,
 } from '../protocol';
 
 function collect(): AgentMessage[] {
@@ -122,11 +119,7 @@ describe('library ↔ page-agent end-to-end', () => {
         await model.setField('email', 'nope');
         await model.settled();
 
-        // Ask the agent for a fresh snapshot and read it back.
-        window.postMessage(
-            { source: PANEL_SOURCE, kind: 'get-snapshot', id } as PanelMessage,
-            '*'
-        );
+        // Rejected input must refresh automatically without a panel request.
         await flush();
         await flush();
 
@@ -137,6 +130,15 @@ describe('library ↔ page-agent end-to-end', () => {
         // The bad value lives in dirtyData, not data (verify-then-commit).
         expect(snap!.snapshot.dirtyData.email).toEqual({ t: 'primitive', v: 'nope' });
         expect(snap!.snapshot.errors.email!.length).toBeGreaterThan(0);
+        expect(received.filter((m) => m.kind === 'change')).toHaveLength(0);
+
+        model.clearDirtyData();
+        await flush();
+        await flush();
+        const snapshots = received.filter(
+            (m): m is Extract<AgentMessage, { kind: 'snapshot' }> => m.kind === 'snapshot'
+        );
+        expect(snapshots[snapshots.length - 1]?.snapshot.dirtyData).toEqual({});
 
         model.dispose();
     });

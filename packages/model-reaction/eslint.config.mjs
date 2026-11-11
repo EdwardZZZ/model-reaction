@@ -25,7 +25,7 @@ export default tseslint.config(
   },
   // Looser rules for tests
   {
-    files: ['src/__tests__/**/*.ts'],
+    files: ['src/__tests__/**/*.{ts,tsx}'],
     rules: {
       '@typescript-eslint/no-non-null-assertion': 'off',
       'no-console': 'off',
@@ -33,7 +33,7 @@ export default tseslint.config(
   },
   // Looser rules for examples (illustrative scripts, not lib code)
   {
-    files: ['examples/**/*.ts'],
+    files: ['examples/**/*.{ts,tsx}'],
     rules: {
       'no-console': 'off',
       '@typescript-eslint/no-unused-vars': 'off',

@@ -81,202 +81,53 @@ unsubscribe();
 
 ## 7. React 集成
 
-`model-reaction/react` 入口提供一组基于 `useSyncExternalStore` 的 hook
-与组件，下面的实践帮助你在 React 项目中用得更顺。
+React 的技术契约与完整 Recipe 统一维护在 [REACT_CN.md](REACT_CN.md)。
+下面保留原有章节锚点，应用状态库的组合建议继续维护在本页。
 
 ### 7.1 选对 hook
 
-| 需求 | 用 |
-| --- | --- |
-| 展示单个字段 | `useModelField` |
-| 受控文本输入 | `useDraftField` |
-| 非文本控件或 committed value 绑定 | `useModelFieldState` |
-| 稳定的派生 selector | `useModelSelector` |
-| 闭包当前 props 的 selector | `useModelComputed` |
-| 一次订阅多个字段 | `useModelFields(model, ['a', 'b'])` |
-
-优先选择最具体的 hook：`useModelField` 比 `useModelSelector` 更轻量，
-而 `useModelFields` 比手写一个返回新对象的 selector 更高效。把已校验的文本输入
-直接绑定到已提交数据之前，请先阅读
-[REACT_CN.md](REACT_CN.md#严格--异步校验下的受控输入)。
+见 [Hooks 与组件](REACT_CN.md#hooks-与组件)。
 
 ### 7.2 selector 引用要稳定
 
-`useModelSelector` 在订阅时一次性捕获 `selector` 与 `isEqual`。每次渲染
-传入新函数会触发重新订阅：
-
-```tsx
-// ❌ 每次渲染都会重新订阅
-const total = useModelSelector(cart, (d) => d.qty * d.price);
-
-// ✅ 引用稳定
-const selectTotal = useCallback((d: Cart) => d.qty * d.price, []);
-const total = useModelSelector(cart, selectTotal);
-```
-
-selector 返回新容器时，请配合 `shallow`；保持 selector 引用稳定可避免重新订阅：
-
-```tsx
-const selectSlice = useCallback(
-    (d: Cart) => ({ qty: d.qty, price: d.price }),
-    [],
-);
-const slice = useModelSelector(cart, selectSlice, shallow);
-```
+见 [`useModelSelector` vs `useModelComputed`](REACT_CN.md#usemodelselector-vs-usemodelcomputed)。
 
 ### 7.2bis 内联 selector 使用 `useModelComputed`
 
-selector 需要闭包当前 props 且不希望重新订阅时，用 `useModelComputed`。
-它的订阅只依赖 model；每次字段变化都会通知 React，由共享快照 getter 比较选中值。
-两个 Hook 都会在字段变化时求值，比较函数本身不会省掉下一次计算。
-
-```tsx
-const item = useModelComputed(cart, (data) => data.items[id]);
-const slice = useModelComputed(cart, (data) => ({ qty: data.qty, price: data.price }), shallow);
-```
+见 [`useModelSelector` vs `useModelComputed`](REACT_CN.md#usemodelselector-vs-usemodelcomputed)。
 
 ### 7.3 用 `<ModelProvider>` 避免 prop 透传
 
-在表单根节点包一次，后代直接取出 model：
-
-```tsx
-<ModelProvider model={userModel}>
-    <NameField />
-    <AddressFields />
-    <SubmitButton />
-</ModelProvider>
-```
-
-后代任意位置：
-
-```tsx
-const model = useModel<User>();
-const name = useDraftField(model, 'name');
-```
+见 [基本示例](REACT_CN.md#基本示例)。
 
 ### 7.4 用 `<Field>` 绑定 committed value 控件
 
-当 checkbox、select 等控件可以直接绑定 model 已提交值时，可以使用 `<Field>`
-render-prop 隐藏 model 引用。文本输入默认使用 `useDraftField`，以保留被校验拒绝的
-编辑中间态：
-
-```tsx
-interface PlanForm {
-    plan: 'free' | 'pro';
-}
-
-function PlanField() {
-    return (
-        <Field<PlanForm, 'plan'> name="plan">
-            {({ value, setValue, meta }) => (
-                <label>
-                    <select
-                        value={value}
-                        onChange={(e) => {
-                            const plan = e.target.value;
-                            if (plan === 'free' || plan === 'pro') {
-                                void setValue(plan);
-                            }
-                        }}
-                        aria-invalid={!!meta.error}
-                    >
-                        <option value="free">免费版</option>
-                        <option value="pro">专业版</option>
-                    </select>
-                    {meta.error && <span>{meta.error}</span>}
-                </label>
-            )}
-        </Field>
-    );
-}
-```
+见 [基本示例](REACT_CN.md#基本示例)。
 
 ### 7.5 touched 语义
 
-标准文本输入流程中，`useDraftField` 已经提供 `touched`、`onBlur` 和
-`showError`。使用更低层的 `useModelFieldState` 时，仍应在组件本地管理
-`touched`，因为它是 UI 关注点，不属于模型：
-
-```tsx
-const [touched, setTouched] = useState(false);
-<input onBlur={() => setTouched(true)} />
-{touched && meta.error && <span>{meta.error}</span>}
-```
-
-如果表单会被复用，提交成功后把它重置回 `false` 即可。
+见 [受控输入](REACT_CN.md#严格--异步校验下的受控输入)。
 
 ### 7.6 提交流程
 
-校验是异步的，提交回调里务必 `await validateAll()`：
-
-```tsx
-async function onSubmit() {
-    const ok = await model.validateAll();
-    if (!ok) return;
-    await model.settled();      // 等待所有挂起的反应
-    await api.save(model.data);
-}
-```
-
-当 reaction 带防抖或校验会触发级联异步工作时，`settled()` 可保证读取
-`model.data` 前模型已经稳定。
+见 [提交流程](REACT_CN.md#提交流程)。
 
 ### 7.7 一个逻辑表单一个 model
 
-每次 `createModel(...)` 互相独立，推荐分层：
-
-- 页面级 UI 状态 → `zustand` / `useState` / context
-- 业务实体与表单 → 各自一个 `model-reaction` 模型
-- 跨表单状态（向导步骤、草稿 id 等）→ 外层容器
-
-不要为了复用 Provider 把多个无关表单塞进同一个 model；嵌套多个 Provider
-即可。
+无关表单使用独立 owner，见 [Model 生命周期](REACT_CN.md#react-中的-model-生命周期)。
 
 ### 7.8 生命周期与清理
 
-`createModel` 持有内部监听器；长生命周期的 SPA 应在所属组件的 effect
-中创建 model，并在路由卸载时释放同一个实例：
-
-```tsx
-import { useEffect, useState, type ReactNode } from 'react';
-import { ModelProvider } from 'model-reaction/react';
-import { createModel, type ModelReturn } from 'model-reaction';
-
-interface User {
-    name: string;
-}
-
-function createUserModel() {
-    return createModel<User>({ name: { type: 'string', default: '' } });
-}
-
-function UserRoute({ children }: { children: ReactNode }) {
-    const [model, setModel] = useState<ModelReturn<User> | null>(null);
-    useEffect(() => {
-        const owned = createUserModel();
-        setModel(owned);
-        return () => owned.dispose();
-    }, []);
-    if (!model) return null;
-    return <ModelProvider model={model}>{children}</ModelProvider>;
-}
-```
-
-应由卸载订阅者的同一个 owner 调用 `dispose()`。被释放的 model 已清空内部状态
-和监听器，后续写入会抛错。
+见 [Model 生命周期](REACT_CN.md#react-中的-model-生命周期)。
 
 ### 7.9 SSR 与并发渲染
 
-所有 hook 基于 `useSyncExternalStore`，并发渲染下安全。SSR 场景下把
-model 当作请求作用域：在请求处理函数里 `createModel`，`renderToString`
-完成后 `dispose()`，**不要**跨请求复用同一个 model 实例。
+见 [SSR 与并发渲染](REACT_CN.md#ssr-与并发渲染)。
 
 ### 7.10 与 zustand、Redux 的取舍
 
-`model-reaction` 是**模型层（model layer）**，而 zustand 与 Redux 是
-**状态容器（state container）**，它们处于不同抽象层级，**并不互斥**。
-完整对比表见 [COMPARISON_CN.md](COMPARISON_CN.md)。React 项目中的速查
-建议：
+`model-reaction` 是**模型层**，zustand 与 Redux 是**状态容器**，可以组合使用。
+完整对比见 [COMPARISON_CN.md](COMPARISON_CN.md)。
 
 | 需求 | 推荐 |
 | --- | --- |
@@ -287,14 +138,12 @@ model 当作请求作用域：在请求处理函数里 `createModel`，`renderTo
 
 #### 7.10.1 不要为了表单字段而堆 `useState`
 
-如果一个表单存在两个以上互相联动的字段（校验、派生总计、异步唯一性
-检查等），直接用 `model-reaction` 比一连串 `useState` 更合适，否则你会
-手写一遍校验、脏数据与副作用。
+对于带校验、派生总计或异步检查的联动字段，用 model 管理领域状态；
+编辑文本与 UI 旗标留在 React。边界见 [受控输入](REACT_CN.md#严格--异步校验下的受控输入)。
 
 #### 7.10.2 与 zustand 组合管全局状态
 
 ```tsx
-// 全局 UI store —— zustand
 const useUI = create<{ drawerOpen: boolean; toggle: () => void }>((set) => ({
     drawerOpen: false,
     toggle: () => set((s) => ({ drawerOpen: !s.drawerOpen })),
@@ -303,64 +152,23 @@ const useUI = create<{ drawerOpen: boolean; toggle: () => void }>((set) => ({
 function UserDrawer() {
     const open = useUI((s) => s.drawerOpen);
     if (!open) return null;
-    return (
-        <UserRoute>
-            <UserForm />
-        </UserRoute>
-    );
+    return <UserRoute><UserForm /></UserRoute>;
 }
 ```
 
-经验法则：zustand 管**应用状态**（开/关、当前用户 id、主题）；
-`model-reaction` 管**实体状态**（正在编辑的用户记录及其规则）。
-`UserRoute` 沿用 §7.8 的生命周期模式，在抽屉关闭时释放 model。
+zustand 管应用状态，model 管正在编辑的实体及其规则。
+`UserRoute` 遵循 [owner 生命周期](REACT_CN.md#react-中的-model-生命周期)。
+见 [组合示例](../examples/react-best-practices/7-10-2-with-zustand.tsx)。
 
 #### 7.10.3 与 Redux Toolkit 组合
 
-在 Redux 项目里，把 RTK 当应用骨架，凡是为了一个编辑器 / 向导 / 表单
-单独写一个 slice 的场景，都换成 `model-reaction`：
+保留 RTK 作为应用状态库，为编辑器、向导或表单使用 model。
+每个编辑对象有独立 owner，通过 [提交检查](REACT_CN.md#提交流程)
+后，将 model 的已提交数据 dispatch 到应用状态库，避免每个表单字段都写 action 和 reducer。
 
-```tsx
-import { useEffect, useState } from 'react';
-import { createModel, type ModelReturn } from 'model-reaction';
-
-interface User {
-    id: string;
-    name: string;
-}
-
-function EditUserPage() {
-    const [model, setModel] = useState<ModelReturn<User> | null>(null);
-    const userId = useSelector(selectCurrentUserId);
-    const dispatch = useDispatch();
-    useEffect(() => {
-        const owned = createModel<User>(userSchema);
-        setModel(owned);
-        return () => owned.dispose();
-    }, [userId]);
-
-    if (!model) return null;
-
-    async function onSave() {
-        if (!(await model.validateAll())) return;
-        await model.settled();
-        dispatch(saveUser(model.data));
-    }
-
-    return (
-        <ModelProvider model={model}>
-            <UserForm onSubmit={onSave} />
-        </ModelProvider>
-    );
-}
-```
-
-这样既能避免「每个字段一个 action / reducer」的繁琐，又保留了 Redux
-对应用其余部分的统一治理。
+见 [组合示例](../examples/react-best-practices/7-10-3-with-redux.tsx)。
 
 #### 7.10.4 哪些场景**不要**用 `model-reaction`
-
-`model-reaction` 刻意保持在模型层，下列场景请别硬塞：
 
 - 全局 UI 旗标（模态框、主题、语言）→ 用 zustand / Redux。
 - 跨路由缓存 / 查询结果 → 用 TanStack Query / RTK Query。
@@ -381,5 +189,5 @@ createModel<{ name: string }>({
 });
 ```
 
-`model-reaction` 把校验、错误状态、脏数据、字段订阅都做成内置；其他两者
-则需要逐项手写。
+见 [对比示例](../examples/react-best-practices/7-10-5-cheat-sheet.ts)。
+这些组合示例需要额外安装第三方依赖，库本身不会安装它们。

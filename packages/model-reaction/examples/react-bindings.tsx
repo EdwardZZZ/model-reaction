@@ -2,8 +2,8 @@
  * React Bindings Example
  *
  * This file demonstrates how to wire `model-reaction` into a React app using
- * the `model-reaction/react` adapter. It is a standalone .tsx snippet — not
- * runnable from the CLI, but copy-paste-ready into any React 18+ project.
+ * the `model-reaction/react` adapter. The separate react-bindings-runner.tsx
+ * performs the CLI SSR smoke check (`pnpm run example:react`).
  *
  * Required peer deps in your app:
  *   npm install model-reaction react react-dom
@@ -16,12 +16,9 @@
  *   - Either explicit `createModel<T>(schema)` or schema-inferred types.
  *   - Provider-owned model lifecycle: whoever creates a model also disposes it.
  */
-import * as React from 'react';
-import { useCallback, useEffect, useState } from 'react';
-// `React` is required for the JSX runtime even if not directly referenced.
-void React;
-import { createModel, type ModelReturn } from '../src/index';
-import { ValidationRules } from '../src/validation';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { createModel, type ModelReturn } from 'model-reaction';
+import { ValidationRules } from 'model-reaction/validation';
 import {
     Field,
     ModelProvider,
@@ -31,7 +28,7 @@ import {
     useModelFieldState,
     useModelSelector,
     useDraftField,
-} from '../src/react';
+} from 'model-reaction/react';
 
 // 1. Define the model. Use an explicit interface for the cleanest types.
 interface Cart {
@@ -41,7 +38,7 @@ interface Cart {
     name: string;
 }
 
-function createCartModel() {
+export function createCartModel() {
     return createModel<Cart>({
         qty:    { type: 'number', default: 1 },
         price:  { type: 'number', default: 100 },
@@ -101,20 +98,15 @@ function CouponBadge() {
     return summary.hasCoupon ? <span>Coupon: {summary.coupon}</span> : null;
 }
 
-// 6. Validation surfacing through a plain selector.
+// 6. Validation metadata has its own event subscriptions.
 function ValidationSummary() {
     const cart = useModel<Cart>();
-    // Re-renders only when the validation error count for `name` changes.
-    const selectErrorCount = useCallback(
-        () => cart.validationErrors.name?.length ?? 0,
-        [cart]
-    );
-    const errorCount = useModelSelector(cart, selectErrorCount);
-    return errorCount > 0 ? <span style={{ color: 'red' }}>Invalid name</span> : null;
+    const [, , meta] = useModelFieldState(cart, 'name');
+    return meta.error ? <span style={{ color: 'red' }}>Invalid name</span> : null;
 }
 
 // 7. Top-level app — create after commit and dispose that instance in cleanup.
-function CartModelOwner({ children }: { children: React.ReactNode }) {
+function CartModelOwner({ children }: { children: ReactNode }) {
     const [cart, setCart] = useState<ModelReturn<Cart> | null>(null);
     useEffect(() => {
         const owned = createCartModel();
@@ -134,7 +126,7 @@ export function CartApp() {
 }
 
 // 7a. Components rendered under a provider demonstrate independent updates.
-function CartContents() {
+export function CartContents() {
     return (
         <div>
             <NameInput />
@@ -233,68 +225,9 @@ function NameFieldWithBlur() {
 
 // 8. Schema-inferred types (no explicit interface).
 //    `inferred.data` is typed automatically as `{ tax: number; rate: number }`.
-interface Tax { tax: number; rate: number }
-function createTaxModel() {
-    return createModel<Tax>({
+export function createTaxModel() {
+    return createModel({
         tax:  { type: 'number', default: 0 },
         rate: { type: 'number', default: 0.1 },
     });
 }
-
-// -----------------------------------------------------------------------------
-// 10. CLI runner — renders the components via `react-dom/server` so this file
-//     can be executed with `npm run example:react`. In a real React app you
-//     would mount with `react-dom/client`'s `createRoot` instead.
-// -----------------------------------------------------------------------------
-import { renderToString } from 'react-dom/server';
-
-async function runExample(): Promise<void> {
-    const cart = createCartModel();
-    const inferred = createTaxModel();
-
-    /* eslint-disable no-console */
-    inferred.subscribe(
-        (d) => d.tax * d.rate,
-        (v) => {
-            console.log('[inferred] tax * rate →', v);
-        }
-    );
-    cart.subscribe((data) => data.name, (v) => {
-        console.log('[non-React subscriber] name changed →', v);
-    });
-    cart.subscribe(
-        (d) => d.qty * d.price,
-        (total, prev) => {
-            console.log(`[non-React subscriber] total: ${prev} → ${total}`);
-        }
-    );
-
-    console.log('=== React Bindings Example ===');
-
-    console.log('\n[render #1] initial state:');
-    console.log(renderToString(<ModelProvider model={cart}><CartContents /></ModelProvider>));
-
-    console.log('\n→ setField("name", "Zephyr")');
-    await cart.setField('name', 'Zephyr');
-
-    console.log('\n→ setField("qty", 3)   // total: 100 → 300');
-    await cart.setField('qty', 3);
-
-    console.log('\n→ setField("coupon", "SAVE10")  // does NOT change total');
-    await cart.setField('coupon', 'SAVE10');
-
-    console.log('\n[render #2] after mutations:');
-    console.log(renderToString(<ModelProvider model={cart}><CartContents /></ModelProvider>));
-
-    console.log('\n→ inferred.setField("tax", 200)  // tax * rate → 20');
-    await inferred.setField('tax', 200);
-
-    cart.dispose();
-    inferred.dispose();
-}
-
-runExample().catch((err) => {
-    console.error(err);
-    process.exit(1);
-});
-/* eslint-enable no-console */

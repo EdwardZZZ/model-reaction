@@ -67,6 +67,8 @@ export interface Snapshot {
     data: Record<string, SerializedValue>;
     dirtyData: Record<string, SerializedValue>;
     errors: Record<string, Array<{ field: string; message: string; rule?: string }>>;
+    /** Some values or fields were omitted or clipped to fit serialization limits. */
+    truncated?: boolean;
 }
 
 export interface ChangeEntry {

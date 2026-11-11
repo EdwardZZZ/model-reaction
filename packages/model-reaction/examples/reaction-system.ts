@@ -1,4 +1,4 @@
-import { createModel } from '../src/index';
+import { createModel } from 'model-reaction';
 
 interface Product {
   price: number;

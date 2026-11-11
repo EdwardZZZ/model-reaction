@@ -1,4 +1,4 @@
-import { createModel } from '../index';
+import { createModel, FieldSchema, Reaction, SKIP_REACTION } from '../index';
 import { createModel as createDevtoolsModel } from '../devtools';
 
 // Both directions preserve the complete overload set, including generics.
@@ -111,6 +111,87 @@ describe('createModel type inference', () => {
             };
             void invalidWrite;
             expect(person).toEqual({ name: 'Ada', age: 36 });
+            model.dispose();
+        });
+    });
+
+    describe('reaction.computed return type', () => {
+        test('follows the target field type tag', async () => {
+            const doubled: Reaction<number> = {
+                fields: ['price'],
+                computed: (v) => v.price * 2,
+            };
+            const textField = (): FieldSchema<'string'> => ({ type: 'string', default: '' });
+            const model = createModel({
+                price: { type: 'number', default: 2 },
+                total: { type: 'number', default: 0, reaction: doubled },
+                label: {
+                    ...textField(),
+                    reaction: {
+                        fields: ['price'],
+                        computed: (v) => (v.price > 0 ? `$${v.price}` : SKIP_REACTION),
+                    },
+                },
+            });
+            const invalidSchemas = () => {
+                createModel({
+                    price: { type: 'number', default: 2 },
+                    // @ts-expect-error a number field rejects a string result
+                    total: {
+                        type: 'number',
+                        reaction: { fields: ['price'], computed: () => '4' },
+                    },
+                });
+                createModel({
+                    price: { type: 'number', default: 2 },
+                    // @ts-expect-error every reaction array entry is checked
+                    total: {
+                        type: 'number',
+                        reaction: [doubled, { fields: ['price'], computed: () => true }],
+                    },
+                });
+                createModel<{ price: number; label: string }>({
+                    price: { type: 'number' },
+                    // @ts-expect-error explicit data types are checked too
+                    label: { type: 'string', reaction: { fields: ['price'], computed: () => 1 } },
+                });
+                createModel({
+                    price: { type: 'number', default: 2 },
+                    // @ts-expect-error Reaction<number> does not fit a string field
+                    label: { type: 'string', reaction: doubled },
+                });
+            };
+            void invalidSchemas;
+
+            await model.settled();
+            expect(model.data).toEqual({ price: 2, total: 4, label: '$2' });
+            model.dispose();
+        });
+
+        test('rejects nullable results unless the reaction is untyped', async () => {
+            interface Priced { price: number; label: string | null }
+            const nullableLabel: Reaction = {
+                fields: ['price'],
+                computed: (v) => (v.price > 0 ? `$${v.price}` : null),
+            };
+            const model = createModel<Priced>({
+                price: { type: 'number', default: 0 },
+                label: { type: 'string', default: '', reaction: nullableLabel },
+            });
+            const invalidSchema = () => {
+                createModel<Priced>({
+                    price: { type: 'number' },
+                    // @ts-expect-error null is not a string result
+                    label: {
+                        type: 'string',
+                        reaction: { fields: ['price'], computed: () => null },
+                    },
+                });
+            };
+            void invalidSchema;
+
+            await model.settled();
+            expect(model.getField('label')).toBeNull();
             model.dispose();
         });
     });

@@ -108,7 +108,13 @@ pnpm --filter model-reaction-devtools run build
 - 如果一个页面承载了**多个**模型，面板头部会出现实例选择器，可切换检视对象。
 - **时间线**由环形缓冲区限制大小（默认每个实例 100 条），因此长时间运行、变更频繁的
   页面也不会无限占用内存。
-- 数据树中的大对象会被保守截断（限制深度、宽度与字符串长度），避免超大数据卡死面板。
+- 被拒输入、校验完成、dirty 清理和 reaction 错误都会自动刷新数据树。
+  同步通知共用一次排队的快照刷新，只有已提交的字段变更进入时间线。
+- 每份快照的 `data`、`dirtyData` 和 `errors` 共享 2,000 个节点和保守的
+  256 KiB UTF-8 JSON 字节预算；时间线中的每个值拥有独立预算。
+  默认深度上限为 6，每个容器或 record 最多 100 项，字符串前缀最多 10,000 个字符。
+- 预算耗尽后停止遍历并显示截断标记；值、字段或错误被省略或裁剪时，
+  面板显示快照截断提示。兄弟分支中的共享对象仍可读取，真正的循环引用会被标记。
 
 ## DevTools Hook 契约
 
@@ -128,14 +134,18 @@ interface ModelReactionDevtoolsHook {
 ```
 
 每个已注册实例暴露拉取式读取接口（`getFields`、`getDependencyGraph`、`getSnapshot`），
-外加一个推送式的 `subscribe` 用于变更时间线。扩展的页面 agent 实现该 hook；DevTools 入口
-只负责**消费**它。
+外加用于已提交变更的 `subscribe`，以及可选的 `subscribeSnapshot`，
+用于校验、dirty 与错误状态更新。旧实例没有 `subscribeSnapshot` 时，
+agent 仍会在已提交变更后刷新。注销或释放时移除两种订阅。
+扩展的页面 agent 实现该 hook，DevTools 入口负责消费它。
 
 依赖图由 schema 经一个共享原语 [`eachReactionEdge`](../src/reaction/reaction-graph.ts) 推导，它是
 「如何把 `reaction.fields` 读成边」的唯一定义处。核心的 reaction 调度器（`collectReactions`）
 使用同一个原语，且有一个锁定测试
 （[reaction-graph.test.ts](../src/__tests__/reaction-graph.test.ts)）断言：原语、运行时索引、
 DevTools 图三者一致 —— 因此面板永远不会显示与运行时行为不符的依赖图。
+每个已注册模型只构建一次字段元数据，依赖图直接从同一份依赖列表投影，
+后续读取复用这两个结构。
 
 ## 不存在时零开销
 
@@ -148,6 +158,7 @@ DevTools 图三者一致 —— 因此面板永远不会显示与运行时行为
 - **写回式时间旅行（write-back time-travel）**。时间线为**只读**。把旧值回放进模型会
   重新触发 reaction，并可能污染 `dirtyData`（库刻意不提供 `resetDirty` —— 见
   AGENTS.md §5），因此扩展不提供恢复操作。
-- **可配置的上限**。时间线环形缓冲区大小，以及值序列化的深度 / 宽度 / 字符串上限均使用
-  固定默认值。
+- **可配置的上限**。时间线环形缓冲区大小，以及值序列化的深度 / 宽度 /
+  字符串 / 节点 / 字节上限均使用固定默认值。预算按快照或时间线中的单个值计算，
+  不限制跨全部模型聚合的 `init` 消息或 schema 元数据。
 - **多帧 / 跨域 iframe**。agent 仅注入到顶层帧。

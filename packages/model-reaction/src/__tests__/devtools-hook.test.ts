@@ -180,7 +180,7 @@ describe('devtools-hook', () => {
                     },
                 },
             };
-            const graph = buildDependencyGraph(schema);
+            const graph = buildDependencyGraph(buildFieldInfo(schema));
             expect(graph.nodes).toEqual(['firstName', 'lastName', 'fullName']);
             expect(graph.edges).toEqual(
                 expect.arrayContaining([
@@ -196,7 +196,7 @@ describe('devtools-hook', () => {
                 a: { type: 'string', default: '' },
                 b: { type: 'number', default: 0 },
             };
-            const graph = buildDependencyGraph(schema);
+            const graph = buildDependencyGraph(buildFieldInfo(schema));
             expect(graph.nodes).toEqual(['a', 'b']);
             expect(graph.edges).toEqual([]);
         });
@@ -213,7 +213,7 @@ describe('devtools-hook', () => {
                     ],
                 },
             };
-            const edges = buildDependencyGraph(schema).edges;
+            const edges = buildDependencyGraph(buildFieldInfo(schema)).edges;
             expect(edges.filter((e) => e.from === 'a' && e.to === 'sum')).toHaveLength(1);
         });
     });

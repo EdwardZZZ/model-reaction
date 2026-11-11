@@ -120,8 +120,16 @@ assets (`manifest.json`, `devtools.html`, `panel.html`, `panel.css`).
   panel header; pick which one to inspect.
 - The **Timeline** is capped by a ring buffer (default 100 entries per
   instance) so a long-lived, chatty page cannot grow memory without bound.
-- Large values in the data tree are truncated defensively (depth, breadth, and
-  string length) so a huge blob cannot lock up the panel.
+- Rejected input, validation completion, dirty clearing, and reaction errors
+  refresh the data tree automatically. Synchronous notifications share one
+  queued snapshot; only committed field changes enter the timeline.
+- Each snapshot shares a budget across `data`, `dirtyData`, and `errors`:
+  2,000 nodes and a conservative 256 KiB UTF-8 JSON cap. Each timeline value
+  has its own budget. Defaults also cap depth at 6, entries per container or
+  record at 100, and string prefixes at 10,000 characters.
+- Traversal stops when a budget is exhausted, with truncation markers and a
+  snapshot banner when values, fields, or errors were omitted or clipped.
+  Shared objects in sibling branches remain readable; true cycles are marked.
 
 ## The DevTools hook contract
 
@@ -144,9 +152,11 @@ interface ModelReactionDevtoolsHook {
 ```
 
 Each registered instance exposes pull-based reads (`getFields`,
-`getDependencyGraph`, `getSnapshot`) plus a push-based `subscribe` for the
-change timeline. The extension's page agent implements this hook; the DevTools
-entry only ever *consumes* it.
+`getDependencyGraph`, `getSnapshot`) plus `subscribe` for committed changes and
+optional `subscribeSnapshot` for validation, dirty-data, and error updates.
+The agent still refreshes on committed changes for older instances without
+`subscribeSnapshot`. Both subscriptions are removed on unregister/disposal.
+The extension's page agent implements the hook; the DevTools entry consumes it.
 
 The dependency graph is derived from the schema through a shared primitive,
 [`eachReactionEdge`](../src/reaction/reaction-graph.ts), which is the single definition of
@@ -155,6 +165,8 @@ how `reaction.fields` is read as edges. The core reaction scheduler
 ([reaction-graph.test.ts](../src/__tests__/reaction-graph.test.ts)) asserts the
 primitive, the runtime index, and the DevTools graph all agree — so the panel
 can never show a dependency graph that disagrees with runtime behaviour.
+Field metadata is built once per registered model; the graph projects those
+same dependency lists. Subsequent reads reuse both structures.
 
 ## Zero overhead when absent
 
@@ -171,6 +183,8 @@ returns without building an instance descriptor or adding subscriptions.
   `dirtyData` (the library intentionally has no `resetDirty` — see AGENTS.md
   §5), so the extension does not offer a restore action.
 - **Configurable limits.** The timeline ring-buffer size and the value
-  serialization depth / breadth / string caps currently use fixed defaults.
+  serialization depth / breadth / string / node / byte caps currently use fixed
+  defaults. Budgets apply per snapshot or timeline value, not to aggregate
+  `init` messages or schema metadata across all model instances.
 - **Multi-frame / cross-origin iframes.** The agent is injected into the top
   frame only.

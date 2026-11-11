@@ -26,7 +26,7 @@ import {
     type PanelMessage,
     type Snapshot,
 } from './protocol';
-import { serializeRecord, serializeValue } from './serialize';
+import { serializeSnapshot, serializeValue } from './serialize';
 
 /** Mirrors `ModelReactionDevtoolsHook` from the library (re-declared, not imported). */
 interface HookModelInstance {
@@ -39,6 +39,7 @@ interface HookModelInstance {
         errors: Record<string, Array<{ field: string; message: string; rule?: string }>>;
     };
     subscribe(listener: (change: { field: string; value: unknown; timestamp: number }) => void): () => void;
+    subscribeSnapshot?(listener: () => void): () => void;
 }
 
 const HOOK_KEY = '__MODEL_REACTION_DEVTOOLS_HOOK__';
@@ -69,14 +70,8 @@ export function installAgent(
         win.postMessage(message, '*');
     };
 
-    const takeSnapshot = (instance: HookModelInstance): Snapshot => {
-        const raw = instance.getSnapshot();
-        return {
-            data: serializeRecord(raw.data),
-            dirtyData: serializeRecord(raw.dirtyData),
-            errors: raw.errors,
-        };
-    };
+    const takeSnapshot = (instance: HookModelInstance): Snapshot =>
+        serializeSnapshot(instance.getSnapshot());
 
     const toState = (entry: TrackedInstance): InstanceState => ({
         id: entry.instance.id,
@@ -110,7 +105,7 @@ export function installAgent(
                 seq: 0,
                 snapshotQueued: false,
             };
-            entry.unsubscribe = instance.subscribe((change) => {
+            const unsubscribeChanges = instance.subscribe((change) => {
                 const record: ChangeEntry = {
                     seq: entry.seq++,
                     field: change.field,
@@ -127,6 +122,11 @@ export function installAgent(
                 // refresh the whole instance once at the end of this microtask.
                 scheduleSnapshot(entry);
             });
+            const unsubscribeSnapshot = instance.subscribeSnapshot?.(() => scheduleSnapshot(entry));
+            entry.unsubscribe = () => {
+                unsubscribeChanges();
+                unsubscribeSnapshot?.();
+            };
             tracked.set(instance.id, entry);
             post({ source: AGENT_SOURCE, kind: 'instance-added', instance: toState(entry) });
         },

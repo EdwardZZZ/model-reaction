@@ -21,7 +21,7 @@ devtools/
 ├── types/chrome.d.ts      # minimal ambient chrome.* subset (no @types/chrome)
 └── src/
     ├── protocol.ts        # wire protocol shared across every layer
-    ├── serialize.ts       # value → transport-safe tree (cycle/depth/breadth safe)
+    ├── serialize.ts       # bounded value/snapshot serialization (cycles + total budgets)
     ├── page-agent.ts      # MAIN-world hook impl + timeline ring buffer
     ├── page-agent.entry.ts
     ├── content.ts         # ISOLATED-world relay

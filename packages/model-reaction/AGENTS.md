@@ -173,7 +173,7 @@ These are **deliberate omissions**. Don't add them; don't fake them.
 | Arbitrary side-effect from validators | Validators are pure boolean tests. Use reactions for side-effects. |
 | Synchronous batching across `setField` calls | Each `setField` is its own validation cycle. Use `setFields({ ... })` to batch validation + a single reaction pass — its cross-field validators also see the merged batch, so co-dependent fields can be set together. |
 | True all-or-nothing transactional writes | `setFields` is **not atomic**: each field commits independently; valid fields land in `data` even if a sibling fails (return value is the AND of all fields). Use an application-level preflight or a disposable candidate model before mutating the live model when all-or-nothing behavior is required. |
-| Plugin / middleware system | Compose at the schema level (factory functions returning `FieldSchema`). |
+| Plugin / middleware system | Compose at the schema level (factory functions returning a single variant such as `FieldSchema<'string'>`, so spreading one keeps `reaction.computed` checked against its `type`). |
 | `model.describe()` schema introspection | The schema literal is already a plain object; iterate it directly (see §4.5). |
 
 ---
@@ -185,14 +185,15 @@ root, run **all three** before submitting:
 
 ```bash
 pnpm --filter model-reaction run lint
-pnpm --filter model-reaction run typecheck        # source + test types (CI gate)
-pnpm --filter model-reaction exec jest --silent    # full suite, including doc scenarios
+pnpm --filter model-reaction run typecheck        # source + tests + checked examples (CI gate)
+pnpm --filter model-reaction run test --silent    # full suite, including doc scenarios
 ```
 
 (Or `cd packages/model-reaction` and use the equivalent `npm run lint` /
 `npm run typecheck` / `npx jest --silent` commands.)
 
-Then verify the README scenarios still work end-to-end:
+Then run the React example's SSR smoke check (mounted behavior is covered by
+the React suite):
 
 ```bash
 pnpm --filter model-reaction run example:react
