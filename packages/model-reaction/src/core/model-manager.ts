@@ -134,7 +134,7 @@ export class ModelManager<
         value: T[K]
     ): Promise<boolean> => {
         this.ensureNotDisposed();
-        return this.updateField(field as string, value);
+        return this.updateField(field as string, value, { origin: 'direct' });
     };
 
     setFields = async (fields: Partial<T>): Promise<boolean> => {
@@ -216,7 +216,7 @@ export class ModelManager<
         const endBatch = this.pendingTasks.begin();
         const changedFields = new Set<string>();
         try {
-            const results = await validate({ changedFields });
+            const results = await validate({ changedFields, origin: 'direct' });
             this.reactionSystem.triggerReactionsForFields([...changedFields]);
             return complete(results);
         } finally {
@@ -322,7 +322,7 @@ export class ModelManager<
     private async updateField(
         field: string,
         value: any,
-        options: CommitOptions = {}
+        options: CommitOptions
     ): Promise<boolean> {
         if (this.disposed) return false;
         const schema = this.schema[field];
@@ -431,6 +431,9 @@ export class ModelManager<
         if (dataChanged) {
             this.modelData[fieldKey] = value;
             this.dataSnapshot = null;
+            if (options.origin === 'direct') {
+                this.reactionSystem.invalidateActionsForField(field);
+            }
         }
         if (hadDirty) {
             delete this.dirtyData[field];

@@ -166,7 +166,8 @@ const asyncModel = createModel({
 
 ## 等待异步操作
 
-使用异步验证或带防抖的反应时，仅 `await setField` 不足以保证所有副作用都已执行完成。请使用 `settled()`：
+`await setField` 等待该字段的校验与提交，即使未使用防抖，下游 reaction 与 action
+组仍可能在执行。请在 action 外使用 `settled()`：
 
 ```typescript
 interface Schema {

@@ -249,6 +249,16 @@ body {
   fill: var(--mrd-muted);
 }
 
+.mrd-node .mrd-field-module {
+  fill: transparent;
+  stroke: var(--mrd-border);
+}
+
+.mrd-action-edge {
+  fill: none;
+  stroke-dasharray: 4 3;
+}
+
 .mrd-graph-hint {
   color: var(--mrd-muted);
   font-style: italic;

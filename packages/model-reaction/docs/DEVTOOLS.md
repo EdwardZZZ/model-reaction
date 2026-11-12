@@ -31,9 +31,13 @@ tab in the browser DevTools, with three views:
    - `data` — the committed source of truth (schema defaults are seeded without validation)
    - `dirtyData` — the last input that failed validation, per field
    - `errors` — current validation errors, per field
-2. **Dependencies** — the reaction dependency graph. Each node is a field;
-   each arrow points **from a dependency to the field its reaction computes**
-   (read it as "`from` feeds `to`"). Hovering a node highlights its edges.
+2. **Dependencies** — the reaction dependency graph. Solid arrows point
+   **from a dependency to the field its reaction computes** (read it as
+   "`from` feeds `to`"). Declared actions appear inside their host field module,
+   connected by dashed arrows and labelled by reaction and action indices.
+   These arrows show ownership and execution after calculation settles, not
+   closure read/write dependencies or a requirement that the host value changes.
+   Array indices express execution order. Hovering a field highlights its edges.
 3. **Timeline** — a reverse-chronological list of committed field changes.
    Selecting an entry shows the field's value at that point next to its
    previous value.
@@ -167,6 +171,11 @@ primitive, the runtime index, and the DevTools graph all agree — so the panel
 can never show a dependency graph that disagrees with runtime behaviour.
 Field metadata is built once per registered model; the graph projects those
 same dependency lists. Subsequent reads reuse both structures.
+The shared `eachReaction` traversal also adds optional `actions` metadata:
+`{ reactionIndex, actionIndex, name }[]`, omitted when empty. Function references
+are not merged. These declarations do not expose candidates, versions,
+barriers, or execution status. Actions are drawn inside fields and never added
+as computation nodes or edges.
 
 ## Zero overhead when absent
 

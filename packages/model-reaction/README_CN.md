@@ -114,6 +114,12 @@ const m = createModel({
 TypeScript 会按字段的 `type` 检查返回值，因此 `full` 只能返回字符串或
 `SKIP_REACTION`；具体规则与例外见 [docs/API_CN.md](docs/API_CN.md#反应)。
 
+`action` 是可选的无参数函数数组，通过闭包读取 model。计算链落定后，每个宿主
+字段只有最新调度且成功提交的 reaction 能启动一组 action。数组项按顺序执行，
+每次调用前都等待计算落定，返回的 Promise 纳入 `settled()`。初始化及相等计算值
+仍可触发一组；直接修改宿主字段会取消其未启动项，但不会自行触发新组。
+从单函数 action 升级前，请阅读 [执行契约与迁移](docs/API_CN.md#action-组)。
+
 ### 脏数据
 
 验证失败的值会被记录为"脏数据"，与已提交状态隔离保存。

@@ -73,7 +73,7 @@ describe('Integration Tests — Full Documentation Scenarios', () => {
                     reaction: {
                         fields: ['name', 'age'],
                         computed: (values) => `My name is ${values.name} and I am ${values.age} years old.`,
-                        action: (values) => console.log('Info updated:', values.computed)
+                        action: [() => console.log('Info updated:', userModel.data.info)]
                     },
                     default: ''
                 }
@@ -523,8 +523,11 @@ describe('Integration Tests — Full Documentation Scenarios', () => {
     // 10. Reaction System — action callback
     // =========================================================================
     describe('Reaction System: action callback', () => {
-        test('should call action with computed value and dependent values', async () => {
-            const actionSpy = jest.fn();
+        test('should call action without arguments and read committed model values', async () => {
+            const actionSpy = jest.fn(() => {
+                observed.push(model.data.fullName);
+            });
+            const observed: string[] = [];
 
             interface Schema {
                 firstName: string;
@@ -541,7 +544,7 @@ describe('Integration Tests — Full Documentation Scenarios', () => {
                     reaction: {
                         fields: ['firstName', 'lastName'],
                         computed: (vals) => `${vals.firstName} ${vals.lastName}`.trim(),
-                        action: actionSpy
+                        action: [actionSpy]
                     }
                 }
             });
@@ -551,8 +554,8 @@ describe('Integration Tests — Full Documentation Scenarios', () => {
             await new Promise(r => setTimeout(r, 10));
 
             expect(actionSpy).toHaveBeenCalled();
-            const lastCall = actionSpy.mock.calls[actionSpy.mock.calls.length - 1][0];
-            expect(lastCall.computed).toBe('Jane Doe');
+            expect(actionSpy).toHaveBeenCalledWith();
+            expect(observed[observed.length - 1]).toBe('Jane Doe');
 
             model.dispose();
         });
@@ -894,7 +897,7 @@ describe('Integration Tests — Full Documentation Scenarios', () => {
                         {
                             fields: ['input'],
                             computed: (vals) => vals.input.toUpperCase(),
-                            action: actionSpy
+                            action: [actionSpy]
                         }
                     ]
                 }
@@ -1073,7 +1076,7 @@ describe('Integration Tests — Full Documentation Scenarios', () => {
                     reaction: {
                         fields: ['input'],
                         computed: (vals) => vals.input.toUpperCase(),
-                        action: actionSpy
+                        action: [actionSpy]
                     }
                 }
             });
@@ -1326,7 +1329,7 @@ describe('Integration Tests — Full Documentation Scenarios', () => {
                     reaction: {
                         fields: ['input'],
                         computed: (vals) => vals.input.toUpperCase(),
-                        action: actionSpy
+                        action: [actionSpy]
                     }
                 }
             }, { debounceReactions: 100 });

@@ -16,6 +16,27 @@ function clearHook(): void {
 }
 
 describe('devtools-hook', () => {
+    test('lists every action declaration by reaction and array index without changing calculation edges', () => {
+        function save() {}
+        const fields = buildFieldInfo({
+            source: { type: 'number' },
+            target: { type: 'number', reaction: [
+                { fields: ['source'], computed: () => 1, action: [save, save] },
+                { fields: ['source'], computed: () => 2, action: [] },
+                { fields: [], computed: () => 3, action: [() => {}] },
+            ] },
+        });
+        expect(fields.target?.actions).toEqual([
+            { reactionIndex: 0, actionIndex: 0, name: 'save' },
+            { reactionIndex: 0, actionIndex: 1, name: 'save' },
+            { reactionIndex: 2, actionIndex: 0, name: '' },
+        ]);
+        expect(fields.source?.actions).toBeUndefined();
+        expect(buildDependencyGraph(fields)).toEqual({
+            nodes: ['source', 'target'], edges: [{ from: 'source', to: 'target' }],
+        });
+    });
+
     afterEach(() => {
         clearHook();
         jest.restoreAllMocks();

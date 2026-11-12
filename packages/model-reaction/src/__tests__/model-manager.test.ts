@@ -429,7 +429,7 @@ describe('ModelManager - Batch Operations (setFields)', () => {
                     reaction: {
                         fields: ['source'],
                         computed: ({ source }) => source * 2,
-                        action,
+                        action: [action],
                     },
                 },
             });
@@ -1259,11 +1259,11 @@ describe('ModelManager - dispose / settled lifecycle', () => {
                     reaction: {
                         fields: ['derived'],
                         computed: ({ derived }) => derived + 1,
-                        action: async ({ computed }) => {
-                            if (computed !== 3) return;
+                        action: [async () => {
+                            if (model.data.final !== 3) return;
                             signalActionStarted();
                             await actionGate;
-                        },
+                        }],
                     },
                 },
             }, { debounceReactions, strictMode: true });

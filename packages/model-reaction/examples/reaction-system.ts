@@ -24,9 +24,9 @@ const productModel = createModel<Product>({
     reaction: {
       fields: ['price', 'quantity'],
       computed: (values) => values.price * values.quantity,
-      action: (values) => {
-        console.log(`总价更新为: ${values.computed}`);
-      }
+      action: [() => {
+        console.log(`总价更新为: ${productModel.data.total}`);
+      }]
     }
   },
   discount: {
@@ -39,9 +39,9 @@ const productModel = createModel<Product>({
     reaction: {
       fields: ['total', 'discount'],
       computed: (values) => values.total * (1 - values.discount / 100),
-      action: (values) => {
-        console.log(`折扣后总价: ${values.computed}`);
-      }
+      action: [() => {
+        console.log(`折扣后总价: ${productModel.data.finalTotal}`);
+      }]
     }
   }
 }, {
@@ -57,12 +57,12 @@ async function runExample() {
   await productModel.setField('quantity', 5);
 
   // 等待反应计算
-  await new Promise(resolve => setTimeout(resolve, 200));
+  await productModel.settled();
   console.log('当前总价:', productModel.getField('total'));
 
   // 设置折扣
   await productModel.setField('discount', 20);
-  await new Promise(resolve => setTimeout(resolve, 200));
+  await productModel.settled();
   console.log('最终支付金额:', productModel.getField('finalTotal'));
 
   // 清理资源

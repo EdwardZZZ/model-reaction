@@ -140,11 +140,12 @@ const orderFormModel = createModel<OrderForm>({
         }
         return 0;
       },
-      action: (values) => {
-        if (values.computed > 0) {
-          console.log(`应用优惠券 ${values.couponCode}，折扣金额: ${values.computed}`);
+      action: [() => {
+        const { couponCode, discountAmount } = orderFormModel.data;
+        if (discountAmount > 0) {
+          console.log(`应用优惠券 ${couponCode}，折扣金额: ${discountAmount}`);
         }
-      }
+      }]
     }
   },
 

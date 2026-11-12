@@ -122,6 +122,16 @@ TypeScript checks the result against the field's `type`, so `full` must return
 a string or `SKIP_REACTION`; see [docs/API.md](docs/API.md#reactions) for the
 rules and exceptions.
 
+`action` is an optional array of no-argument functions that read the model
+through a closure. After the calculation chain settles, only the latest
+scheduled reaction for each field can start its group, if its computation commits.
+Items run in array order and wait for calculation to settle before each call;
+returned Promises are included in `settled()`. Initialization and unchanged
+computed values can still trigger a group. Direct changes to the host field
+cancel its remaining items without triggering a new group. See the
+[action contract and migration](docs/API.md#action-groups) before upgrading
+from single-function actions.
+
 ### Dirty Data
 
 Values that fail validation are recorded as "dirty" and kept separate from the

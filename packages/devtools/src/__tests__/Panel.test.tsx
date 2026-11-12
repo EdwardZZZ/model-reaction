@@ -7,6 +7,7 @@
  */
 import { act, render } from '@testing-library/react';
 import { Panel } from '../panel/Panel';
+import { DependencyGraphView } from '../panel/DependencyGraphView';
 import {
     AGENT_SOURCE,
     type AgentMessage,
@@ -60,6 +61,26 @@ function makeFakeConnect() {
 }
 
 describe('Panel', () => {
+    test('renders action nodes and dashed edges inside their field without adding calculation nodes', () => {
+        const state = instance(1);
+        state.fields.full!.actions = [
+            { reactionIndex: 0, actionIndex: 0, name: 'save' },
+            { reactionIndex: 0, actionIndex: 1, name: 'save' },
+        ];
+        const { container } = render(<DependencyGraphView instance={state} />);
+        const actions = container.querySelectorAll('.mrd-action');
+        expect(actions).toHaveLength(2);
+        expect(Array.from(actions).map((node) => node.getAttribute('data-action-id'))).toEqual([
+            '["full",0,0]', '["full",0,1]',
+        ]);
+        expect(container.querySelectorAll('.mrd-field-module')).toHaveLength(1);
+        expect(container.querySelectorAll('.mrd-action-edge')).toHaveLength(2);
+        expect(container.querySelectorAll('.mrd-node')).toHaveLength(3);
+        expect(container.querySelectorAll('svg > .mrd-edge')).toHaveLength(2);
+        expect(container.textContent).toContain('action[0]');
+        expect(container.textContent).toContain('action[1]');
+    });
+
     test('shows the empty state when no model is present', () => {
         const { connect } = makeFakeConnect();
         const { container } = render(<Panel connect={connect} />);

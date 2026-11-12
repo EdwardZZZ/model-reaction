@@ -353,8 +353,8 @@ describe('ReactionSystem - via createModel', () => {
                     type: 'number',
                     default: 10,
                     reaction: [
-                        { fields: ['source'], computed: firstComputed, action: firstAction },
-                        { fields: ['source'], computed: lastComputed, action: lastAction },
+                        { fields: ['source'], computed: firstComputed, action: [firstAction] },
+                        { fields: ['source'], computed: lastComputed, action: [lastAction] },
                     ],
                 },
             }, { debounceReactions });
@@ -393,8 +393,8 @@ describe('ReactionSystem - via createModel', () => {
                         validate: async (value) => value > 0,
                     }],
                     reaction: [
-                        { fields: ['source'], computed: () => 1, action: firstAction },
-                        { fields: ['source'], computed: () => -1, action: lastAction },
+                        { fields: ['source'], computed: () => 1, action: [firstAction] },
+                        { fields: ['source'], computed: () => -1, action: [lastAction] },
                     ],
                 },
                 downstream: {
@@ -565,7 +565,7 @@ describe('ReactionSystem - via createModel', () => {
                 reaction: {
                     fields: ['b'],
                     computed: (deps) => deps.b,
-                    action: bAction,
+                    action: [bAction],
                 },
             },
         };
@@ -607,7 +607,7 @@ describe('ReactionSystem - via createModel', () => {
                 reaction: {
                     fields: ['source'],
                     computed: (deps) => deps.source,
-                    action,
+                    action: [action],
                 },
             },
         };
@@ -638,7 +638,7 @@ describe('ReactionSystem - via createModel', () => {
                 reaction: {
                     fields: ['source'],
                     computed: (deps) => deps.source,
-                    action,
+                    action: [action],
                 },
             },
         };
@@ -763,7 +763,7 @@ describe('ReactionSystem - settled() waits for chained reactions and async actio
                 reaction: {
                     fields: ['source'],
                     computed: targetComputed,
-                    action: targetAction,
+                    action: [targetAction],
                 },
             },
             downstream: {
@@ -804,13 +804,13 @@ describe('ReactionSystem - settled() waits for chained reactions and async actio
                     {
                         fields: ['source'],
                         computed: () => SKIP_REACTION,
-                        action: skippedAction,
+                        action: [skippedAction],
                     },
                     {
                         fields: ['source'],
                         computed: (deps: Record<string, any>) =>
                             deps.source.toUpperCase(),
-                        action: committedAction,
+                        action: [committedAction],
                     },
                 ],
             },
@@ -834,8 +834,8 @@ describe('ReactionSystem - settled() waits for chained reactions and async actio
                 type: 'number',
                 default: 0,
                 reaction: [
-                    { fields: ['source'], computed: () => 1, action: firstAction },
-                    { fields: ['source'], computed: () => SKIP_REACTION, action: skippedAction },
+                    { fields: ['source'], computed: () => 1, action: [firstAction] },
+                    { fields: ['source'], computed: () => SKIP_REACTION, action: [skippedAction] },
                 ],
             },
         });
@@ -843,7 +843,7 @@ describe('ReactionSystem - settled() waits for chained reactions and async actio
             await model.setField('source', 1);
             await model.settled();
             expect(model.getField('target')).toBe(1);
-            expect(firstAction).toHaveBeenCalledTimes(1);
+            expect(firstAction).not.toHaveBeenCalled();
             expect(skippedAction).not.toHaveBeenCalled();
         } finally {
             model.dispose();
@@ -864,7 +864,7 @@ describe('ReactionSystem - settled() waits for chained reactions and async actio
                 reaction: {
                     fields: ['source'],
                     computed: async (deps) => deps.source * 2,
-                    action,
+                    action: [action],
                 },
             },
         });
@@ -901,12 +901,12 @@ describe('ReactionSystem - settled() waits for chained reactions and async actio
                 reaction: {
                     fields: ['a'],
                     computed: (deps) => deps.a * 2,
-                    action: async () => {
+                    action: [async () => {
                         await new Promise<void>((resolve) => {
                             releaseAction = resolve;
                         });
                         actionFinished = true;
-                    },
+                    }],
                 },
             },
         };
@@ -942,10 +942,10 @@ describe('ReactionSystem - settled() waits for chained reactions and async actio
                 reaction: {
                     fields: ['source'],
                     computed: (deps) => deps.source * 2,
-                    action: async () => {
+                    action: [async () => {
                         await Promise.resolve();
                         throw new Error('async action failed');
-                    },
+                    }],
                 },
             },
         });
@@ -1048,11 +1048,11 @@ describe('ReactionSystem - lifecycle and rejected actions', () => {
                     reaction: {
                         fields: ['source'],
                         computed: () => 1,
-                        action: async () => {
+                        action: [async () => {
                             signalStarted();
                             await gate;
                             if (rejectAction) throw new Error('late failure');
-                        },
+                        }],
                     },
                 },
                 downstream: {
@@ -1061,7 +1061,7 @@ describe('ReactionSystem - lifecycle and rejected actions', () => {
                     reaction: {
                         fields: ['target'],
                         computed: laterComputed,
-                        action: laterAction,
+                        action: [laterAction],
                     },
                 },
             }, { debounceReactions: 5 });
@@ -1073,8 +1073,8 @@ describe('ReactionSystem - lifecycle and rejected actions', () => {
             // turn drains these already-resolved action continuations.
             await new Promise((resolve) => setTimeout(resolve, 0));
 
-            expect(laterComputed).not.toHaveBeenCalled();
-            expect(laterAction).not.toHaveBeenCalled();
+            expect(laterComputed).toHaveBeenCalledTimes(1);
+            expect(laterAction).toHaveBeenCalledTimes(1);
             expect(model.data).toEqual({});
             expect(model.validationErrors).toEqual({});
             expect(model.getDirtyData()).toEqual({});
@@ -1088,7 +1088,7 @@ describe('ReactionSystem - lifecycle and rejected actions', () => {
             target: {
                 type: 'number',
                 default: 0,
-                reaction: { fields: ['source'], computed: () => 1, action },
+                reaction: { fields: ['source'], computed: () => 1, action: [action] },
             },
         });
         model.subscribe((data) => data.target, () => model.dispose());
@@ -1109,7 +1109,7 @@ describe('ReactionSystem - lifecycle and rejected actions', () => {
                     model.dispose();
                     return value;
                 },
-                reaction: { fields: ['source'], computed: () => 1, action },
+                reaction: { fields: ['source'], computed: () => 1, action: [action] },
             },
         };
         const model = createModel(schema);
@@ -1136,10 +1136,10 @@ describe('ReactionSystem - lifecycle and rejected actions', () => {
                                 if (source === 1 && stage === 'computed') throw reason;
                                 return source;
                             },
-                            action: ({ computed }) => {
-                                if (computed === 1) return Promise.reject(reason);
+                            action: [() => {
+                                if (model.data.target === 1) return Promise.reject(reason);
                                 laterAction();
-                            },
+                            }],
                         },
                     },
                 });

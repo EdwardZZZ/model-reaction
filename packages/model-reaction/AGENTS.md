@@ -55,7 +55,11 @@ m.dispose();                                  // ALWAYS call this in cleanup
 
 3. **Async work or side effects inside `reaction.computed`** — `computed` MUST
    be synchronous and pure. It must not return a Promise. Put asynchronous work
-   and other side effects in `reaction.action` instead.
+   and other side effects in `reaction.action`, an array of no-argument
+   functions that read the model through a closure. Each item waits for
+   calculation to settle; only the host's latest valid reaction can start a
+   group. New host versions cancel remaining items. Never await the same
+   model's `settled()` inside an action.
 
 4. **Not calling `dispose()`** — leaves reaction timers, listeners, and pending
    work active for as long as the model remains reachable. Wire disposal to the
@@ -224,8 +228,8 @@ pnpm --filter model-reaction-devtools run test
 | `data` | Committed source of truth. Writes are validated; defaults are seeded directly. Read via `m.data` or `getField`. |
 | `dirtyData` | Last user input whose validation **failed**, indexed by field. Cleared by `clearDirtyData()` or by next successful `setField` of that field. |
 | `reaction.computed` | Synchronous pure function: `deps -> derived value`; must not return a Promise. |
-| `reaction.action` | Optional side-effect callback fired after the computed value validates and commits. |
-| `settled()` | Promise that resolves when all in-flight reactions and validations finish. Use it in tests. |
+| `reaction.action` | Optional no-argument function array. The host's latest valid reaction starts a group after calculation settles; each item waits for calculation again. |
+| `settled()` | Promise that resolves when validations, calculations, and action groups finish. Never await it inside the same model's action. |
 | `verify-then-commit` | Set-field protocol: validate first, write to `data` only on pass; otherwise write to `dirtyData`. |
 | `commitValid` | Internal: when `validateAll` finds the dirty value now passes, promote it from `dirtyData` to `data`. |
 

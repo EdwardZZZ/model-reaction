@@ -20,7 +20,7 @@
  *     DevTools agent's concern, not the library's.
  */
 import type { FieldSchema, Model, ValidationError } from '../types';
-import { eachReactionEdge } from '../reaction/reaction-graph';
+import { eachReaction, eachReactionEdge } from '../reaction/reaction-graph';
 
 /** The `globalThis` key the DevTools front-end installs its hook under. */
 export const DEVTOOLS_HOOK_KEY = '__MODEL_REACTION_DEVTOOLS_HOOK__';
@@ -35,6 +35,8 @@ export interface DevtoolsFieldInfo {
     validatorCount: number;
     /** Fields this field's reaction(s) read as dependencies (deduped). */
     reactionDeps: string[];
+    /** Declared side effects, without execution state; absent when empty. */
+    actions?: Array<{ reactionIndex: number; actionIndex: number; name: string }>;
 }
 
 /**
@@ -176,6 +178,15 @@ export function buildFieldInfo(schema: Model): Record<string, DevtoolsFieldInfo>
             reactionDeps: [...(deps.get(name) ?? [])],
         };
     }
+    eachReaction(schema, (field, reaction, reactionIndex) => {
+        reaction.action?.forEach((action, actionIndex) => {
+            (out[field]!.actions ??= []).push({
+                reactionIndex,
+                actionIndex,
+                name: action.name,
+            });
+        });
+    });
     return out;
 }
 

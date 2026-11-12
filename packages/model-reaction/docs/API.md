@@ -57,9 +57,10 @@ top level.
 > committed through the same validate-then-commit path as `setField`. If the
 > derived field declares a `validator` and the computed value fails it, `data`
 > keeps its previous value and the computed value is stored in `dirtyData`.
-> The reaction's optional `action` runs **only when that computed value passes
-> validation** — a value that fails and lands in `dirtyData` fires neither the
-> derived field's change nor its `action`.
+> Passing validation is necessary for `action` eligibility. Only the host
+> field's latest scheduled reaction can start its group after calculation
+> settles; a failed value fires neither the derived field's change nor its
+> `action`.
 
 ## Model Methods
 
@@ -121,9 +122,9 @@ dependencies declared in `fields` and returns the target field's next value.
 Returning a Promise is reported through `reaction:error`, and no result is
 committed. Other side effects, such as requests, logging, or external-state
 mutations, cannot be detected at runtime and must be avoided by the caller. Put
-asynchronous work and other side effects in `action`. An `action` may be
-asynchronous; its Promise is tracked by `settled()`, and a rejection is
-reported through `reaction:error`.
+asynchronous work and other side effects in `action`, an array of no-argument
+functions. Each returned PromiseLike is tracked by `settled()`, and a
+rejection is reported through `reaction:error`.
 
 Return the package-level `SKIP_REACTION` export to conditionally stop the
 current reaction:
@@ -138,7 +139,8 @@ computed: ({ enabled, source }) =>
 `SKIP_REACTION` is a normal no-op: the target field is not validated or
 written, `dirtyData` is unchanged, and no `field:change`, downstream reaction,
 or current reaction `action` is triggered. Later entries in a reaction array
-still run in declaration order.
+still run in declaration order. Scheduling this reaction also cancels earlier
+action eligibility for the same host field, even when it skips.
 
 #### Result types
 
@@ -181,20 +183,103 @@ When several reactions write the same target for the same changed dependency,
 the last scheduled write is authoritative; earlier writes are superseded. Thus,
 in the example, the second reaction determines `total` if its result passes
 validation. If it fails validation, the result goes to `dirtyData`; an earlier
-reaction's value is not used as a fallback. An `action` runs only when that
-reaction's own write commits successfully.
+reaction's value is not used as a fallback. Action eligibility is separate
+from value commits: only the host's latest scheduled reaction can register an
+action group after its own write commits successfully.
 
 Matching reactions compute and start validation in scheduling order. A
 `SKIP_REACTION` result makes no write and does not supersede an earlier one.
 Debounced reactions sharing a target are collected into one callback; another
-trigger for that target restarts its debounce window. Actions from already
-committed writes may overlap with later updates; `settled()` waits for all of
-them.
+trigger for that target restarts its debounce window. A later skipped or
+throwing computation can leave an earlier value commit intact while cancelling
+its actions. An already started action may overlap with later updates;
+`settled()` still waits for its returned Promise.
 
 For a `setFields()` batch that changes multiple dependencies, the order in
 which changed fields are processed also affects scheduling. If one result
 depends on several inputs, prefer one reaction listing all of them rather than
 using multiple reactions to compete for the same target.
+
+#### Action groups
+
+```ts
+import { createModel } from 'model-reaction';
+import type { ReactionAction } from 'model-reaction';
+
+const saveTotal: ReactionAction = async () => {
+  const { price, quantity, total } = model.data;
+  await saveAmount({ price, quantity, total }); // application-provided function
+};
+
+const model = createModel({
+  price: { type: 'number', default: 10 },
+  quantity: { type: 'number', default: 2 },
+  total: {
+    type: 'number', default: 0,
+    reaction: {
+      fields: ['price', 'quantity'],
+      computed: ({ price, quantity }) => price * quantity,
+      action: [saveTotal, () => { console.log(model.data.total); }],
+    },
+  },
+});
+await model.settled();
+```
+
+The public signature is `type ReactionAction = () => void | PromiseLike<void>`
+and `Reaction<T>.action?: ReactionAction[]`. `Reaction<T>` remains an interface;
+its `T` only constrains `computed`. Actions receive no dependency projection,
+result argument, or injected `computed` property. Their reads do not add
+dependencies: declare trigger fields in `fields`.
+
+Overlapping input validation, batch commits, reaction debounce, computation,
+and computed-value validation form one calculation phase. When it becomes idle,
+the scheduler hands off at most one eligible group per host field. Each actual
+reaction scheduling replaces the host's action version, including reactions
+with no actions or an empty array. If the latest reaction skips, throws, returns
+a Promise, fails validation, or loses its write, no earlier group is restored.
+Later independent updates can start new groups.
+
+Successful initialization and equal computed values remain eligible. The first
+action call occurs after `createModel` returns, so initialization closures can
+read `model`. Direct successful value changes through `setField`, `setFields`,
+or dirty-value promotion in `validateAll` cancel the host's pending and remaining
+items without starting actions themselves. Equal or failed direct writes do not
+cancel them. Computed writeback does not invalidate its own group.
+
+Each item, including the first, checks the host version and waits for calculation
+to become idle immediately before its no-argument call. It then waits for that
+item's PromiseLike before considering the next item. An unrelated calculation
+pauses remaining items; a new host version cancels them. Already started
+functions continue, and a new valid group starts from index zero without waiting
+for an old function to finish. Duplicate function references execute once per
+array position; empty arrays do nothing.
+
+Groups ready in the same scheduler turn are attempted in schema field order.
+Each group waits independently for its own Promise. A synchronous write starting
+new calculation pauses other ready items. An exception or rejection stops only
+that group. It appends `reaction_error` to the host's `validationErrors` before
+emitting `reaction:error`, even if that action's version has since expired.
+A late old error can therefore accompany a newer successful value. After
+`dispose`, returned rejections are still observed, but errors and events are
+no longer recorded; pending `settled()` calls are released immediately.
+
+The barrier protects entry to each array item. An ordinary `await` inside an
+item does not protect later reads: `await model.setField()` waits for that write,
+and its downstream computation may still be running. Put a later operation in
+the next array item to get a new calculation barrier. Capture `const data =
+model.data` at function entry when one request needs consistent top-level values;
+the snapshot includes transformed committed values and is only shallow-frozen.
+Nested values must not be mutated in place.
+
+For writeback, use `async () => { await model.setField('field', value); }`.
+An expression returning `Promise<boolean>` does not fit `ReactionAction` and
+may create circular schema inference. Never await the same model's `settled()`
+inside an action: it waits for the current group itself. Only returned or
+awaited business Promises are tracked. Cancellation of requests, stale response
+protection, and writeback cycles remain application responsibilities.
+For side effects without a derived field, use `model.subscribe`; its callback
+Promises are not included in `settled()`.
 
 ### Validation
 
@@ -334,7 +419,7 @@ const custom = formatValidationErrors(
 ## Type Definitions
 
 Publicly exported types include `Model`, `ModelOptions`, `ModelReturn`,
-`Validator`, `Reaction`, `FieldSchema`, `ValidationError`, `ModelError`,
+`Validator`, `Reaction`, `ReactionAction`, `FieldSchema`, `ValidationError`, `ModelError`,
 `ModelErrorCode`, `ModelEventMap`, `InferFieldType`, and `InferModelData`.
 
 The core entry exports `createModel`, `ModelEvents`, and `SKIP_REACTION`.
@@ -347,6 +432,13 @@ For full type definitions, see [`src/types.ts`](../src/types.ts).
 
 These changes are breaking and require updating consumers:
 
+- Replace `action: fn` with `action: [fn]` and migrate parameter reads to model
+  closures. Direct callers must iterate the array and invoke items without
+  arguments. Actions now wait for calculation to settle and merge by host's
+  latest scheduling version; they no longer run after every intermediate
+  successful computation. A later skip or failure cancels earlier actions even
+  when an earlier value commits. Remaining items can be cancelled after a new
+  host version; combine operations in one item when they must complete together.
 - Import `ValidationRules`, `Rule`, `formatValidationErrors`, and the
   `ValidationErrorFormatter` type from `model-reaction/validation`.
   Browser UMD consumers also load `dist/validation.js`; helpers are on the

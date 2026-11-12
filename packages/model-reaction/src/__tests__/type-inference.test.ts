@@ -1,4 +1,4 @@
-import { createModel, FieldSchema, Reaction, SKIP_REACTION } from '../index';
+import { createModel, FieldSchema, Reaction, ReactionAction, SKIP_REACTION } from '../index';
 import { createModel as createDevtoolsModel } from '../devtools';
 
 // Both directions preserve the complete overload set, including generics.
@@ -8,6 +8,41 @@ void devtoolsSignature;
 void rootSignature;
 
 describe('createModel type inference', () => {
+    test('preserves Reaction interface extension and typed no-argument action arrays', async () => {
+        interface NamedReaction extends Reaction<number> { label: string }
+        const calls: number[] = [];
+        const action: ReactionAction = () => { calls.push(model.data.target); };
+        const reaction: NamedReaction = {
+            label: 'double', fields: ['source'], computed: ({ source }) => source * 2,
+            action: [action, async () => { await model.setField('note', 'saved'); }],
+        };
+        const model = createModel({
+            source: { type: 'number', default: 1 },
+            target: { type: 'number', default: 0, reaction },
+            note: { type: 'string', default: '' },
+        });
+        const invalidDeclarations = () => {
+            // @ts-expect-error single action functions are no longer accepted
+            const single: Reaction<number> = { fields: [], computed: () => 1, action };
+            // @ts-expect-error action receives no dependency projection
+            const parameter: ReactionAction = (values: Record<string, any>) => { void values; };
+            // @ts-expect-error boolean write results are not side-effect return values
+            const write: ReactionAction = () => model.setField('note', 'saved');
+            // @ts-expect-error action requires no arguments
+            action(model.data);
+            // @ts-expect-error computed remains required
+            const incomplete: Reaction<number> = { fields: [], action: [] };
+            void [single, parameter, write, incomplete];
+        };
+        void invalidDeclarations;
+        await model.settled();
+        const value: number = model.data.target;
+        expect(value).toBe(2);
+        expect(calls).toEqual([2]);
+        expect(model.data.note).toBe('saved');
+        model.dispose();
+    });
+
     test('infers field values from a schema literal at the root entry', () => {
         const model = createModel({
             name: { type: 'string', default: 'Ada' },

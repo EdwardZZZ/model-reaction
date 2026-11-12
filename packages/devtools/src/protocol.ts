@@ -50,6 +50,7 @@ export interface FieldInfo {
     hasDefault: boolean;
     validatorCount: number;
     reactionDeps: string[];
+    actions?: Array<{ reactionIndex: number; actionIndex: number; name: string }>;
 }
 
 export interface DependencyEdge {

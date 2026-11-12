@@ -69,6 +69,8 @@ export interface ModelEventMap<T = Record<string, any>> {
     [ModelEvents.DIRTY_DATA_CLEARED]: { fields: Array<keyof T & string> };
 }
 
+export type ReactionAction = () => void | PromiseLike<void>;
+
 /**
  * @typeParam T Value type `computed` must return. The `any` default leaves a
  * bare `Reaction` unchecked, so it fits any field.
@@ -83,8 +85,8 @@ export interface Reaction<T = any> {
      * the target unchanged and skip `action`.
      */
     computed: (values: Record<string, any>) => T | typeof SKIP_REACTION;
-    /** Optional side effect run after the computed value validates and commits. */
-    action?: (data: Record<string, any>) => void | PromiseLike<void>;
+    /** Sequential side effects started after computation settles; see docs/API.md. */
+    action?: ReactionAction[];
 }
 
 /**
@@ -206,7 +208,7 @@ export interface ModelReturn<T = Record<string, any>> {
     /** Return a stable shallow read-only snapshot of rejected input values. */
     getDirtyData: () => Readonly<Partial<T>>;
     clearDirtyData: () => void;
-    /** Wait for pending reactions and validations to complete. */
+    /** Wait for pending validations, computations, and action groups to complete. */
     settled: () => Promise<void>;
     dispose: () => void;
     /**
@@ -231,6 +233,7 @@ export interface ModelReturn<T = Record<string, any>> {
  * the fields that really moved.
  */
 export interface CommitOptions {
+    origin: 'direct' | 'reaction';
     reactionStack?: string[];
     changedFields?: Set<string>;
     validationData?: Readonly<Record<string, any>>;

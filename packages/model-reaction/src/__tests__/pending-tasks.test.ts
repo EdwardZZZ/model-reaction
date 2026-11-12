@@ -7,6 +7,61 @@ describe('PendingTasks', () => {
         tasks = new PendingTasks();
     });
 
+    describe('computation and action phases', () => {
+        test('computation idle does not wait for action tasks', async () => {
+            const idle = jest.fn();
+            tasks.onComputeIdle(idle);
+            const endCompute = tasks.begin();
+            const endAction = tasks.begin('action');
+            let settled = false;
+            const completion = tasks.settled().then(() => { settled = true; });
+            endCompute();
+            expect(tasks.isComputeIdle).toBe(true);
+            expect(idle).toHaveBeenCalledTimes(1);
+            await Promise.resolve();
+            expect(settled).toBe(false);
+            endAction();
+            await completion;
+            expect(settled).toBe(true);
+            expect(idle).toHaveBeenCalledTimes(1);
+        });
+
+        test('a new compute task from the idle listener prevents false settled', async () => {
+            let endNext!: () => void;
+            const unsubscribe = tasks.onComputeIdle(() => {
+                endNext = tasks.begin('compute');
+                unsubscribe();
+            });
+            const end = tasks.begin();
+            let settled = false;
+            const completion = tasks.settled().then(() => { settled = true; });
+            end();
+            await Promise.resolve();
+            expect(tasks.isComputeIdle).toBe(false);
+            expect(settled).toBe(false);
+            endNext();
+            await completion;
+        });
+
+        test('dispose wakes computation listeners and makes both releases idempotent', async () => {
+            const idle = jest.fn();
+            tasks.onComputeIdle(idle);
+            const endCompute = tasks.begin();
+            const endAction = tasks.begin('action');
+            const completion = tasks.settled();
+            tasks.dispose();
+            tasks.dispose();
+            endCompute();
+            endAction();
+            await completion;
+            expect(idle).toHaveBeenCalledTimes(1);
+            expect(tasks.isComputeIdle).toBe(true);
+            tasks.onComputeIdle(idle);
+            tasks.begin('action')();
+            expect(idle).toHaveBeenCalledTimes(1);
+        });
+    });
+
     // -------------------------------------------------------------------------
     // Idle / baseline behaviour
     // -------------------------------------------------------------------------

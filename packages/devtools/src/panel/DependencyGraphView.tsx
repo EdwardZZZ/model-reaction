@@ -20,13 +20,23 @@ interface DependencyGraphViewProps {
 }
 
 const PAD = 16;
-const { nodeWidth, nodeHeight } = DEFAULT_LAYOUT_OPTIONS;
+const HEADER_HEIGHT = DEFAULT_LAYOUT_OPTIONS.nodeHeight;
+const ACTION_STEP = 38;
 
 export function DependencyGraphView({ instance }: DependencyGraphViewProps): ReactElement {
-    const layout = useMemo(() => layoutGraph(instance.graph), [instance.graph]);
+    const actionCount = Math.max(0, ...Object.values(instance.fields).map(
+        (info) => info.actions?.length ?? 0
+    ));
+    const nodeWidth = actionCount ? 240 : DEFAULT_LAYOUT_OPTIONS.nodeWidth;
+    const nodeHeight = HEADER_HEIGHT + (actionCount ? actionCount * ACTION_STEP + 12 : 0);
+    const layout = useMemo(() => layoutGraph(instance.graph, {
+        ...DEFAULT_LAYOUT_OPTIONS,
+        nodeWidth,
+        nodeHeight,
+    }), [instance.graph, nodeWidth, nodeHeight]);
     const [active, setActive] = useState<string | null>(null);
 
-    if (instance.graph.edges.length === 0) {
+    if (instance.graph.edges.length === 0 && actionCount === 0) {
         return (
             <div className="mrd-empty mrd-graph-empty">
                 No reactions declared — every field is independent.
@@ -91,18 +101,50 @@ export function DependencyGraphView({ instance }: DependencyGraphViewProps): Rea
                             onMouseEnter={() => setActive(n.id)}
                             onMouseLeave={() => setActive(null)}
                         >
-                            <rect width={nodeWidth} height={nodeHeight} rx={6} />
-                            <text x={nodeWidth / 2} y={nodeHeight / 2} className="mrd-node-label">
+                            {Boolean(info?.actions?.length) && (
+                                <rect
+                                    width={nodeWidth}
+                                    height={HEADER_HEIGHT + info!.actions!.length * ACTION_STEP + 12}
+                                    rx={6}
+                                    className="mrd-field-module"
+                                />
+                            )}
+                            <rect width={nodeWidth} height={HEADER_HEIGHT} rx={6} />
+                            <text x={nodeWidth / 2} y={HEADER_HEIGHT / 2} className="mrd-node-label">
                                 {n.id}
                             </text>
                             {info && info.reactionDeps.length > 0 && (
                                 <title>{`${n.id} ← ${info.reactionDeps.join(', ')}`}</title>
                             )}
+                            {info?.actions?.map((action, index) => {
+                                const y = HEADER_HEIGHT + index * ACTION_STEP + 10;
+                                return (
+                                    <g
+                                        key={`${action.reactionIndex}:${action.actionIndex}`}
+                                        className="mrd-action"
+                                        data-action-id={JSON.stringify([n.id, action.reactionIndex, action.actionIndex])}
+                                    >
+                                        <path
+                                            d={`M 12 ${HEADER_HEIGHT} V ${y + 12} H 30`}
+                                            className="mrd-edge mrd-action-edge"
+                                            markerEnd="url(#mrd-arrow)"
+                                        />
+                                        <rect x={32} y={y} width={nodeWidth - 42} height={26} rx={4} />
+                                        <text x={nodeWidth / 2 + 11} y={y + 13} className="mrd-node-label">
+                                            {`r${action.reactionIndex} · action[${action.actionIndex}]`}
+                                        </text>
+                                        <title>{action.name || 'anonymous action'}</title>
+                                    </g>
+                                );
+                            })}
                         </g>
                     );
                 })}
             </svg>
-            <p className="mrd-graph-hint">Arrows point from a dependency to the field it feeds.</p>
+            <p className="mrd-graph-hint">
+                Solid arrows show computation dependencies; dashed arrows show actions within a field.
+                Actions run in array order after computation settles.
+            </p>
         </div>
     );
 }

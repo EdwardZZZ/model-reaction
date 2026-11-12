@@ -1,31 +1,40 @@
-/**
- * Tracks asynchronous work across validation and reactions.
- *
- * A task is registered before it can schedule follow-up work, so `settled()`
- * observes the complete chain rather than coordinating separate subsystems.
- */
+/** Shared computation and action lifecycle; see docs/DESIGN_EFFECT_DEPS_CN.md §4.4. */
 export class PendingTasks {
-    private count = 0;
+    private counts = { compute: 0, action: 0 };
+    private computeIdleListeners = new Set<() => void>();
     private settledResolvers: Array<() => void> = [];
     private disposed = false;
 
-    begin(): () => void {
+    get isComputeIdle(): boolean {
+        return this.counts.compute === 0;
+    }
+
+    onComputeIdle(listener: () => void): () => void {
+        if (this.disposed) return () => {};
+        this.computeIdleListeners.add(listener);
+        return () => this.computeIdleListeners.delete(listener);
+    }
+
+    begin(kind: 'compute' | 'action' = 'compute'): () => void {
         if (this.disposed) return () => {};
 
-        this.count++;
+        this.counts[kind]++;
         let ended = false;
 
         return () => {
             if (ended) return;
             ended = true;
             if (this.disposed) return;
-            this.count--;
+            this.counts[kind]--;
+            if (kind === 'compute' && this.isComputeIdle) {
+                for (const listener of this.computeIdleListeners) listener();
+            }
             this.notifyIfIdle();
         };
     }
 
     settled(): Promise<void> {
-        if (this.count === 0 || this.disposed) return Promise.resolve();
+        if (this.isIdle || this.disposed) return Promise.resolve();
 
         return new Promise<void>((resolve) => {
             this.settledResolvers.push(resolve);
@@ -35,12 +44,18 @@ export class PendingTasks {
     dispose(): void {
         if (this.disposed) return;
         this.disposed = true;
-        this.count = 0;
+        this.counts = { compute: 0, action: 0 };
+        for (const listener of this.computeIdleListeners) listener();
+        this.computeIdleListeners.clear();
         this.notifyIfIdle();
     }
 
+    private get isIdle(): boolean {
+        return this.isComputeIdle && this.counts.action === 0;
+    }
+
     private notifyIfIdle(): void {
-        if (this.count !== 0 || this.settledResolvers.length === 0) return;
+        if (!this.isIdle || this.settledResolvers.length === 0) return;
 
         const resolvers = this.settledResolvers.splice(0);
         resolvers.forEach((resolve) => resolve());

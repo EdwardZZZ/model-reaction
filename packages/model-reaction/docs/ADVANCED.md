@@ -167,9 +167,9 @@ const asyncModel = createModel({
 
 ## Waiting for Async Operations
 
-When using async validations or debounced reactions, awaiting `setField`
-alone may not guarantee that all cascading effects have settled. Use
-`settled()`:
+Awaiting `setField` waits for that field's validation and commit. Cascading
+reactions and action groups may still be running, including without debounce.
+Use `settled()` outside actions:
 
 ```typescript
 interface Schema {

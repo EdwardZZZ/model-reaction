@@ -13,6 +13,7 @@ export type {
     ModelReturn,
     Validator,
     Reaction,
+    ReactionAction,
     FieldSchema,
     ValidationError,
     ModelError,

@@ -65,9 +65,9 @@ async function verifySkipReaction(createModel, label) {
       reaction: {
         fields: ['source'],
         computed: () => esmRoot.SKIP_REACTION,
-        action: () => {
+        action: [() => {
           actionCalls += 1;
-        },
+        }],
       },
     },
   });
@@ -83,5 +83,39 @@ await verifySkipReaction(esmRoot.createModel, 'ESM root');
 await verifySkipReaction(cjsRoot.createModel, 'CommonJS root');
 await verifySkipReaction(esmDevtools.createModel, 'ESM DevTools');
 await verifySkipReaction(cjsDevtools.createModel, 'CommonJS DevTools');
+
+async function verifyActionArray(createModel, label) {
+  const observed = [];
+  const model = createModel({
+    source: { type: 'number', default: 2 },
+    target: {
+      type: 'number',
+      default: 0,
+      reaction: {
+        fields: ['source'],
+        computed: ({ source }) => source * 2,
+        action: [
+          async (...args) => {
+            assert.deepEqual(args, [], `${label} calls action without arguments`);
+            observed.push(model.data.target);
+          },
+          () => { observed.push(model.data.target); },
+        ],
+      },
+    },
+  });
+  assert.deepEqual(observed, [], `${label} defers initialization actions`);
+  await model.settled();
+  assert.deepEqual(observed, [4, 4], `${label} awaits the initialized group`);
+  await model.setField('source', 3);
+  await model.settled();
+  assert.deepEqual(observed, [4, 4, 6, 6], `${label} runs later groups`);
+  model.dispose();
+}
+
+await verifyActionArray(esmRoot.createModel, 'ESM root');
+await verifyActionArray(cjsRoot.createModel, 'CommonJS root');
+await verifyActionArray(esmDevtools.createModel, 'ESM DevTools');
+await verifyActionArray(cjsDevtools.createModel, 'CommonJS DevTools');
 
 console.log('Verified ESM and CommonJS package exports.');

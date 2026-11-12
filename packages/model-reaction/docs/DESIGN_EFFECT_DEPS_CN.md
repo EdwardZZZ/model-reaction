@@ -1,10 +1,10 @@
 # 设计记录：收敛 Reaction，增强 action
 
-> **状态：无参数 action 数组、宿主 action 版本、统一任务统计及组间调度规则已确认；尚未实现。**
+> **状态：已实现无参数 action 数组、宿主 action 版本、统一任务统计及组间调度。**
 > 更新日期：2026-11-12。
 > Reaction 只保留 `fields`、`computed`、`action` 三个成员。
-> 当前运行时只有单参数、单函数 action，并在每次计算提交成功后调用。
-> 本文的无参数调用、函数数组及批次合并均用于指导后续实现。
+> 运行时支持无参数函数数组及计算落定后的候选合并，替换旧单参数、单函数 action。
+> 公开执行契约与破坏性迁移见 [API_CN.md](API_CN.md#action-组)。
 > 调度方向固定为：action 等待 reaction 计算落定；reaction 不等待 action。
 > 原字段级 `reaction.effects` 提案暂不推进，原 D1–D8 不再作为实现清单。
 
@@ -39,7 +39,7 @@ interface Reaction<T = any> {
 ```
 
 保留当前公开 `Reaction<T>` interface 和同步 computed 契约，action
-使用无参数函数数组，不接受单函数形式。`ReactionAction` 是否公开导出由实现决定。
+使用无参数函数数组，不接受单函数形式。`ReactionAction` 已由包根公开导出。
 不增加 `deps`、`run`、`writes` 等成员，也不把 computed 改成可选。
 
 action 不接收依赖投影、computed 属性或 result 参数，也不为它增加泛型。
@@ -56,7 +56,7 @@ action 不接收依赖投影、computed 属性或 result 参数，也不为它�
 
 ## 3. 字段模块示例
 
-以下是待实现的 action 数组示例，`saveAmount` 与 `trackAmount` 由业务提供：
+以下是 action 数组示例，`saveAmount` 与 `trackAmount` 由业务提供：
 
 ```ts
 const model = createModel({
@@ -92,7 +92,7 @@ const model = createModel({
 
 ## 4. 计算链落定后的批次合并
 
-以下依据当前 [Reaction 类型](../src/types.ts)、
+以下记录从旧即时 action 迁移的原因；对应 [Reaction 类型](../src/types.ts)、
 [processReaction](../src/reaction/reaction-system.ts) 和
 [API 文档](API_CN.md)，说明为什么需要调整即时 action 的时序。
 
@@ -101,7 +101,7 @@ const model = createModel({
 假设 `b` 依赖 `a`，`c` 依赖 `b`，total 的 reaction 声明
 `fields: ['a', 'b', 'c']`。a 更新后，total 可能先后用以下输入重算：
 
-| 次序 | 输入状态 | 现有异步校验场景中的 action |
+| 次序 | 输入状态 | 旧即时 action 在异步校验场景中的行为 |
 |---|---|---|
 | 1 | a 新值、b 旧值、c 旧值 | 可能发送中间状态。 |
 | 2 | a 新值、b 新值、c 旧值 | 可能再次发送中间状态。 |
@@ -188,10 +188,10 @@ origin 只供库内部使用，不增加公开写入参数或 schema 成员，�
 过期结果处理；`fieldActionVersion` 只决定 action 能否启动，不替代校验请求 ID，
 也不因 action 版本变化而额外阻止某次计算值提交。
 
-当前 [processReaction](../src/reaction/reaction-system.ts) 在 `SKIP_REACTION` 或计算
+沿用的 [processReaction](../src/reaction/reaction-system.ts) 在 `SKIP_REACTION` 或计算
 抛错时不发起新的字段校验，前一个有效写入仍可能提交；
-[现有测试](../src/__tests__/reaction-system.test.ts)也明确覆盖最后一个 reaction 跳过时
-前一个写入及其 action 仍生效。本方案保留该计算提交规则，但新增“最新调度即淘汰旧
+[测试](../src/__tests__/reaction-system.test.ts)保留最后一个 reaction 跳过时
+前一个写入仍生效的校验；旧版该场景的 action 也会执行。本方案保留计算提交规则，但新增“最新调度即淘汰旧
 action 资格”：即使较早计算值仍能提交，只要最新 reaction 跳过或失败，该宿主本轮也
 不启动 action。这个变化不是对现有运行时行为的沿用，迁移边界见 §4.5。
 
@@ -466,8 +466,10 @@ ReactionJob 执行版本、候选有效性标记或 Batch 存档。
 | 未返回的业务 Promise | 不在 settled 保证范围内；业务必须 return/await 才能让整体等待覆盖请求。 |
 | 类型与图协议 | 保留 Reaction interface 扩展能力；消费者按数组无参数调用；action 只扩展声明元数据与字段内部展示。 |
 
-公开类型和运行时变更落地时，再同步 README / README_CN、API / API_CN、
-DEVTOOLS / DEVTOOLS_CN 及 AGENTS.md。本次只更新已确认的设计文档，不表示数组已受支持。
+README / README_CN、API / API_CN、DEVTOOLS / DEVTOOLS_CN、ADVANCED / ADVANCED_CN
+及 AGENTS.md 已同步数组签名、调度契约和迁移边界。验收测试主要位于
+[action-executor.test.ts](../src/__tests__/action-executor.test.ts)，任务分类、类型及
+DevTools 声明分别由对应测试覆盖。
 
 action 函数内部写回后若必须立即读取下游派生值，仍需业务侧编排；是否增加独立的
 计算空闲等待 API 不属于本次实现范围。逐项屏障只保护每个数组项的启动时刻，
