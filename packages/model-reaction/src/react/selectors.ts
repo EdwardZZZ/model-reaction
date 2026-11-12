@@ -156,9 +156,7 @@ export function useModelFields<
     // collisions and keeps inline field arrays stable when their contents match.
     const key = JSON.stringify(fields);
     const pick = useCallback((data: Readonly<T>): Pick<T, K> => {
-        const out = {} as Pick<T, K>;
-        for (const f of fields) out[f] = data[f];
-        return out;
+        return Object.fromEntries(fields.map((f) => [f, data[f]])) as Pick<T, K>;
         // `key` covers `fields` content; intentional dep list.
     }, [key]);
 

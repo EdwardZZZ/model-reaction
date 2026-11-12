@@ -21,7 +21,7 @@ export function TextField<T extends Record<string, any>>({
     readOnly?: boolean;
 }) {
     const model = useModel<T>();
-    const { draft, setDraft, meta, onBlur, showError } = useDraftField(model, field);
+    const { draft, setDraft, meta, writeError, onBlur, showError } = useDraftField(model, field);
 
     return (
         <label className="field">
@@ -38,7 +38,7 @@ export function TextField<T extends Record<string, any>>({
                 onChange={(e) => setDraft(e.target.value)}
                 onBlur={onBlur}
             />
-            {showError && <small role="alert" className="field-error">{meta.error}</small>}
+            {showError && <small role="alert" className="field-error">{writeError?.message ?? meta.error}</small>}
         </label>
     );
 }

@@ -82,23 +82,30 @@ createModel<S extends Record<string, FieldSchema>>(
 | `setField(field, value): Promise<boolean>` | 设置单个字段；返回该字段的验证结果 |
 | `setFields(fields): Promise<boolean>` | 在一次校验 + 反应流程中批量设置多个字段；返回所有字段结果的逻辑与。跨字段校验看到的是**合并后的批次数据**——每个字段针对已叠加了本次调用全部字段的 `data` 进行校验，因此相互依赖的字段（如 `password` / `confirmPassword`）可在一次调用中一起设置。**非原子**——即使某个字段校验失败，其余通过校验的字段仍会提交到 `data`。 |
 
-条件函数和验证器读取浅冻结的数据快照。`setFields()` 的所有字段共享一份经过
-transform 的候选快照；`validateAll()` 共享一份合并已提交数据与脏数据的快照。
-`setField()` 捕获当前已提交数据的快照。验证器必须保持纯函数，不能修改快照及其
-嵌套字段值。
+`setField()` 委托单项 `setFields()` 流程。条件函数和验证器共享浅冻结候选快照：
+已提交数据叠加本次全部经过 transform 的输入，包括正在验证的字段自身。
+候选值不代表已经通过验证。`validateAll()` 合并已提交数据与脏数据，不再重复
+transform。验证器必须保持纯函数，不能修改快照及其嵌套字段值。
+
+全部输入 key 必须是 schema 的自有字段。遇到未知 key，先发送 `field:not-found`
+再 reject，整批不开始 transform、validation 或提交；按输入顺序报告首个未知字段。
+transform 抛错也会 reject，不转成普通校验错误或 dirty 输入。合法字段的普通校验
+失败仍 resolve `false`，其他通过的字段仍可提交。批次在已开始的校验全部收尾、
+登记 reaction 后才释放计算任务，异常路径也遵守此规则。
 
 ### 反应
 
-字段可以配置一个 reaction，也可以配置 reaction 数组。`fields` 中任意依赖字段变化时，
-对应 reaction 会运行。数组中的匹配项按声明顺序调度：
+每个字段最多配置一个 reaction。`fields` 中任意依赖字段变化时运行。
+数组（包括空数组）会在构造阶段抛出包含字段名的 `TypeError`，早于默认值初始化和
+异步任务启动：
 
 ```ts
 total: {
     type: 'number',
-    reaction: [
-        { fields: ['price'], computed: ({ price }) => price * 1.1 },
-        { fields: ['price'], computed: ({ price }) => price * 1.2 },
-    ],
+    reaction: {
+        fields: ['price', 'quantity'],
+        computed: ({ price, quantity }) => price * quantity,
+    },
 }
 ```
 
@@ -119,13 +126,13 @@ computed: ({ enabled, source }) =>
 
 返回 `SKIP_REACTION` 是正常的 no-op：不会验证或写入目标字段，不会修改
 `dirtyData`，也不会触发 `field:change`、下游 reaction 或当前 reaction 的
-`action`。reaction 数组中的后续项仍会按声明顺序执行。本 reaction 的调度也会
+`action`。本 reaction 的调度也会
 取消同一宿主字段较早的 action 资格，即使最终返回跳过。
 
 #### 返回值类型
 
-TypeScript 会按字段的 `type` 检查每个 `computed` 的返回值（reaction 数组中的
-每一项都会检查）：分别为 `string`、`number`、`boolean`、`Date`、`object`
+TypeScript 会按字段的 `type` 检查 `computed` 的返回值：
+分别为 `string`、`number`、`boolean`、`Date`、`object`
 或只读数组，另外都允许 `SKIP_REACTION`。`enum` 字段的返回值不检查。
 `values` 的类型是 `Record<string, any>`，所以直接返回其中的值（`(v) => v.name`）
 得到的是 `any`，同样不会被检查。
@@ -157,20 +164,11 @@ const label: Reaction = {
 `FieldSchema<'string'>` 这类单一分支，这样展开片段再添加 reaction 时，
 字段仍保留原来的 `type`。
 
-多个 reaction 因同一个依赖字段变化而写入同一目标时，最后调度的写入具有最终效力，
-之前的写入会被更新的写入覆盖。因此上例中，如果第二个结果通过校验，`total` 由第二个
-reaction 决定；如果它校验失败，结果会进入 `dirtyData`，不会回退采用前一个 reaction
-的值。action 资格与值提交分开：只有宿主最新调度的 reaction，才能在自身写入
-成功提交后登记一组 action。
-
-匹配的 reaction 按调度顺序计算并开始校验。`SKIP_REACTION` 不产生写入，也不会
-取代前一个写入。写入同一目标的防抖 reaction 会合并到一次回调中，该目标再次被触发
-时会重新计时。较晚计算跳过或抛错时，较早值仍可能提交，但其 action 已被取消。
+重复触发时，同一 reaction 的多次校验可能重叠。校验请求 ID 决定写入新鲜度，
+action 资格另由宿主最新调度版本决定。较晚的 `SKIP_REACTION` 不产生写入，
+因此较早有效值仍可能提交，但其 action 已被取消；较晚计算抛错也有相同的分离行为。
+防抖时每个宿主只保留一项待执行计算，再次触发会替换它并重新计时。
 已开始的 action 可以与后续更新重叠执行；`settled()` 仍等待其返回的 Promise。
-
-`setFields()` 批量修改多个依赖字段时，变更字段的处理顺序也会影响调度顺序。如果一个
-结果依赖多个输入，建议用一个包含这些依赖字段的 reaction 计算，避免多个 reaction 竞争
-写入同一目标。
 
 #### action 组
 
@@ -204,7 +202,7 @@ await model.settled();
 闭包读取不会增加依赖，需要触发重跑的字段仍须声明在 `fields` 中。
 
 重叠的入口校验、批量提交、reaction 防抖、计算与计算结果校验构成一个计算阶段。
-计算归零时，调度器交接每个宿主至多一组有效候选。每次实际调度 reaction 都会
+计算归零时，调度器尝试启动各宿主的有效组。每次实际调度 reaction 都会
 替换宿主 action 版本，包括没有 action 或空数组的 reaction。最新者跳过、抛错、
 返回 Promise、校验失败或写入过期时，不恢复较早候选。后续独立更新仍可启动新组。
 
@@ -293,8 +291,6 @@ off();
 interface ModelOptions {
   debounceReactions?: number;
   asyncValidationTimeout?: number;
-  strictMode?: boolean;
-  failFast?: boolean;
 }
 ```
 
@@ -302,8 +298,6 @@ interface ModelOptions {
 | --- | --- | --- |
 | `debounceReactions` | `0` | 反应触发的防抖时间（毫秒） |
 | `asyncValidationTimeout` | `5000` | 异步验证的超时时间（毫秒） |
-| `strictMode` | `false` | 为 `true` 时，设置未在 schema 中声明的字段会抛错 |
-| `failFast` | `false` | 为 `true` 时，单字段在第一条规则失败后即停止后续验证 |
 
 ## 验证规则
 
@@ -315,6 +309,11 @@ import { ValidationRules, Rule } from 'model-reaction/validation';
 ```
 
 每条规则都实现了 `Validator` 接口，可直接放进字段的 `validator` 数组。
+
+按声明顺序执行，每条规则先判断 `condition` 再运行 `validate`；condition 为 false
+则跳过。首次 condition 异常、验证失败、异常或超时即停止该字段，后续规则不再执行。
+错误仍保持数组形态。单字段异步规则顺序等待，不同字段可以并行验证。优先放置廉价
+同步规则；确需并行的独立请求可封装在同一个业务 validator 中。
 
 ### 内置规则
 
@@ -386,6 +385,19 @@ const custom = formatValidationErrors(
 
 这组变更不向后兼容，升级时需要修改调用处：
 
+- 单项 `reaction` 数组直接解包；多项按业务改为一条计算规则，或把独立结果拆成不同
+  字段。机械合并依赖列表不保留旧语义。
+- 删除 `strictMode` 和 `failFast`。未知字段固定在 `field:not-found` 后 reject，
+  且整批不开始准备输入；外部 DTO 应先映射字段。单字段固定首错停止，condition
+  与 validate 交错执行，不再预筛选全部 condition；原 `failFast: true` 的错误优先级
+  也可能改变。
+- 单字段 validator 的 `data[field]` 现在是经过 transform 的候选值，不再是旧提交值。
+  依赖旧值的前置条件移到业务写入入口，或显式提供业务比较基准。
+  `validateAll()` 不再重复 transform dirty 值。
+- React `DraftField` 新增必需成员 `writeError: Error | null`；手工构造值的调用方
+  需要补齐。消息展示改为 `writeError?.message ?? meta.error`，`showError` 由 touched
+  与任一错误来源共同决定，详见 [React 绑定](REACT_CN.md)。
+- 字段结构判等和两个 selector Hook 保持原有契约。
 - 将 `action: fn` 改为 `action: [fn]`，参数读取改为 model 闭包。直接调用者需要
   遍历数组并无参数调用。action 现在等待计算落定，按宿主最新调度版本合并，
   不再在每次中间计算提交后立即执行。较晚跳过或失败会取消较早 action，即使较早

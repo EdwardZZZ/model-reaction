@@ -20,6 +20,9 @@ export interface PanelState {
     selectedId: number | null;
 }
 
+/** Local selection never enters the agent transport protocol. */
+export type PanelAction = AgentMessage | { kind: 'select'; id: number };
+
 export function initialPanelState(): PanelState {
     return { instances: new Map(), selectedId: null };
 }
@@ -37,10 +40,14 @@ function pushChange(
 
 export function panelReducer(
     state: PanelState,
-    message: AgentMessage,
+    message: PanelAction,
     timelineLimit = 100
 ): PanelState {
     switch (message.kind) {
+        case 'select':
+            return state.instances.has(message.id)
+                ? { ...state, selectedId: message.id }
+                : state;
         case 'init': {
             const instances = new Map<number, InstanceState>();
             message.instances.forEach((inst) => instances.set(inst.id, inst));

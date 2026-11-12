@@ -297,90 +297,40 @@ describe('ReactionSystem - via createModel', () => {
         model.dispose();
     });
 
-    test('multiple reactions on the same field all execute', async () => {
-        const spy1 = jest.fn();
-        const spy2 = jest.fn();
-
-        interface Schema {
-            source: string;
-            target: string;
-        }
-        const schema: Model<Schema> = {
-            source: { type: 'string', default: 'start' },
+    test.each([0, 1, 2])('rejects reaction arrays of length %i before initialization', (length) => {
+        const readDefault = jest.fn(() => 1);
+        const computed = jest.fn(() => 2);
+        const timeout = jest.spyOn(globalThis, 'setTimeout');
+        const schema: Model = {
+            source: { type: 'number', get default() { return readDefault(); } },
+            derived: { type: 'number', reaction: { fields: ['source'], computed } },
             target: {
-                type: 'string',
-                default: 'initial',
-                reaction: [
-                    {
-                        fields: ['source'],
-                        computed: (values) => {
-                            spy1();
-                            return values.source + '_1';
-                        },
-                    },
-                    {
-                        fields: ['source'],
-                        computed: (values) => {
-                            spy2();
-                            return values.source + '_2';
-                        },
-                    },
-                ],
+                type: 'number',
+                // @ts-expect-error test JavaScript callers bypassing the public type
+                reaction: Array.from({ length }, () => ({ fields: ['source'], computed })),
             },
         };
-
-        const model = createModel<Schema>(schema);
-        await model.setField('source', 'update');
-        await model.settled();
-
-        expect(spy1).toHaveBeenCalled();
-        expect(spy2).toHaveBeenCalled();
-        // Last scheduled reaction wins.
-        expect(model.getField('target')).toBe('update_2');
-        model.dispose();
+        try {
+            expect(() => createModel(schema, { debounceReactions: 5 })).toThrow(TypeError);
+            expect(() => createModel(schema)).toThrow(/target.*single reaction/);
+            expect(readDefault).not.toHaveBeenCalled();
+            expect(computed).not.toHaveBeenCalled();
+            expect(timeout).not.toHaveBeenCalled();
+        } finally {
+            timeout.mockRestore();
+        }
     });
 
     test.each([0, 5])(
-        'only the last competing reaction commits and runs its action (debounce: %s)',
+        'does not fall back to an earlier in-flight write when the latest is invalid (debounce: %s)',
         async (debounceReactions) => {
-            const firstAction = jest.fn();
-            const lastAction = jest.fn();
-            const firstComputed = jest.fn(() => 1);
-            const lastComputed = jest.fn(() => 2);
-            const model = createModel({
-                source: { type: 'number' },
-                target: {
-                    type: 'number',
-                    default: 10,
-                    reaction: [
-                        { fields: ['source'], computed: firstComputed, action: [firstAction] },
-                        { fields: ['source'], computed: lastComputed, action: [lastAction] },
-                    ],
-                },
-            }, { debounceReactions });
-            const changes = jest.fn();
-            model.subscribe((data) => data.target, changes);
-            try {
-                await model.setField('source', 1);
-                await model.settled();
-                expect(firstComputed).toHaveBeenCalledTimes(1);
-                expect(lastComputed).toHaveBeenCalledTimes(1);
-                expect(model.getField('target')).toBe(2);
-                expect(changes).toHaveBeenCalledTimes(1);
-                expect(changes).toHaveBeenCalledWith(2, 10);
-                expect(firstAction).not.toHaveBeenCalled();
-                expect(lastAction).toHaveBeenCalledTimes(1);
-            } finally {
-                model.dispose();
-            }
-        }
-    );
-
-    test.each([0, 5])(
-        'does not fall back to an earlier reaction when the last write is invalid (debounce: %s)',
-        async (debounceReactions) => {
-            const firstAction = jest.fn();
-            const lastAction = jest.fn();
+            const action = jest.fn();
+            let release!: (valid: boolean) => void;
+            let signalFirst!: () => void;
+            let signalLast!: () => void;
+            const first = new Promise<void>((resolve) => { signalFirst = resolve; });
+            const last = new Promise<void>((resolve) => { signalLast = resolve; });
+            const gate = new Promise<boolean>((resolve) => { release = resolve; });
             const downstreamComputed = jest.fn(({ target }) => target * 2);
             const model = createModel({
                 source: { type: 'number' },
@@ -390,12 +340,18 @@ describe('ReactionSystem - via createModel', () => {
                     validator: [{
                         type: 'positive',
                         message: 'must be positive',
-                        validate: async (value) => value > 0,
+                        validate: (value) => {
+                            if (value === 1) {
+                                signalFirst();
+                                return gate;
+                            }
+                            signalLast();
+                            return value > 0;
+                        },
                     }],
-                    reaction: [
-                        { fields: ['source'], computed: () => 1, action: [firstAction] },
-                        { fields: ['source'], computed: () => -1, action: [lastAction] },
-                    ],
+                    reaction: {
+                        fields: ['source'], computed: ({ source }) => source, action: [action],
+                    },
                 },
                 downstream: {
                     type: 'number',
@@ -407,6 +363,10 @@ describe('ReactionSystem - via createModel', () => {
             model.subscribe((data) => data.target, changes);
             try {
                 await model.setField('source', 1);
+                await first;
+                await model.setField('source', -1);
+                await last;
+                release(true);
                 await model.settled();
                 expect(model.getField('target')).toBe(10);
                 expect(model.getDirtyData()).toEqual({ target: -1 });
@@ -416,9 +376,9 @@ describe('ReactionSystem - via createModel', () => {
                 expect(model.getField('downstream')).toBe(20);
                 expect(downstreamComputed).not.toHaveBeenCalled();
                 expect(changes).not.toHaveBeenCalled();
-                expect(firstAction).not.toHaveBeenCalled();
-                expect(lastAction).not.toHaveBeenCalled();
+                expect(action).not.toHaveBeenCalled();
             } finally {
+                release(true);
                 model.dispose();
             }
         }
@@ -432,6 +392,7 @@ describe('ReactionSystem - via createModel', () => {
             dep1: string;
             dep2: string;
             target: string;
+            other: string;
         }
         const schema: Model<Schema> = {
             dep1: { type: 'string', default: 'a' },
@@ -439,22 +400,24 @@ describe('ReactionSystem - via createModel', () => {
             target: {
                 type: 'string',
                 default: '',
-                reaction: [
-                    {
-                        fields: ['dep1'],
-                        computed: (values) => {
-                            spy1();
-                            return values.dep1;
-                        },
+                reaction: {
+                    fields: ['dep1'],
+                    computed: (values) => {
+                        spy1();
+                        return values.dep1;
                     },
-                    {
-                        fields: ['dep2'],
-                        computed: (values) => {
-                            spy2();
-                            return values.dep2;
-                        },
+                },
+            },
+            other: {
+                type: 'string',
+                default: '',
+                reaction: {
+                    fields: ['dep2'],
+                    computed: (values) => {
+                        spy2();
+                        return values.dep2;
                     },
-                ],
+                },
             },
         };
 
@@ -792,59 +755,55 @@ describe('ReactionSystem - settled() waits for chained reactions and async actio
         model.dispose();
     });
 
-    test('SKIP_REACTION does not cancel later reactions for the same target', async () => {
-        const skippedAction = jest.fn();
+    test('SKIP_REACTION does not cancel later computations for the same target', async () => {
         const committedAction = jest.fn();
         const model = createModel({
             source: { type: 'string' as const },
             target: {
                 type: 'string' as const,
                 default: 'initial',
-                reaction: [
-                    {
-                        fields: ['source'],
-                        computed: () => SKIP_REACTION,
-                        action: [skippedAction],
-                    },
-                    {
-                        fields: ['source'],
-                        computed: (deps: Record<string, any>) =>
-                            deps.source.toUpperCase(),
-                        action: [committedAction],
-                    },
-                ],
+                reaction: {
+                    fields: ['source'],
+                    computed: ({ source }) => source === 'skip' ? SKIP_REACTION : source.toUpperCase(),
+                    action: [committedAction],
+                },
             },
         });
 
+        await model.setField('source', 'skip');
+        await model.settled();
+        expect(committedAction).not.toHaveBeenCalled();
         await model.setField('source', 'update');
         await model.settled();
 
         expect(model.getField('target')).toBe('UPDATE');
-        expect(skippedAction).not.toHaveBeenCalled();
         expect(committedAction).toHaveBeenCalledTimes(1);
         model.dispose();
     });
 
-    test('a skipped last reaction leaves an earlier valid write authoritative', async () => {
+    test('a skipped later computation leaves an earlier committed value intact', async () => {
         const firstAction = jest.fn();
-        const skippedAction = jest.fn();
         const model = createModel({
             source: { type: 'number' },
             target: {
                 type: 'number',
                 default: 0,
-                reaction: [
-                    { fields: ['source'], computed: () => 1, action: [firstAction] },
-                    { fields: ['source'], computed: () => SKIP_REACTION, action: [skippedAction] },
-                ],
+                reaction: {
+                    fields: ['source'],
+                    computed: ({ source }) => source === 1 ? 1 : SKIP_REACTION,
+                    action: [firstAction],
+                },
             },
         });
         try {
             await model.setField('source', 1);
             await model.settled();
+            expect(firstAction).toHaveBeenCalledTimes(1);
+            firstAction.mockClear();
+            await model.setField('source', 2);
+            await model.settled();
             expect(model.getField('target')).toBe(1);
             expect(firstAction).not.toHaveBeenCalled();
-            expect(skippedAction).not.toHaveBeenCalled();
         } finally {
             model.dispose();
         }

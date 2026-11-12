@@ -28,6 +28,15 @@ function seedDraft<T extends Record<string, any>, K extends keyof T>(
     return display(value as T[K]);
 }
 
+function asWriteError(error: unknown): Error {
+    if (error instanceof Error) return error;
+    try {
+        return new Error(String(error));
+    } catch {
+        return new Error('Field write failed');
+    }
+}
+
 /** What {@link useDraftField} hands back to a controlled input. */
 export interface DraftField<V> {
     /** Text shown in the input; updates on every keystroke regardless of validity. */
@@ -36,11 +45,13 @@ export interface DraftField<V> {
     setDraft: (next: string) => void;
     /** Model-side metadata for this field (errors, validating, dirty). */
     meta: FieldMeta;
+    /** Latest edit's write exception, kept locally rather than in model errors. */
+    writeError: Error | null;
     /** True once the input has been blurred at least once. */
     touched: boolean;
     /** Flips `touched` on. Wire to `onBlur`. */
     onBlur: () => void;
-    /** `touched && meta.error`; the message itself is `meta.error`. */
+    /** `touched && (writeError || meta.error)`; prefer `writeError.message`. */
     showError: boolean;
     /** The last value the model committed to `data`. Rarely needed directly. */
     committed: V;
@@ -86,10 +97,11 @@ export function useDraftField<
 ): DraftField<T[K]> {
     const [committed, setValue, meta] = useModelFieldState(model, field);
 
-    // Ref-lock `format` so an inline arrow needs no useCallback and doesn't
-    // retrigger the reseed effect. `toDisplay` handles nullish / non-finite.
     const formatRef = useRef<(value: T[K]) => string>(options.format ?? String);
-    formatRef.current = options.format ?? String;
+    // Publish only committed renders, before reconciliation; see docs/REACT.md.
+    useEffect(() => {
+        formatRef.current = options.format ?? String;
+    }, [options.format]);
     const display = useCallback(
         (value: T[K]) => toDisplay(value, formatRef.current),
         []
@@ -98,6 +110,7 @@ export function useDraftField<
     // Seed on mount: pending dirty value if any, else committed value.
     const [draft, setDraft] = useState(() => seedDraft(model, field, committed, display));
     const [touched, setTouched] = useState(false);
+    const [writeError, setWriteError] = useState<Error | null>(null);
     const session = useMemo(() => ({
         committed: model.getField(field),
         pending: new Set<() => void>(),
@@ -114,6 +127,7 @@ export function useDraftField<
             previous.current = session;
             setDraft(seedDraft(model, field, committed, display));
             setTouched(false);
+            setWriteError(null);
             return;
         }
 
@@ -136,6 +150,7 @@ export function useDraftField<
     const edit = useCallback(
         (next: string) => {
             setDraft(next); // show what was typed, valid or not
+            setWriteError(null);
             const editId = ++session.edit;
             let ownCommitted = session.committed;
             let observed = false;
@@ -152,13 +167,17 @@ export function useDraftField<
                     session.committed = ownCommitted;
                 }
             }).finally(() => {
-                unsubscribe();
                 session.pending.delete(unsubscribe);
+                unsubscribe();
                 if (!session.active || previous.current !== session || session.pending.size > 0) return;
                 const current = model.getField(field);
                 if (!Object.is(session.committed, current)) {
                     session.committed = current;
                     setDraft(display(current));
+                }
+            }).catch((error: unknown) => {
+                if (session.active && previous.current === session && editId === session.edit) {
+                    setWriteError(asWriteError(error));
                 }
             });
         },
@@ -166,7 +185,7 @@ export function useDraftField<
     );
 
     const onBlur = useCallback(() => setTouched(true), []);
-    const showError = Boolean(touched && meta.error);
+    const showError = Boolean(touched && (writeError || meta.error));
 
-    return { draft, setDraft: edit, meta, touched, onBlur, showError, committed };
+    return { draft, setDraft: edit, meta, writeError, touched, onBlur, showError, committed };
 }

@@ -20,7 +20,7 @@ const userModel = createModel<User>({
 });
 
 export function NameInput() {
-    const { draft, setDraft, meta, onBlur, showError } = useDraftField(
+    const { draft, setDraft, meta, writeError, onBlur, showError } = useDraftField(
         userModel,
         'name'
     );
@@ -31,7 +31,7 @@ export function NameInput() {
                 onChange={(e) => setDraft(e.target.value)}
                 onBlur={onBlur}
             />
-            {showError && <span>{meta.error}</span>}
+            {showError && <span>{writeError?.message ?? meta.error}</span>}
         </label>
     );
 }

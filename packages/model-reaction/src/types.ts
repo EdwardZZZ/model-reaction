@@ -114,13 +114,8 @@ interface TypedFieldSchema<K extends FieldType> {
     default?: unknown;
     /** Literal set used to infer enum values; validators enforce membership. */
     values?: readonly unknown[];
-    /**
-     * Reaction definition. When an array is used, matching reactions are
-     * scheduled in declaration order for each changed dependency field.
-     */
-    reaction?:
-        | Reaction<ComputedValueMap[K]>
-        | Reaction<ComputedValueMap[K]>[];
+    /** One computation per field; side effects remain an action array. */
+    reaction?: Reaction<ComputedValueMap[K]>;
     /** Transform input before validation. */
     transform?: (value: any) => any;
 }
@@ -186,10 +181,6 @@ export interface ModelOptions {
     asyncValidationTimeout?: number;
     /** Debounce window for reactions in milliseconds. */
     debounceReactions?: number;
-    /** Throw when a write targets a field absent from the schema. */
-    strictMode?: boolean;
-    /** Stop validating a field after its first error. */
-    failFast?: boolean;
 }
 
 export interface ModelReturn<T = Record<string, any>> {

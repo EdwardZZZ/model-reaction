@@ -45,7 +45,7 @@ describe('panelReducer', () => {
 
     test('init keeps the current selection if still present', () => {
         let state: PanelState = panelReducer(initialPanelState(), init([makeInstance(1), makeInstance(2)]));
-        state = { ...state, selectedId: 2 };
+        state = panelReducer(state, { kind: 'select', id: 2 });
         state = panelReducer(state, init([makeInstance(1), makeInstance(2)]));
         expect(state.selectedId).toBe(2);
     });
@@ -54,6 +54,11 @@ describe('panelReducer', () => {
         const state = panelReducer(initialPanelState(), init([]));
         expect(state.selectedId).toBeNull();
         expect(state.instances.size).toBe(0);
+    });
+
+    test('ignores selection of an absent instance', () => {
+        const state = panelReducer(initialPanelState(), init([makeInstance(1)]));
+        expect(panelReducer(state, { kind: 'select', id: 99 })).toBe(state);
     });
 
     test('instance-added selects it when nothing was selected', () => {

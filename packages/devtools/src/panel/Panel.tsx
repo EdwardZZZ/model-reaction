@@ -12,6 +12,7 @@ import { useEffect, useReducer, useState, type ReactElement } from 'react';
 import {
     initialPanelState,
     panelReducer,
+    type PanelAction,
     type PanelState,
 } from '../panel-state';
 import type { AgentMessage } from '../protocol';
@@ -35,13 +36,11 @@ export interface PanelProps {
 
 export function Panel({ connect }: PanelProps): ReactElement {
     const [state, dispatch] = useReducer(
-        (s: PanelState, m: AgentMessage) => panelReducer(s, m),
+        (s: PanelState, m: PanelAction) => panelReducer(s, m),
         undefined,
         initialPanelState
     );
     const [tab, setTab] = useState<Tab>('data');
-    // The reducer owns selection, but the user can override it here.
-    const [selectedOverride, setSelectedOverride] = useState<number | null>(null);
 
     useEffect(() => {
         const port = connect((msg) => dispatch(msg));
@@ -49,7 +48,7 @@ export function Panel({ connect }: PanelProps): ReactElement {
     }, [connect]);
 
     const instances = [...state.instances.values()];
-    const selectedId = selectedOverride ?? state.selectedId;
+    const selectedId = state.selectedId;
     const selected = selectedId !== null ? state.instances.get(selectedId) ?? null : null;
 
     return (
@@ -59,7 +58,7 @@ export function Panel({ connect }: PanelProps): ReactElement {
                 <InstancePicker
                     instances={instances.map((i) => i.id)}
                     selectedId={selectedId}
-                    onSelect={setSelectedOverride}
+                    onSelect={(id) => dispatch({ kind: 'select', id })}
                 />
             </header>
 

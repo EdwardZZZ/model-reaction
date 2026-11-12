@@ -95,25 +95,34 @@ instances, are compared by reference: a new instance is treated as a change.
 | `setField(field, value): Promise<boolean>` | Set a single field; returns its validation result. |
 | `setFields(fields): Promise<boolean>` | Batch set multiple fields in one validation + reaction pass; returns the AND of every field's result. Cross-field validators see the **merged batch** — each field validates against `data` with all fields in the same call already applied, so co-dependent fields (e.g. `password` / `confirmPassword`) can be set together in one call. **Not atomic** — valid fields commit to `data` even if a sibling field fails validation. |
 
-Conditions and validators read shallow-frozen data snapshots. `setFields()`
-shares one transformed candidate snapshot across its fields; `validateAll()`
-shares one snapshot of committed data merged with dirty data. `setField()`
-captures the committed snapshot. Validators must remain pure and must not
-mutate the snapshot or its nested field values.
+`setField()` delegates to the single-entry `setFields()` flow. Conditions and
+validators share one shallow-frozen candidate snapshot: committed data merged
+with every transformed input in this call, including the field being validated.
+These candidates have not necessarily passed validation. `validateAll()` merges
+committed and dirty data without transforming values again. Validators must
+remain pure and must not mutate the snapshot or its nested field values.
+
+All input keys must be own fields of the schema. An unknown key emits
+`field:not-found` and rejects the whole call before any transform, validation,
+or commit starts; the first unknown key in input order is reported. A transform
+exception also rejects rather than becoming a validation error or dirty input.
+For known fields, ordinary validation failures resolve `false` and still allow
+valid siblings to commit. The batch drains started validations and registers
+reactions before releasing its calculation task, including rejection paths.
 
 ### Reactions
 
-A field can have one reaction or an array of reactions. Each reaction runs when
-one of the fields in its `fields` list changes. For an array, matching
-reactions are scheduled in declaration order:
+A field can have at most one reaction. It runs when one of the fields in its
+`fields` list changes. Arrays, including empty arrays, throw a `TypeError` naming
+the field during construction, before defaults or asynchronous work start:
 
 ```ts
 total: {
     type: 'number',
-    reaction: [
-        { fields: ['price'], computed: ({ price }) => price * 1.1 },
-        { fields: ['price'], computed: ({ price }) => price * 1.2 },
-    ],
+    reaction: {
+        fields: ['price', 'quantity'],
+        computed: ({ price, quantity }) => price * quantity,
+    },
 }
 ```
 
@@ -138,14 +147,13 @@ computed: ({ enabled, source }) =>
 
 `SKIP_REACTION` is a normal no-op: the target field is not validated or
 written, `dirtyData` is unchanged, and no `field:change`, downstream reaction,
-or current reaction `action` is triggered. Later entries in a reaction array
-still run in declaration order. Scheduling this reaction also cancels earlier
+or current reaction `action` is triggered. Scheduling this reaction also cancels earlier
 action eligibility for the same host field, even when it skips.
 
 #### Result types
 
-TypeScript checks each `computed` result, including every entry of a reaction
-array, against the field's `type`: `string`, `number`, `boolean`, `Date`,
+TypeScript checks the `computed` result against the field's `type`:
+`string`, `number`, `boolean`, `Date`,
 `object`, or a readonly array, plus `SKIP_REACTION`. `enum` results are not
 checked. `values` is typed as `Record<string, any>`, so a result read straight
 from it (`(v) => v.name`) is `any` and also passes unchecked.
@@ -179,26 +187,14 @@ fragment factories should return a single variant such as
 `FieldSchema<'string'>`, so a spread fragment keeps its tag when a reaction is
 added.
 
-When several reactions write the same target for the same changed dependency,
-the last scheduled write is authoritative; earlier writes are superseded. Thus,
-in the example, the second reaction determines `total` if its result passes
-validation. If it fails validation, the result goes to `dirtyData`; an earlier
-reaction's value is not used as a fallback. Action eligibility is separate
-from value commits: only the host's latest scheduled reaction can register an
-action group after its own write commits successfully.
-
-Matching reactions compute and start validation in scheduling order. A
-`SKIP_REACTION` result makes no write and does not supersede an earlier one.
-Debounced reactions sharing a target are collected into one callback; another
-trigger for that target restarts its debounce window. A later skipped or
-throwing computation can leave an earlier value commit intact while cancelling
-its actions. An already started action may overlap with later updates;
-`settled()` still waits for its returned Promise.
-
-For a `setFields()` batch that changes multiple dependencies, the order in
-which changed fields are processed also affects scheduling. If one result
-depends on several inputs, prefer one reaction listing all of them rather than
-using multiple reactions to compete for the same target.
+Repeated triggers can overlap validations of the same reaction. Validation
+request IDs decide which write can commit; action eligibility separately follows
+the host's latest scheduling version. A later `SKIP_REACTION` creates no write,
+so an earlier valid write may still commit while its actions are cancelled.
+A later computation that throws has the same separation. Debouncing keeps one
+pending computation per host, replacing it and restarting the window on another
+trigger. An already started action may overlap with later updates; `settled()`
+still waits for its returned Promise.
 
 #### Action groups
 
@@ -234,7 +230,7 @@ dependencies: declare trigger fields in `fields`.
 
 Overlapping input validation, batch commits, reaction debounce, computation,
 and computed-value validation form one calculation phase. When it becomes idle,
-the scheduler hands off at most one eligible group per host field. Each actual
+the scheduler attempts the eligible group for each host field. Each actual
 reaction scheduling replaces the host's action version, including reactions
 with no actions or an empty array. If the latest reaction skips, throws, returns
 a Promise, fails validation, or loses its write, no earlier group is restored.
@@ -338,8 +334,6 @@ Subscribe via `model.on(eventName, handler)`.
 interface ModelOptions {
   debounceReactions?: number;
   asyncValidationTimeout?: number;
-  strictMode?: boolean;
-  failFast?: boolean;
 }
 ```
 
@@ -347,8 +341,6 @@ interface ModelOptions {
 | --- | --- | --- |
 | `debounceReactions` | `0` | Debounce window (ms) for reaction triggers. |
 | `asyncValidationTimeout` | `5000` | Timeout (ms) for async validators. |
-| `strictMode` | `false` | If `true`, setting a field absent from the schema throws. |
-| `failFast` | `false` | If `true`, stop validating a field after its first failure. |
 
 ## Validation Rules
 
@@ -361,6 +353,13 @@ import { ValidationRules, Rule } from 'model-reaction/validation';
 
 Each rule implements the `Validator` interface, so it can be dropped straight
 into a field's `validator` array.
+
+Rules run in declaration order, evaluating each `condition` immediately before
+its `validate`. A false condition skips that rule. The first condition exception,
+failed validation, exception, or timeout stops the field; later rules are not
+evaluated. Errors retain their array shape. Async rules in one field run
+sequentially; different fields can validate concurrently. Put cheap synchronous
+checks first, and combine independent requests inside one validator if needed.
 
 ### Built-in rules
 
@@ -432,6 +431,23 @@ For full type definitions, see [`src/types.ts`](../src/types.ts).
 
 These changes are breaking and require updating consumers:
 
+- Unwrap single-entry `reaction` arrays. Rewrite multiple rules as one business
+  calculation or split independent results into separate fields; merging
+  dependency lists mechanically does not preserve the old semantics.
+- Remove `strictMode` and `failFast`. Unknown fields now always reject after
+  `field:not-found`, before any field in that batch is prepared. Map external
+  DTO keys before writing. Per-field validation always stops at the first error,
+  with interleaved condition/validation evaluation rather than condition
+  prefiltering; this also changes error priority for former `failFast: true` users.
+- A single-field validator's `data[field]` now contains the transformed candidate,
+  not the previous committed value. Move checks that require the old value to
+  the business write entry point or provide an explicit business baseline.
+  `validateAll()` does not transform dirty values again.
+- React `DraftField` adds required `writeError: Error | null`; update manually
+  constructed values and display `writeError?.message ?? meta.error`.
+  `showError` is now gated by `touched` and either error source. See
+  [React bindings](REACT.md).
+- Structural field equality and both selector Hooks remain unchanged.
 - Replace `action: fn` with `action: [fn]` and migrate parameter reads to model
   closures. Direct callers must iterate the array and invoke items without
   arguments. Actions now wait for calculation to settle and merge by host's

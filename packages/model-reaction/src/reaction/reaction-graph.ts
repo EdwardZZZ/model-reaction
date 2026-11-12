@@ -2,12 +2,11 @@ import type { Model, Reaction } from '../types';
 
 export function eachReaction(
     schema: Model,
-    visit: (field: string, reaction: Reaction, reactionIndex: number) => void
+    visit: (field: string, reaction: Reaction) => void
 ): void {
     for (const [name, field] of Object.entries(schema)) {
         if (!field.reaction) continue;
-        const reactions = Array.isArray(field.reaction) ? field.reaction : [field.reaction];
-        reactions.forEach((reaction, index) => visit(name, reaction, index));
+        visit(name, field.reaction);
     }
 }
 
@@ -25,8 +24,8 @@ export function eachReaction(
  * (when `dependencyField` changes, the reaction that produces `computedField`
  * re-runs).
  *
- * Raw and undeduped: a field with two reactions that both read the same
- * dependency yields that edge twice. Consumers that want unique edges dedupe
+ * Raw and undeduped: a repeated dependency yields that edge twice.
+ * Consumers that want unique edges dedupe
  * themselves (e.g. via a `Set`) — this keeps the primitive faithful to the
  * schema and lets each consumer choose its own grouping.
  */

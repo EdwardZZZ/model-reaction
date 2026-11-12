@@ -193,20 +193,19 @@ function QtyControl() {
 
 // 7e. Real-world controlled text input with touched / blur / error display.
 //     `useDraftField` owns the local draft and standard edit-lifecycle state:
-//       - `meta.error` for the message,
-//       - `meta.validating` to disable the input while the async setter is
-//         in flight (prevents duplicate submissions),
+//       - `writeError?.message ?? meta.error` for the message,
+//       - `meta.validating` to indicate pending validation,
 //       - `meta.dirty` if you want to flag rejected writes.
 function NameFieldWithBlur() {
     const cart = useModel<Cart>();
-    const { draft, setDraft, meta, onBlur, showError } =
+    const { draft, setDraft, meta, writeError, onBlur, showError } =
         useDraftField(cart, 'name');
     return (
         <label style={{ display: 'block' }}>
             <span>Name</span>
             <input
                 value={draft}
-                disabled={meta.validating}
+                aria-busy={meta.validating}
                 onChange={(e) => setDraft(e.target.value)}
                 onBlur={onBlur}
                 aria-invalid={showError}
@@ -216,7 +215,7 @@ function NameFieldWithBlur() {
             />
             {showError ? (
                 <span role="alert" style={{ color: 'red' }}>
-                    {meta.error}
+                    {writeError?.message ?? meta.error}
                 </span>
             ) : null}
         </label>

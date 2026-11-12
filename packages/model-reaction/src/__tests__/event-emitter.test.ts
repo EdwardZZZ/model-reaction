@@ -19,8 +19,8 @@ describe('EventEmitter', () => {
     test('should unsubscribe from events', () => {
         const callback = jest.fn();
 
-        eventEmitter.on('test-event', callback);
-        eventEmitter.off('test-event', callback);
+        const unsubscribe = eventEmitter.on('test-event', callback);
+        unsubscribe();
         eventEmitter.emit('test-event', { data: 'test data' });
 
         expect(callback).not.toHaveBeenCalled();
@@ -38,23 +38,26 @@ describe('EventEmitter', () => {
         expect(callback2).toHaveBeenCalledWith({ data: 'test data' });
     });
 
-    test('should remove all listeners when off called without callback', () => {
+    test('one disposer removes duplicate registrations of the same callback', () => {
         const cb1 = jest.fn();
         const cb2 = jest.fn();
 
+        const unsubscribe = eventEmitter.on('event', cb1);
         eventEmitter.on('event', cb1);
         eventEmitter.on('event', cb2);
 
-        eventEmitter.off('event');
+        unsubscribe();
         eventEmitter.emit('event', 'data');
 
         expect(cb1).not.toHaveBeenCalled();
-        expect(cb2).not.toHaveBeenCalled();
+        expect(cb2).toHaveBeenCalledTimes(1);
     });
 
-    test('should handle off for non-existent event without throwing', () => {
-        expect(() => eventEmitter.off('non-existent')).not.toThrow();
-        expect(() => eventEmitter.off('non-existent', () => {})).not.toThrow();
+    test('a disposer remains safe after clear and repeated calls', () => {
+        const unsubscribe = eventEmitter.on('constructor', () => {});
+        eventEmitter.clear();
+        expect(unsubscribe).not.toThrow();
+        expect(unsubscribe).not.toThrow();
     });
 
     test('clear() should remove every listener for every event', () => {

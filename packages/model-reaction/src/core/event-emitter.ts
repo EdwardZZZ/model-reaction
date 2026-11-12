@@ -3,31 +3,22 @@ export class EventEmitter<
 > {
     private events: Partial<{
         [E in keyof Events]: Array<(data: Events[E]) => void>;
-    }> = {};
+    }> = Object.create(null);
 
     on<E extends keyof Events>(
         event: E,
         callback: (data: Events[E]) => void
-    ): void {
+    ): () => void {
         if (!this.events[event]) {
             this.events[event] = [];
         }
         this.events[event]!.push(callback);
-    }
-
-    off<E extends keyof Events>(
-        event: E,
-        callback?: (data: Events[E]) => void
-    ): void {
-        if (!this.events[event]) return;
-
-        if (callback) {
+        return () => {
+            if (!this.events[event]) return;
             this.events[event] = this.events[event].filter(
                 (cb) => cb !== callback
             );
-        } else {
-            delete this.events[event];
-        }
+        };
     }
 
     emit<E extends keyof Events>(event: E, data: Events[E]): void {
@@ -50,6 +41,6 @@ export class EventEmitter<
     }
 
     clear(): void {
-        this.events = {};
+        this.events = Object.create(null);
     }
 }

@@ -266,7 +266,6 @@ export function createAdDraftModel() {
     },
     {
       debounceReactions: 16,
-      failFast: true,
     },
   );
 }
@@ -463,7 +462,7 @@ function AdDraftOwner() {
 
 function NameField() {
   const model = useModel<AdDraftData>();
-  const { draft, setDraft, onBlur, showError, meta } =
+  const { draft, setDraft, onBlur, showError, meta, writeError } =
     useDraftField(model, 'name');
 
   return (
@@ -475,14 +474,14 @@ function NameField() {
         onBlur={onBlur}
         aria-invalid={showError}
       />
-      {showError && <small role="alert">{meta.error}</small>}
+      {showError && <small role="alert">{writeError?.message ?? meta.error}</small>}
     </label>
   );
 }
 
 function TitleField() {
   const model = useModel<AdDraftData>();
-  const { draft, setDraft, onBlur, showError, meta } =
+  const { draft, setDraft, onBlur, showError, meta, writeError } =
     useDraftField(model, 'title');
 
   return (
@@ -494,7 +493,7 @@ function TitleField() {
         onBlur={onBlur}
         aria-invalid={showError}
       />
-      {showError && <small role="alert">{meta.error}</small>}
+      {showError && <small role="alert">{writeError?.message ?? meta.error}</small>}
     </label>
   );
 }

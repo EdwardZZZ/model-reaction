@@ -30,6 +30,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and the `packages/devtools/` workspace package.
 
 ### Changed
+- **Breaking:** each field now accepts one `reaction`; arrays (including empty
+  arrays) fail at construction before initialization. Unwrap single entries;
+  refactor multiple calculations by business result instead of merging them
+  mechanically.
+- **Breaking:** removed `strictMode` and `failFast`. Unknown keys always emit
+  `field:not-found` and reject the whole batch before preparation. Field rules
+  now evaluate condition/validation in order and stop at the first error.
+- **Breaking:** `setField` shares the transformed candidate snapshot semantics
+  of `setFields`, including its own new value in validator `data`. Move
+  old-value preconditions to the business write entry point. `validateAll`
+  reuses dirty values without applying transforms again.
+- **React migration:** `DraftField` adds required `writeError: Error | null`;
+  `showError` now includes local write exceptions. Display
+  `writeError?.message ?? meta.error`, and update manually constructed bindings.
+- Action candidates and active groups now share one collection; each host has
+  one pending debounced computation. Per-item calculation barriers, version
+  cancellation, and tracking of already started Promises are preserved.
+- Structural field equality, both selector Hook contracts, async validation
+  timeout, and reaction debounce remain unchanged. These unreleased breaking
+  changes require a major release, not a patch release.
 - **Breaking:** moved `ValidationRules`, `Rule`, `formatValidationErrors`, and
   the `ValidationErrorFormatter` type from the root to
   `model-reaction/validation`. The core still executes validators. Browser
@@ -65,6 +85,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now reflects the computed value from the start.
 
 ### Fixed
+- Own field keys such as `toString`, `constructor`, and `__proto__` now work
+  through model storage, defaults, dirty/error state, reactions, and React
+  field selection without reading inherited properties or invoking prototype
+  setters.
+- Draft formatters from abandoned renders no longer affect pending writes;
+  setter and cleanup rejections are handled locally without losing input text.
+- DevTools selection falls back when the chosen instance disappears.
+  `NaN`, infinities, and negative zero retain their identity through JSON
+  transport and render as numbers.
 - Published ESM entry points now use `.mjs`, so Node 18+ loads
   `model-reaction`, `model-reaction/react`, and `model-reaction/devtools`
   through the `import` condition without parsing them as CommonJS.

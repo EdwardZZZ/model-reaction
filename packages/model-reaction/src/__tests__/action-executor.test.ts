@@ -70,10 +70,12 @@ describe('action computation barriers', () => {
     );
 
     test.each([0, 5])(
-        'keeps earlier value commits but cancels actions when the last job skips (debounce: %s)',
+        'keeps in-flight value commits but cancels actions when a later computation skips (debounce: %s)',
         async (debounceReactions) => {
             const earlier = jest.fn();
-            const skipped = jest.fn();
+            const gate = deferred<boolean>();
+            const first = deferred();
+            const last = deferred();
             const model = own(
                 createModel(
                     {
@@ -81,42 +83,52 @@ describe('action computation barriers', () => {
                         target: {
                             type: 'number',
                             default: 0,
-                            reaction: [
-                                { fields: ['source'], computed: () => 1, action: [earlier] },
-                                {
-                                    fields: ['source'],
-                                    computed: () => SKIP_REACTION,
-                                    action: [skipped],
+                            validator: [{
+                                type: 'gate',
+                                message: '',
+                                validate: () => { first.resolve(); return gate.promise; },
+                            }],
+                            reaction: {
+                                fields: ['source'],
+                                computed: ({ source }) => {
+                                    if (source === 1) return 1;
+                                    last.resolve();
+                                    return SKIP_REACTION;
                                 },
-                            ],
+                                action: [earlier],
+                            },
                         },
                     },
                     { debounceReactions }
                 )
             );
             await model.setField('source', 1);
+            await first.promise;
+            await model.setField('source', 2);
+            await last.promise;
+            gate.resolve(true);
             await model.settled();
             expect(model.data.target).toBe(1);
             expect(earlier).not.toHaveBeenCalled();
-            expect(skipped).not.toHaveBeenCalled();
         }
     );
 
-    test.each(['skip', 'throw', 'promise', 'invalid', 'empty', 'absent'] as const)(
+    test.each(['skip', 'throw', 'promise', 'invalid'] as const)(
         'does not restore a replaced candidate when its successor is %s',
         async (outcome) => {
             const barrier = deferred<boolean>();
             const started = deferred();
             const action = jest.fn();
             const latest: Reaction<number> = {
-                fields: ['second'],
-                computed: () => {
+                fields: ['first', 'second'],
+                computed: ({ second }) => {
+                    if (second === undefined) return 1;
                     if (outcome === 'skip') return SKIP_REACTION;
                     if (outcome === 'throw') throw new Error('failed compute');
                     if (outcome === 'promise') return Promise.resolve(2) as unknown as number;
                     return outcome === 'invalid' ? -1 : 2;
                 },
-                ...(outcome === 'empty' ? { action: [] } : {}),
+                action: [action],
             };
             const model = own(
                 createModel({
@@ -141,10 +153,7 @@ describe('action computation barriers', () => {
                         validator: [
                             { type: 'positive', message: 'positive', validate: (v) => v > 0 },
                         ],
-                        reaction: [
-                            { fields: ['first'], computed: () => 1, action: [action] },
-                            latest,
-                        ],
+                        reaction: latest,
                     },
                 })
             );
@@ -159,9 +168,31 @@ describe('action computation barriers', () => {
             await slow;
             await model.settled();
             expect(action).not.toHaveBeenCalled();
-            expect(model.data.target).toBe(outcome === 'empty' || outcome === 'absent' ? 2 : 1);
+            expect(model.data.target).toBe(1);
         }
     );
+
+    test.each([{}, { action: [] }])('invalidates older groups when the new job has no actions: %p', async (config) => {
+        const tasks = new PendingTasks();
+        const onError = jest.fn();
+        const executor = new ActionExecutor(['target'], tasks, onError);
+        const end = tasks.begin();
+        const action = jest.fn();
+        executor.register({
+            field: 'target',
+            reaction: { fields: [], computed: () => 1, action: [action] },
+        }, executor.invalidate('target'));
+        executor.register({
+            field: 'target',
+            reaction: { fields: [], computed: () => 2, ...config },
+        }, executor.invalidate('target'));
+        end();
+        await tasks.settled();
+        expect(action).not.toHaveBeenCalled();
+        expect(onError).not.toHaveBeenCalled();
+        executor.dispose();
+        tasks.dispose();
+    });
 
     test('waits for downstream computation before the next item after an unrelated write', async () => {
         const gate = deferred<boolean>();
@@ -650,10 +681,11 @@ describe('action computation barriers', () => {
                             },
                         },
                     ],
-                    reaction: [
-                        { fields: ['first'], computed: () => 1, action: [action] },
-                        { fields: ['second'], computed: () => SKIP_REACTION },
-                    ],
+                    reaction: {
+                        fields: ['first', 'second'],
+                        computed: ({ second }) => second === undefined ? 1 : SKIP_REACTION,
+                        action: [action],
+                    },
                 },
             })
         );

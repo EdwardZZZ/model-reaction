@@ -31,6 +31,7 @@ export const DEFAULT_TIMELINE_LIMIT = 100;
  */
 export type SerializedValue =
     | { t: 'primitive'; v: string | number | boolean | null }
+    | { t: 'number'; v: 'NaN' | 'Infinity' | '-Infinity' | '-0' }
     | { t: 'undefined' }
     | { t: 'bigint'; v: string }
     | { t: 'date'; v: string }

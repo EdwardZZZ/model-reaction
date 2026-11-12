@@ -94,7 +94,7 @@ function PriceLine() {
 // 4. 默认推荐的文本输入绑定
 function CouponInput() {
     const cart = useModel<Cart>();
-    const { draft, setDraft, meta, onBlur, showError } =
+    const { draft, setDraft, meta, writeError, onBlur, showError } =
         useDraftField(cart, 'coupon');
     return (
         <label>
@@ -102,9 +102,9 @@ function CouponInput() {
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
                 onBlur={onBlur}
-                disabled={meta.validating}
+                aria-busy={meta.validating}
             />
-            {showError && <span style={{ color: 'red' }}>{meta.error}</span>}
+            {showError && <span style={{ color: 'red' }}>{writeError?.message ?? meta.error}</span>}
         </label>
     );
 }
@@ -185,7 +185,7 @@ import { useDraftField } from 'model-reaction/react';
 import type { ModelReturn } from 'model-reaction';
 
 function UsernameInput({ model }: { model: ModelReturn<{ username: string }> }) {
-    const { draft, setDraft, onBlur, showError, meta } = useDraftField(model, 'username');
+    const { draft, setDraft, onBlur, showError, meta, writeError } = useDraftField(model, 'username');
     return (
         <label>
             <input
@@ -195,18 +195,20 @@ function UsernameInput({ model }: { model: ModelReturn<{ username: string }> }) 
                 aria-invalid={showError}
             />
             {meta.validating && <span>validating…</span>}
-            {showError && <span role="alert">{meta.error}</span>}
+            {showError && <span role="alert">{writeError?.message ?? meta.error}</span>}
         </label>
     );
 }
 ```
 
-`useDraftField(model, field, options?)` 返回 `{ draft, setDraft, meta, touched,
+`useDraftField(model, field, options?)` 返回 `{ draft, setDraft, meta, writeError, touched,
 onBlur, showError, committed }`：
 
 - `draft` / `setDraft` —— 本地编辑文本及其更新器；接到输入框的 `value` / `onChange`。
 - `touched` / `onBlur` / `showError` —— 失焦门控的错误展示，免得每个输入框各写一遍。
 - `meta` / `committed` —— 底层 `useModelFieldState` 的元数据与最后提交的值。
+- `writeError: Error | null` —— 当前最新编辑的 setter 或收尾异常，只属于本地编辑会话，
+  与模型校验错误分开。
 - `options.format` —— 回填时已提交/待定值如何渲染成文本（默认 `String`），见下方字段类型契约。
 
 使用 `useModelFieldState` 自定义 touched 策略时，应将状态保存在组件内，
@@ -216,6 +218,19 @@ onBlur, showError, committed }`：
 编辑自身提交成功后会保留原始文本，包括数字 transform 后的 `"2."`、`"002"` 和
 `"3.50"`。外部提交回填 draft 时使用 `format`；若本地校验调用仍在进行，会在这些
 调用完成后同步外部更新。旧调用不会覆盖较新的编辑，也不会影响切换后的 model/字段会话。
+
+`setDraft` 返回 `void`，内部处理 setter 拒绝及其收尾链异常。失败文本继续保留；
+只有当前活动会话的最新编辑可以更新 `writeError`。新编辑或切换 model/字段会清空它。
+抛出的 `Error` 保留实例，其他值转换为包含对应消息的 `Error`。这些异常不会写入
+模型错误或 dirtyData；普通校验失败仍通过 `meta.error` 展示。
+
+`showError` 表示 `touched && (writeError || meta.error)`，消息优先使用
+`writeError?.message ?? meta.error`。手工构造 `DraftField` 的调用方需要补充
+新增必需成员 `writeError`。
+
+`format` 只在 render 提交后发布给异步回调，未提交的 Suspense render 不会污染当前输入。
+单独修改 format 保留当前文本，后续外部提交使用最新已提交 formatter。Hook 兼容 SSR。
+IME composition 仍是独立问题，当前 Hook 尚未协调 composition 事件。
 
 > 需要 committed value 语义或绑定非文本控件时，使用更低层的
 > `useModelFieldState`。可运行的集成示例见 demo 应用

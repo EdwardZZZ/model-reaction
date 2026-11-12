@@ -14,6 +14,13 @@ describe('serializeValue', () => {
         expect(serializeValue(null)).toEqual({ t: 'primitive', v: null });
     });
 
+    test.each([
+        [NaN, 'NaN'], [Infinity, 'Infinity'], [-Infinity, '-Infinity'], [-0, '-0'],
+    ])('preserves %p across JSON transport', (value, label) => {
+        expect(JSON.parse(JSON.stringify(serializeValue(value)))).toEqual({ t: 'number', v: label });
+        expect(JSON.parse(JSON.stringify(serializeValue(0)))).toEqual({ t: 'primitive', v: 0 });
+    });
+
     test('undefined, bigint, symbol, function', () => {
         expect(serializeValue(undefined)).toEqual({ t: 'undefined' });
         expect(serializeValue(10n)).toEqual({ t: 'bigint', v: '10' });

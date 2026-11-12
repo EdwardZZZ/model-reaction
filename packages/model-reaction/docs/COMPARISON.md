@@ -191,9 +191,9 @@ const userModel = createModel<{ name: string }>({
 });
 
 // component
-const { draft, setDraft, meta, onBlur, showError } =
+const { draft, setDraft, meta, writeError, onBlur, showError } =
   useDraftField(userModel, 'name');
-// Bind draft/setDraft to the input; meta.error comes from validators.
+// Bind draft/setDraft; display writeError?.message ?? meta.error under showError.
 ```
 
 Validation logic, error state, and field subscriptions are all built-in,

@@ -82,6 +82,11 @@ console.log(ok, user.data); // true { name: 'John', age: 30 }
 `setField()` 或 `setFields()` 整体替换；原地修改不会被观察，也不会触发校验或
 reactions。
 
+每字段只接受一个 `reaction`。字段内校验按规则顺序执行，首错即停。
+未知写入 key 先发送 `field:not-found` 再 reject，整批不开始处理。
+`setField` 和 `setFields` 的验证器读取经过 transform 的候选快照，包含字段自身的新值。
+字段结构判等保持不变，详见 [破坏性迁移说明](docs/API_CN.md#api-精简迁移unreleased)。
+
 ## 核心概念
 
 ### 反应（Reactions）
@@ -151,7 +156,7 @@ import type { ModelReturn } from 'model-reaction';
 import { useDraftField } from 'model-reaction/react';
 
 function NameInput({ user }: { user: ModelReturn<{ name: string }> }) {
-  const { draft, setDraft, meta, onBlur, showError } = useDraftField(user, 'name');
+  const { draft, setDraft, meta, writeError, onBlur, showError } = useDraftField(user, 'name');
   return (
     <label>
       <input
@@ -161,7 +166,7 @@ function NameInput({ user }: { user: ModelReturn<{ name: string }> }) {
         aria-invalid={showError}
       />
       {meta.validating && <span>校验中...</span>}
-      {showError && <span role="alert">{meta.error}</span>}
+      {showError && <span role="alert">{writeError?.message ?? meta.error}</span>}
     </label>
   );
 }

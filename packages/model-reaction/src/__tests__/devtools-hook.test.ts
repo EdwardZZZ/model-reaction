@@ -16,20 +16,18 @@ function clearHook(): void {
 }
 
 describe('devtools-hook', () => {
-    test('lists every action declaration by reaction and array index without changing calculation edges', () => {
+    test('lists action indices with reactionIndex zero without changing calculation edges', () => {
         function save() {}
         const fields = buildFieldInfo({
             source: { type: 'number' },
-            target: { type: 'number', reaction: [
-                { fields: ['source'], computed: () => 1, action: [save, save] },
-                { fields: ['source'], computed: () => 2, action: [] },
-                { fields: [], computed: () => 3, action: [() => {}] },
-            ] },
+            target: { type: 'number', reaction: {
+                fields: ['source'], computed: () => 1, action: [save, save, () => {}],
+            } },
         });
         expect(fields.target?.actions).toEqual([
             { reactionIndex: 0, actionIndex: 0, name: 'save' },
             { reactionIndex: 0, actionIndex: 1, name: 'save' },
-            { reactionIndex: 2, actionIndex: 0, name: '' },
+            { reactionIndex: 0, actionIndex: 2, name: '' },
         ]);
         expect(fields.source?.actions).toBeUndefined();
         expect(buildDependencyGraph(fields)).toEqual({
@@ -168,16 +166,13 @@ describe('devtools-hook', () => {
             expect(info.full!.reactionDeps).toEqual(['first', 'last']);
         });
 
-        test('dedupes reaction deps across multiple reactions on one field', () => {
+        test('dedupes repeated reaction dependencies', () => {
             const schema: Model = {
                 a: { type: 'number', default: 0 },
                 b: { type: 'number', default: 0 },
                 c: {
                     type: 'number',
-                    reaction: [
-                        { fields: ['a', 'b'], computed: (v) => v.a + v.b },
-                        { fields: ['a'], computed: (v) => v.a },
-                    ],
+                    reaction: { fields: ['a', 'b', 'a'], computed: (v) => v.a + v.b },
                 },
             };
             expect(buildFieldInfo(schema).c!.reactionDeps).toEqual(['a', 'b']);
@@ -228,10 +223,7 @@ describe('devtools-hook', () => {
                 b: { type: 'number', default: 0 },
                 sum: {
                     type: 'number',
-                    reaction: [
-                        { fields: ['a', 'b'], computed: (v) => v.a + v.b },
-                        { fields: ['a'], computed: (v) => v.a },
-                    ],
+                    reaction: { fields: ['a', 'b', 'a'], computed: (v) => v.a + v.b },
                 },
             };
             const edges = buildDependencyGraph(buildFieldInfo(schema)).edges;

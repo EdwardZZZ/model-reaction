@@ -87,6 +87,16 @@ describe('cloneDefault', () => {
     // -------------------------------------------------------------------------
 
     describe('plain objects', () => {
+        test('clones an own __proto__ key without changing the clone prototype', () => {
+            const original = { ['__proto__']: { nested: [1] } };
+            const copy = cloneDefault(original);
+            expect(Object.getPrototypeOf(copy)).toBe(Object.prototype);
+            expect(Object.prototype.hasOwnProperty.call(copy, '__proto__')).toBe(true);
+            expect(copy).toEqual(original);
+            copy.__proto__.nested.push(2);
+            expect(original.__proto__.nested).toEqual([1]);
+        });
+
         test('clones a flat object into a new reference with equal contents', () => {
             const original = { a: 1, b: 'x' };
             const clone = cloneDefault(original);

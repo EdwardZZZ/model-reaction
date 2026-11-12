@@ -4,32 +4,23 @@ import {
     Validator,
 } from '../types';
 
-/**
- * Run all validators of a single field.
- *
- * Supports both sync and async validators, optional cross-field `data`,
- * `condition` predicates, `failFast` short-circuit, and a per-request
- * `isCurrent()` race-guard. Reports errors to the caller without owning or
- * mutating the model's error store.
- */
+/** Sequential first-error validation; the model owns error freshness and storage. */
 export async function validateField(
     options: {
         schema: FieldSchema;
         value: unknown;
         field: string;
-        timeout?: number;
-        failFast?: boolean;
-        data?: Record<string, any>;
-        isCurrent?: () => boolean;
-        onError?: (error: ValidationError) => void;
+        timeout: number;
+        data: Readonly<Record<string, any>>;
+        isCurrent: () => boolean;
+        onError: (error: ValidationError) => void;
     }
 ): Promise<boolean> {
     const {
         schema,
         value,
         field,
-        timeout = 5000,
-        failFast = false,
+        timeout,
         data,
         isCurrent,
         onError,
@@ -37,65 +28,25 @@ export async function validateField(
 
     if (!schema.validator) return true;
 
-    const ctxData = data ?? {};
-    const applicable: Validator[] = [];
-    let conditionFailed = false;
     for (const validator of schema.validator) {
+        if (!isCurrent()) return false;
         try {
-            if (!validator.condition || validator.condition(ctxData)) {
-                applicable.push(validator);
-            }
+            if (validator.condition && !validator.condition(data)) continue;
         } catch (err) {
-            conditionFailed = true;
-            if (!isCurrent || isCurrent()) {
-                const detail = err instanceof Error ? err.message : String(err);
-                reportValidationError(
-                    field,
-                    'condition_error',
-                    `Validation condition failed: ${detail}`,
-                    onError
-                );
-            }
-            if (failFast) return false;
-        }
-    }
-
-    let isValid = true;
-
-    if (failFast) {
-        for (const validator of applicable) {
-            const ok = await runValidator(
-                validator,
-                value,
+            const detail = err instanceof Error ? err.message : String(err);
+            onError({
                 field,
-                timeout,
-                ctxData,
-                isCurrent,
-                onError
-            );
-            if (!ok) {
-                isValid = false;
-                break;
-            }
+                rule: 'condition_error',
+                message: `Validation condition failed: ${detail}`,
+            });
+            return false;
         }
-    } else {
-        const results = await Promise.all(
-            applicable.map((v) =>
-                runValidator(
-                    v,
-                    value,
-                    field,
-                    timeout,
-                    ctxData,
-                    isCurrent,
-                    onError
-                )
-            )
+        const ok = await runValidator(
+            validator, value, field, timeout, data, onError
         );
-        isValid = results.every(Boolean);
+        if (!ok || !isCurrent()) return false;
     }
-
-    return isValid && !conditionFailed;
+    return true;
 }
 
 async function runValidator(
@@ -104,8 +55,7 @@ async function runValidator(
     field: string,
     timeout: number,
     data: Record<string, any>,
-    isCurrent?: () => boolean,
-    onError?: (error: ValidationError) => void
+    onError: (error: ValidationError) => void
 ): Promise<boolean> {
     if (!validator.validate) return true;
 
@@ -117,23 +67,19 @@ async function runValidator(
 
         if (ok) return true;
 
-        if (isCurrent && !isCurrent()) return false;
-        reportValidationError(
+        onError({
             field,
-            validator.type,
-            validator.message,
-            onError
-        );
+            rule: validator.type,
+            message: validator.message,
+        });
         return false;
     } catch (err) {
-        if (isCurrent && !isCurrent()) return false;
         const msg = err instanceof Error ? err.message : String(err);
-        reportValidationError(
+        onError({
             field,
-            'validation_error',
-            `Validation failed: ${msg}`,
-            onError
-        );
+            rule: 'validation_error',
+            message: `Validation failed: ${msg}`,
+        });
         return false;
     }
 }
@@ -158,13 +104,4 @@ async function raceTimeout(
     } finally {
         clearTimeout(timeoutId);
     }
-}
-
-function reportValidationError(
-    field: string,
-    rule: string,
-    message: string,
-    onError?: (error: ValidationError) => void
-): void {
-    onError?.({ field, rule, message });
 }

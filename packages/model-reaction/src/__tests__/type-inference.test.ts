@@ -8,6 +8,26 @@ void devtoolsSignature;
 void rootSignature;
 
 describe('createModel type inference', () => {
+    test('both entries reject removed options and reaction arrays at type level', () => {
+        const invalidDeclarations = () => {
+            for (const create of [createModel, createDevtoolsModel]) {
+                // @ts-expect-error unknown fields always reject; strictMode was removed
+                create({ count: { type: 'number' } }, { strictMode: true });
+                // @ts-expect-error field validation always stops at the first error
+                create({ count: { type: 'number' } }, { failFast: true });
+                create({
+                    count: {
+                        type: 'number',
+                        // @ts-expect-error even a single-element reaction array is rejected
+                        reaction: [{ fields: [], computed: () => 1 }],
+                    },
+                });
+            }
+        };
+        void invalidDeclarations;
+        expect(devtoolsSignature).toBe(createDevtoolsModel);
+    });
+
     test('preserves Reaction interface extension and typed no-argument action arrays', async () => {
         interface NamedReaction extends Reaction<number> { label: string }
         const calls: number[] = [];
@@ -179,9 +199,9 @@ describe('createModel type inference', () => {
                 });
                 createModel({
                     price: { type: 'number', default: 2 },
-                    // @ts-expect-error every reaction array entry is checked
                     total: {
                         type: 'number',
+                        // @ts-expect-error reaction arrays are no longer supported
                         reaction: [doubled, { fields: ['price'], computed: () => true }],
                     },
                 });

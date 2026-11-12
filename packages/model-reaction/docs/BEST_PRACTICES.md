@@ -16,6 +16,8 @@
 - Set `asyncValidationTimeout` to a value appropriate for the backing service.
 - Debounce input before calling `setField` when a remote validator should not
   run on every keystroke.
+- Put cheap checks first: rules within a field run sequentially and stop at the
+  first error. Different fields can validate concurrently.
 
 ## 2. Error Handling
 
@@ -33,6 +35,10 @@ unsubscribe();
 - Read field errors from `validationErrors[field]`.
 - Use `formatValidationErrors(model.validationErrors)` for a submission
   summary.
+- Handle rejected writes separately from `false` validation results. Unknown
+  batch keys reject before any input is prepared; map DTO keys first.
+- With `useDraftField`, display `writeError?.message ?? meta.error` under
+  `showError`; transform exceptions stay local and failed text is preserved.
 
 ## 3. Complex Business Rules
 
@@ -40,13 +46,16 @@ unsubscribe();
 - Keep `computed` functions synchronous and pure; never return a Promise. Put
   asynchronous work and other side effects in `action`.
 - Declare every value read by `computed` in `reaction.fields`.
-- Prefer one reaction with all required dependencies over competing reactions
-  that write the same target.
+- Each field accepts one reaction listing all dependencies for its result.
+  Split independent results into separate fields.
 
 ### Conditional Validation
 - Import rule builders and formatting helpers from `model-reaction/validation`.
 - Use `Rule.when(...)` for conditional rules.
 - Read other fields through the validator's `data` parameter.
+- Direct-write snapshots contain transformed candidates, including the current
+  field. Check old-value preconditions at the business write entry point.
+- `validateAll()` reuses committed/dirty values without repeating transforms.
 - Extract shared domain checks into named rules or validation services.
 
 ## 4. Testing Strategy

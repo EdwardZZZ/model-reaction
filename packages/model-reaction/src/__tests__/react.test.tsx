@@ -1382,6 +1382,190 @@ describe('useDraftField', () => {
             },
         });
 
+    it.each([new Error('cannot transform'), 'cannot transform', null])(
+        'keeps rejected text and exposes a local writeError for %p',
+        async (failure) => {
+            const model = createModel({
+                name: {
+                    type: 'string', default: 'Ada',
+                    transform: (value) => {
+                        if (value === 'bad') throw failure;
+                        return value;
+                    },
+                },
+            });
+            const { result, unmount } = renderHook(() => useDraftField(model, 'name'));
+            await act(async () => { result.current.setDraft('bad'); });
+            expect(result.current.draft).toBe('bad');
+            expect(result.current.writeError?.message).toBe(String(failure instanceof Error ? failure.message : failure));
+            if (failure instanceof Error) expect(result.current.writeError).toBe(failure);
+            expect(result.current.showError).toBe(false);
+            expect(result.current.meta.validating).toBe(false);
+            expect(model.getDirtyData()).toEqual({});
+            expect(model.validationErrors).toEqual({});
+            expect(model.getField('name')).toBe('Ada');
+            act(() => { result.current.onBlur(); });
+            expect(result.current.showError).toBe(true);
+            act(() => { result.current.setDraft('Grace'); });
+            expect(result.current.writeError).toBeNull();
+            await act(async () => { await model.settled(); });
+            expect(result.current.draft).toBe('Grace');
+            unmount();
+            model.dispose();
+        }
+    );
+
+    it('ignores a rejected older edit after a newer edit succeeds', async () => {
+        const model = makeSignup();
+        let reject!: (error: Error) => void;
+        jest.spyOn(model, 'setField').mockImplementationOnce(() =>
+            new Promise<boolean>((_resolve, fail) => { reject = fail; })
+        );
+        const { result, unmount } = renderHook(() => useDraftField(model, 'username'));
+        act(() => { result.current.setDraft('old'); });
+        await act(async () => { result.current.setDraft('new'); });
+        await act(async () => { reject(new Error('old failure')); });
+        expect(result.current.writeError).toBeNull();
+        expect(result.current.draft).toBe('new');
+        expect(result.current.meta.validating).toBe(false);
+        unmount();
+        model.dispose();
+    });
+
+    it.each(['field', 'model', 'unmount'] as const)(
+        'clears write errors and ignores old rejections on %s change',
+        async (change) => {
+            const model = makeSignup();
+            const other = makeSignup();
+            let reject!: (error: Error) => void;
+            const setter = jest.spyOn(model, 'setField')
+                .mockRejectedValueOnce(new Error('first failure'));
+            const { result, rerender, unmount } = renderHook(
+                ({ target, field }: { target: ModelReturn<Signup>; field: keyof Signup }) =>
+                    useDraftField(target, field),
+                { initialProps: { target: model, field: 'username' as keyof Signup }, wrapper: React.StrictMode }
+            );
+            await act(async () => { result.current.setDraft('failed'); });
+            expect(result.current.writeError?.message).toBe('first failure');
+            if (change === 'field') rerender({ target: model, field: 'priceCents' });
+            if (change === 'model') rerender({ target: other, field: 'username' });
+            if (change !== 'unmount') expect(result.current.writeError).toBeNull();
+            rerender({ target: model, field: 'username' });
+            setter.mockImplementationOnce(() =>
+                new Promise<boolean>((_resolve, fail) => { reject = fail; })
+            );
+            act(() => { result.current.setDraft('pending'); });
+            if (change === 'field') rerender({ target: model, field: 'priceCents' });
+            if (change === 'model') rerender({ target: other, field: 'username' });
+            if (change === 'unmount') unmount();
+            await act(async () => { reject(new Error('late failure')); });
+            expect(result.current.writeError).toBeNull();
+            if (change !== 'unmount') unmount();
+            model.dispose();
+            other.dispose();
+        }
+    );
+
+    it('uses the committed formatter when a suspended render overlaps pending edit cleanup', async () => {
+        let release!: (valid: boolean) => void;
+        const model = createModel({
+            amount: {
+                type: 'number', default: 0, transform: Number,
+                validator: [{
+                    type: 'controlled', message: 'invalid',
+                    validate: (value) => value === 2
+                        ? new Promise<boolean>((resolve) => { release = resolve; })
+                        : true,
+                }],
+            },
+        });
+        const suspended = new Promise<void>(() => {});
+        let setPrefix!: (prefix: string) => void;
+        let edit!: (text: string) => void;
+        let attempted = false;
+        function Input({ prefix }: { prefix: string }) {
+            const binding = useDraftField(model, 'amount', { format: (value) => `${prefix}:${value}` });
+            if (prefix === 'abandoned') {
+                attempted = true;
+                throw suspended;
+            }
+            edit = binding.setDraft;
+            return <input readOnly value={binding.draft} />;
+        }
+        function App() {
+            const [prefix, update] = useState('committed');
+            setPrefix = update;
+            return <React.Suspense fallback="loading"><Input prefix={prefix} /></React.Suspense>;
+        }
+        const { getByRole, unmount } = render(<App />);
+        act(() => { edit('2.'); });
+        await act(async () => { React.startTransition(() => setPrefix('abandoned')); });
+        expect(attempted).toBe(true);
+        await act(async () => { await model.setField('amount', 42); });
+        await act(async () => { release(true); await model.settled(); });
+        expect((getByRole('textbox') as HTMLInputElement).value).toBe('committed:42');
+        unmount();
+        model.dispose();
+    });
+
+    it('publishes a new format before reconciling a simultaneous outside commit', async () => {
+        const model = makeSignup();
+        const { result, rerender, unmount } = renderHook(
+            ({ prefix }) => useDraftField(model, 'username', { format: (value) => `${prefix}:${value}` }),
+            { initialProps: { prefix: 'old' } }
+        );
+        await act(async () => {
+            const write = model.setField('username', 'Grace');
+            rerender({ prefix: 'new' });
+            await write;
+        });
+        expect(result.current.draft).toBe('new:Grace');
+        unmount();
+        model.dispose();
+    });
+
+    it('handles errors thrown by pending-write reconciliation without losing the text', async () => {
+        const model = makeSignup();
+        let reject!: (error: Error) => void;
+        jest.spyOn(model, 'setField').mockImplementationOnce(() =>
+            new Promise<boolean>((_resolve, fail) => { reject = fail; })
+        );
+        const failure = new Error('cannot format');
+        const { result, unmount } = renderHook(() => useDraftField(model, 'username', {
+            format: (value) => {
+                if (value === 'Grace') throw failure;
+                return value;
+            },
+        }));
+        act(() => { result.current.setDraft('pending'); });
+        await act(async () => { await model.setField('username', 'Grace'); });
+        await act(async () => { reject(new Error('write failed')); });
+        expect(result.current.draft).toBe('pending');
+        expect(result.current.writeError).toBe(failure);
+        expect(result.current.meta.validating).toBe(false);
+        unmount();
+        model.dispose();
+    });
+
+    it.each(['toString', 'constructor', '__proto__'])('binds an own %s field safely', async (field) => {
+        const model = createModel<Record<string, string>>(Object.fromEntries([
+            [field, { type: 'string', default: 'initial', validator: [ValidationRules.minLength(3)] }],
+        ]));
+        const { result, unmount } = renderHook(() => ({
+            input: useDraftField(model, field),
+            fields: useModelFields(model, [field]),
+        }));
+        expect(result.current.input.draft).toBe('initial');
+        expect(result.current.input.meta.error).toBeNull();
+        expect(Object.keys(result.current.fields)).toEqual([field]);
+        expect(result.current.fields[field]).toBe('initial');
+        await act(async () => { result.current.input.setDraft('x'); });
+        expect(result.current.input.meta.dirty).toBe(true);
+        expect(result.current.input.draft).toBe('x');
+        unmount();
+        model.dispose();
+    });
+
     it('seeds the draft from the committed value on mount', () => {
         const model = makeSignup();
         const { result } = renderHook(() => useDraftField(model, 'username'));

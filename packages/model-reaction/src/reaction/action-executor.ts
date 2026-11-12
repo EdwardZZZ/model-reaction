@@ -9,10 +9,9 @@ interface ActionGroup {
     endTask: () => void;
 }
 
-/** Candidate handoff and per-item barriers; see docs/DESIGN_EFFECT_DEPS_CN.md §4–5. */
+/** Action group lifecycle and per-item barriers; see docs/DESIGN_SIMPLIFICATION_CN.md §6. */
 export class ActionExecutor {
     private fieldActionVersion = new Map<string, number>();
-    private pendingActions = new Map<string, ActionGroup>();
     private groups = new Set<ActionGroup>();
     private fieldOrder: Map<string, number>;
     private unsubscribe: () => void;
@@ -25,14 +24,12 @@ export class ActionExecutor {
         private readonly onError: (field: string, error: unknown) => void
     ) {
         this.fieldOrder = new Map(fields.map((field, index) => [field, index]));
-        this.unsubscribe = tasks.onComputeIdle(() => this.handoff());
+        this.unsubscribe = tasks.onComputeIdle(() => this.scheduleFlush());
     }
 
     invalidate(field: string): number {
         const version = (this.fieldActionVersion.get(field) ?? 0) + 1;
         this.fieldActionVersion.set(field, version);
-        const pending = this.pendingActions.get(field);
-        if (pending) this.finish(pending);
         for (const group of this.groups) {
             if (group.job.field === field && !group.running) this.finish(group);
         }
@@ -42,7 +39,6 @@ export class ActionExecutor {
     register(job: ReactionJob, version: number): void {
         if (this.disposed || this.fieldActionVersion.get(job.field) !== version) return;
         if (!job.reaction.action?.length) return;
-        const previous = this.pendingActions.get(job.field);
         const group: ActionGroup = {
             job,
             version,
@@ -50,17 +46,8 @@ export class ActionExecutor {
             running: false,
             endTask: this.tasks.begin('action'),
         };
-        if (previous) this.finish(previous);
-        this.pendingActions.set(job.field, group);
-        if (this.tasks.isComputeIdle) this.handoff();
-    }
-
-    private handoff(): void {
-        if (this.disposed || !this.tasks.isComputeIdle) return;
-        const candidates = this.pendingActions;
-        this.pendingActions = new Map();
-        for (const group of candidates.values()) this.groups.add(group);
-        this.scheduleFlush();
+        this.groups.add(group);
+        if (this.tasks.isComputeIdle) this.scheduleFlush();
     }
 
     private scheduleFlush(): void {
@@ -120,9 +107,6 @@ export class ActionExecutor {
     }
 
     private finish(group: ActionGroup): void {
-        if (this.pendingActions.get(group.job.field) === group) {
-            this.pendingActions.delete(group.job.field);
-        }
         this.groups.delete(group);
         group.endTask();
     }
@@ -131,7 +115,6 @@ export class ActionExecutor {
         if (this.disposed) return;
         this.disposed = true;
         this.unsubscribe();
-        for (const group of this.pendingActions.values()) this.finish(group);
         for (const group of this.groups) this.finish(group);
         this.fieldActionVersion.clear();
     }

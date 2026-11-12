@@ -132,9 +132,7 @@ describe('ModelManager - Basic Operations', () => {
         model.on('field:not-found', errorCallback);
 
         // @ts-expect-error - runtime check for non-existent field
-        const result = await model.setField('nonexistentField', 'value');
-
-        expect(result).toBe(false);
+        await expect(model.setField('nonexistentField', 'value')).rejects.toThrow('nonexistentField');
         expect(errorCallback).toHaveBeenCalled();
         expect(errorCallback.mock.calls[0][0].code).toBe('field_not_found');
         expect(errorCallback.mock.calls[0][0].field).toBe('nonexistentField');
@@ -149,10 +147,9 @@ describe('ModelManager - Basic Operations', () => {
         expect(snapshot.age).toBe(18);
     });
 
-    test('strictMode causes setField on unknown field to throw', async () => {
+    test('unknown fields reject without an option', async () => {
         const strictModel = createModel<{ a: number }>(
-            { a: { type: 'number', default: 0 } },
-            { strictMode: true }
+            { a: { type: 'number', default: 0 } }
         );
 
         await expect(
@@ -306,7 +303,10 @@ describe('ModelManager - Batch Operations (setFields)', () => {
         }
     );
 
-    test('strictMode waits for valid fields and triggers their reactions before rejecting', async () => {
+    test('rejects unknown batch keys before transform or validation starts', async () => {
+        const transform = jest.fn((value) => value);
+        const validate = jest.fn(async () => true);
+        const read = jest.fn(() => 2);
         interface Schema {
             source: number;
             derived: number;
@@ -316,16 +316,12 @@ describe('ModelManager - Batch Operations (setFields)', () => {
                 source: {
                     type: 'number',
                     default: 1,
+                    transform,
                     validator: [
                         {
                             type: 'delayed',
                             message: 'Source is invalid',
-                            validate: async () => {
-                                await new Promise((resolve) =>
-                                    setTimeout(resolve, 10)
-                                );
-                                return true;
-                            },
+                            validate,
                         },
                     ],
                 },
@@ -337,22 +333,24 @@ describe('ModelManager - Batch Operations (setFields)', () => {
                         computed: ({ source }) => source * 2,
                     },
                 },
-            },
-            { strictMode: true }
+            }
         );
         await strictModel.settled();
 
         await expect(
             strictModel.setFields({
-                source: 2,
+                get source() { return read(); },
                 // @ts-expect-error intentional unknown field
                 ghost: 1,
             })
         ).rejects.toThrow(/does not exist in the model schema/);
         await strictModel.settled();
 
-        expect(strictModel.getField('source')).toBe(2);
-        expect(strictModel.getField('derived')).toBe(4);
+        expect(strictModel.getField('source')).toBe(1);
+        expect(strictModel.getField('derived')).toBe(2);
+        expect(transform).not.toHaveBeenCalled();
+        expect(validate).not.toHaveBeenCalled();
+        expect(read).not.toHaveBeenCalled();
         strictModel.dispose();
     });
 
@@ -385,6 +383,108 @@ describe('ModelManager - Batch Operations (setFields)', () => {
             ]);
             expect(local.data).toEqual({ source: 2, matching: 2 });
         } finally {
+            local.dispose();
+        }
+    });
+
+    test.each(['setField', 'setFields'] as const)(
+        '%s supplies its transformed candidate to both condition and validate',
+        async (operation) => {
+            const contexts: Readonly<Record<string, any>>[] = [];
+            const transform = jest.fn((value: number) => value + 1);
+            const local = createModel({
+                amount: {
+                    type: 'number',
+                    default: 0,
+                    transform,
+                    validator: [{
+                        type: 'candidate',
+                        message: 'candidate mismatch',
+                        condition: (data) => { contexts.push(data); return true; },
+                        validate: (value, data) => { contexts.push(data!); return value === data?.amount; },
+                    }],
+                },
+            });
+            try {
+                const result = operation === 'setField'
+                    ? await local.setField('amount', 4)
+                    : await local.setFields({ amount: 4 });
+                expect(result).toBe(true);
+                expect(transform).toHaveBeenCalledTimes(1);
+                expect(contexts).toEqual([{ amount: 5 }, { amount: 5 }]);
+                expect(contexts[0]).toBe(contexts[1]);
+                expect(Object.isFrozen(contexts[0])).toBe(true);
+                expect(local.data.amount).toBe(5);
+            } finally {
+                local.dispose();
+            }
+        }
+    );
+
+    test('validateAll reuses transformed dirty values without transforming again', async () => {
+        let allowed = false;
+        const transform = jest.fn((value: number) => value + 1);
+        const local = createModel({
+            amount: {
+                type: 'number',
+                default: 0,
+                transform,
+                validator: [{ type: 'allowed', message: 'not yet', validate: () => allowed }],
+            },
+        });
+        try {
+            expect(await local.setField('amount', 4)).toBe(false);
+            expect(local.getDirtyData()).toEqual({ amount: 5 });
+            allowed = true;
+            expect(await local.validateAll()).toBe(true);
+            expect(transform).toHaveBeenCalledTimes(1);
+            expect(local.data.amount).toBe(5);
+            expect(local.getDirtyData()).toEqual({});
+        } finally {
+            local.dispose();
+        }
+    });
+
+    test('a rejected validator setup drains sibling work before releasing the batch', async () => {
+        let release!: (valid: boolean) => void;
+        const gate = new Promise<boolean>((resolve) => { release = resolve; });
+        const failure = new Error('unavailable rules');
+        const action = jest.fn();
+        const local = createModel({
+            broken: {
+                type: 'number',
+                get validator(): never { throw failure; },
+            },
+            source: {
+                type: 'number',
+                validator: [{ type: 'gate', message: '', validate: () => gate }],
+            },
+            derived: {
+                type: 'number',
+                reaction: { fields: ['source'], computed: ({ source }) => source * 2, action: [action] },
+            },
+        });
+        let finished = false;
+        const batch = local.setFields({ broken: 1, source: 2 }).catch((error: unknown) => {
+            finished = true;
+            return error;
+        });
+        let idle = false;
+        const settled = local.settled().then(() => { idle = true; });
+        try {
+            await Promise.resolve();
+            await Promise.resolve();
+            expect(finished).toBe(false);
+            expect(idle).toBe(false);
+            release(true);
+            expect(await batch).toBe(failure);
+            await settled;
+            expect(local.data.source).toBe(2);
+            expect(local.data.derived).toBe(4);
+            expect(action).toHaveBeenCalledTimes(1);
+        } finally {
+            release(true);
+            await batch;
             local.dispose();
         }
     });
@@ -876,7 +976,7 @@ describe('ModelManager - Error event routing', () => {
         );
 
         // @ts-expect-error - testing non-existent field
-        await model.setField('missing', 'x');
+        await expect(model.setField('missing', 'x')).rejects.toThrow('missing');
         expect(fieldNotFoundCb).toHaveBeenCalledWith(
             expect.objectContaining({
                 code: 'field_not_found',
@@ -894,7 +994,7 @@ describe('ModelManager - Error event routing', () => {
         });
         model.on('field:not-found', cb);
         // @ts-expect-error - runtime check for non-existent field
-        await model.setField('nonexistentField', 'value');
+        await expect(model.setField('nonexistentField', 'value')).rejects.toThrow('nonexistentField');
         expect(cb).toHaveBeenCalled();
         expect(cb.mock.calls[0][0].code).toBe('field_not_found');
         expect(cb.mock.calls[0][0].field).toBe('nonexistentField');
@@ -1222,7 +1322,8 @@ describe('ModelManager - dispose / settled lifecycle', () => {
         ['setFields', 5],
         ['validateAll', 0],
         ['validateAll', 5],
-        ['strict setFields', 0],
+        ['setField', 0],
+        ['setField', 5],
     ] as const)(
         'settled covers the whole %s batch and its actions (debounce %i)',
         async (operation, debounceReactions) => {
@@ -1266,7 +1367,7 @@ describe('ModelManager - dispose / settled lifecycle', () => {
                         }],
                     },
                 },
-            }, { debounceReactions, strictMode: true });
+            }, { debounceReactions });
             await model.settled();
 
             if (operation === 'validateAll') {
@@ -1277,9 +1378,8 @@ describe('ModelManager - dispose / settled lifecycle', () => {
 
             const batch = operation === 'validateAll'
                 ? model.validateAll()
-                : operation === 'strict setFields'
-                    // @ts-expect-error exercise partial success with an unknown field
-                    ? model.setFields({ source: 1, missing: 1 })
+                : operation === 'setField'
+                    ? model.setField('source', 1)
                     : model.setFields({ source: 1 });
             // Observe the rejection immediately, even while waiting for actions.
             const batchResult = batch.then(
@@ -1299,11 +1399,7 @@ describe('ModelManager - dispose / settled lifecycle', () => {
                 expect(await settled).toEqual({
                     source: 1, derived: 2, final: 3,
                 });
-                if (operation === 'strict setFields') {
-                    expect(await batchResult).toBeInstanceOf(Error);
-                } else {
-                    expect(await batchResult).toBe(true);
-                }
+                expect(await batchResult).toBe(true);
             } finally {
                 releaseAction();
                 await batchResult;
@@ -1425,7 +1521,7 @@ describe('ModelManager - validation error ownership', () => {
         }
     });
 
-    test('stores each error before notifying and isolates event payloads from snapshots', async () => {
+    test('stores the first error before notifying and isolates event payloads from snapshots', async () => {
         const local = createModel({
             field: {
                 type: 'string',
@@ -1452,16 +1548,14 @@ describe('ModelManager - validation error ownership', () => {
         try {
             expect(await local.setField('field', 'invalid')).toBe(false);
             expect(initial).toEqual({});
-            expect(snapshots.map((snapshot) => snapshot.field?.length)).toEqual([1, 2, 3]);
+            expect(snapshots.map((snapshot) => snapshot.field?.length)).toEqual([1]);
             expect(snapshots[0]?.field?.[0]?.message).toBe(
                 'Validation condition failed: condition boom'
             );
             expect(local.validationErrors.field?.map((error) => error.message)).toEqual([
                 'Validation condition failed: condition boom',
-                'first failure',
-                'second failure',
             ]);
-            expect(local.validationErrors).toBe(snapshots[2]);
+            expect(local.validationErrors).toBe(snapshots[0]);
         } finally {
             local.dispose();
         }
@@ -1707,4 +1801,73 @@ describe('createModel - mutable default isolation', () => {
         expect(m.getField('createdAt')).toBe(shared);
         m.dispose();
     });
+});
+
+describe('ModelManager - own field keys', () => {
+    test.each(['toString', 'constructor', '__proto__'])(
+        'preserves %s through validation, dirty storage, clearing and reactions',
+        async (field) => {
+            const schema: Model = {
+                [field]: {
+                    type: 'number',
+                    default: 1,
+                    transform: Number,
+                    validator: [{
+                        type: 'positive',
+                        message: 'positive',
+                        validate: (value, data) => value > 0 && data?.[field] === value,
+                    }],
+                },
+                derived: {
+                    type: 'number',
+                    reaction: { fields: [field], computed: (data) => data[field] * 2 },
+                },
+            };
+            const local = createModel(schema);
+            const completion = jest.fn();
+            local.on(ModelEvents.FIELD_VALIDATION_COMPLETE, completion);
+            try {
+                await local.settled();
+                expect(await local.validateAll()).toBe(true);
+                expect(local.getField(field)).toBe(1);
+                expect(local.getDirtyData()).toEqual({});
+                expect(await local.setField(field, '-1')).toBe(false);
+                expect(local.getDirtyData()).toEqual({ [field]: -1 });
+                expect(local.validationErrors[field]?.[0]?.rule).toBe('positive');
+                expect(completion).toHaveBeenLastCalledWith({ field, isValid: false, dirty: true });
+                expect(await local.validateAll()).toBe(false);
+                local.clearDirtyData();
+                expect(local.getDirtyData()).toEqual({});
+                expect(await local.setFields({ [field]: 2 })).toBe(true);
+                await local.settled();
+                expect(local.data).toEqual({ [field]: 2, derived: 4 });
+                expect(Object.getPrototypeOf(local.data)).toBe(Object.prototype);
+                expect(Object.isFrozen(local.data)).toBe(true);
+                expect(local.validationErrors[field]).toEqual([]);
+            } finally {
+                local.dispose();
+            }
+        }
+    );
+
+    test.each(['toString', 'constructor', '__proto__'])(
+        'rejects inherited schema key %s before touching a valid sibling',
+        async (field) => {
+            const schema: Model = Object.create({ [field]: { type: 'number', default: 1 } });
+            schema.source = { type: 'number', default: 0 };
+            const local = createModel(schema);
+            const errors = jest.fn();
+            local.on(ModelEvents.FIELD_NOT_FOUND, errors);
+            try {
+                expect(local.getField(field)).toBeUndefined();
+                await expect(local.setFields({ source: 2, [field]: 3, missing: 4 })).rejects.toThrow(field);
+                expect(local.data).toEqual({ source: 0 });
+                expect(errors).toHaveBeenCalledTimes(1);
+                expect(errors).toHaveBeenCalledWith(expect.objectContaining({ field }));
+                await local.settled();
+            } finally {
+                local.dispose();
+            }
+        }
+    );
 });

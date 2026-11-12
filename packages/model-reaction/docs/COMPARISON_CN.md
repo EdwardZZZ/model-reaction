@@ -165,9 +165,9 @@ const userModel = createModel<{ name: string }>({
 });
 
 // 组件
-const { draft, setDraft, meta, onBlur, showError } =
+const { draft, setDraft, meta, writeError, onBlur, showError } =
   useDraftField(userModel, 'name');
-// 输入框绑定 draft/setDraft；meta.error 自动来源于 validator
+// 输入框绑定 draft/setDraft；showError 时显示 writeError?.message ?? meta.error
 ```
 
 校验逻辑、错误状态、字段订阅都内置，且类型全自动。

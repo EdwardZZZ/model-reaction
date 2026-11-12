@@ -87,6 +87,12 @@ object, array, or mutable built-in field value such as `Date`, replace the whole
 value with `setField()` or `setFields()`: mutating it in place is not observed
 and does not run validation or reactions.
 
+Each field accepts one `reaction`. Validation follows rule order and stops at
+the first error. Unknown write keys emit `field:not-found` and reject before
+the batch starts. `setField` and `setFields` validators read transformed
+candidates, including their own field. Structural field equality is unchanged.
+See the [breaking migration guide](docs/API.md#api-simplification-migration-unreleased).
+
 ## Core Concepts
 
 ### Reactions
@@ -165,7 +171,7 @@ import type { ModelReturn } from 'model-reaction';
 import { useDraftField } from 'model-reaction/react';
 
 function NameInput({ user }: { user: ModelReturn<{ name: string }> }) {
-  const { draft, setDraft, meta, onBlur, showError } = useDraftField(user, 'name');
+  const { draft, setDraft, meta, writeError, onBlur, showError } = useDraftField(user, 'name');
   return (
     <label>
       <input
@@ -175,7 +181,7 @@ function NameInput({ user }: { user: ModelReturn<{ name: string }> }) {
         aria-invalid={showError}
       />
       {meta.validating && <span>Validating...</span>}
-      {showError && <span role="alert">{meta.error}</span>}
+      {showError && <span role="alert">{writeError?.message ?? meta.error}</span>}
     </label>
   );
 }

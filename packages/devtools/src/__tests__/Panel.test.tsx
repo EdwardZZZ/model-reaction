@@ -5,7 +5,7 @@
  * with scripted AgentMessages, so these exercise the full reducer → render
  * path without any chrome APIs.
  */
-import { act, render } from '@testing-library/react';
+import { act, fireEvent, render } from '@testing-library/react';
 import { Panel } from '../panel/Panel';
 import { DependencyGraphView } from '../panel/DependencyGraphView';
 import {
@@ -14,6 +14,7 @@ import {
     type InstanceState,
 } from '../protocol';
 import type { PanelPort } from '../panel-port';
+import { serializeSnapshot } from '../serialize';
 
 function instance(id: number, overrides: Partial<InstanceState> = {}): InstanceState {
     return {
@@ -61,6 +62,42 @@ function makeFakeConnect() {
 }
 
 describe('Panel', () => {
+    test('falls back after a user-selected instance disappears or init replaces it', () => {
+        const { connect, emit, port } = makeFakeConnect();
+        const { container, getByRole } = render(<Panel connect={connect} />);
+        act(() => {
+            emit({ source: AGENT_SOURCE, kind: 'init', instances: [instance(1), instance(2), instance(3)] });
+        });
+        fireEvent.change(getByRole('combobox'), { target: { value: '2' } });
+        expect((getByRole('combobox') as HTMLSelectElement).value).toBe('2');
+        expect(port.send).not.toHaveBeenCalled();
+        act(() => { emit({ source: AGENT_SOURCE, kind: 'instance-removed', id: 2 }); });
+        expect((getByRole('combobox') as HTMLSelectElement).value).toBe('1');
+        expect(container.textContent).toContain('Ada Lovelace');
+        fireEvent.change(getByRole('combobox'), { target: { value: '3' } });
+        act(() => { emit({ source: AGENT_SOURCE, kind: 'init', instances: [instance(4)] }); });
+        expect(container.textContent).toContain('Ada Lovelace');
+        expect(container.textContent).not.toContain('No model detected');
+        act(() => { emit({ source: AGENT_SOURCE, kind: 'instance-removed', id: 4 }); });
+        expect(container.textContent).toContain('No model detected');
+    });
+
+    test('renders exceptional numbers after JSON transport without turning them into null or zero', () => {
+        const { connect, emit } = makeFakeConnect();
+        const { container } = render(<Panel connect={connect} />);
+        const snapshot = serializeSnapshot({
+            data: { nan: NaN, positive: Infinity, negative: -Infinity, zero: -0 },
+            dirtyData: {}, errors: {},
+        });
+        act(() => {
+            emit(JSON.parse(JSON.stringify({
+                source: AGENT_SOURCE, kind: 'init', instances: [instance(1, { snapshot })],
+            })));
+        });
+        expect(Array.from(container.querySelectorAll('.mrd-val-number'), (node) => node.textContent))
+            .toEqual(['NaN', 'Infinity', '-Infinity', '-0']);
+    });
+
     test('renders action nodes and dashed edges inside their field without adding calculation nodes', () => {
         const state = instance(1);
         state.fields.full!.actions = [

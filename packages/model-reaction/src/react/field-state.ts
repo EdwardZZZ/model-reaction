@@ -113,8 +113,10 @@ export function useModelFieldState<
         } | null = null;
 
         return () => {
-            const errors =
-                model.validationErrors[field as string] ?? EMPTY_ERRORS;
+            const errorMap = model.validationErrors;
+            const errors = Object.prototype.hasOwnProperty.call(errorMap, field)
+                ? errorMap[field as string]!
+                : EMPTY_ERRORS;
             const dirty = Object.prototype.hasOwnProperty.call(
                 model.getDirtyData(),
                 field

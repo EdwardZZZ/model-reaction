@@ -20,7 +20,7 @@
  *     DevTools agent's concern, not the library's.
  */
 import type { FieldSchema, Model, ValidationError } from '../types';
-import { eachReaction, eachReactionEdge } from '../reaction/reaction-graph';
+import { eachReactionEdge } from '../reaction/reaction-graph';
 
 /** The `globalThis` key the DevTools front-end installs its hook under. */
 export const DEVTOOLS_HOOK_KEY = '__MODEL_REACTION_DEVTOOLS_HOOK__';
@@ -33,7 +33,7 @@ export interface DevtoolsFieldInfo {
     hasDefault: boolean;
     /** Number of validators attached to the field. */
     validatorCount: number;
-    /** Fields this field's reaction(s) read as dependencies (deduped). */
+    /** Fields this field's reaction reads as dependencies (deduped). */
     reactionDeps: string[];
     /** Declared side effects, without execution state; absent when empty. */
     actions?: Array<{ reactionIndex: number; actionIndex: number; name: string }>;
@@ -162,7 +162,7 @@ export function attachToDevtools(
  * interpret `reaction.fields` identically.
  */
 export function buildFieldInfo(schema: Model): Record<string, DevtoolsFieldInfo> {
-    const out: Record<string, DevtoolsFieldInfo> = {};
+    const out: Record<string, DevtoolsFieldInfo> = Object.create(null);
     // Deduped dependency sets per computed field, filled by the shared walk.
     const deps = new Map<string, Set<string>>();
     eachReactionEdge(schema, (computedField, dependencyField) => {
@@ -177,17 +177,15 @@ export function buildFieldInfo(schema: Model): Record<string, DevtoolsFieldInfo>
             validatorCount: field.validator?.length ?? 0,
             reactionDeps: [...(deps.get(name) ?? [])],
         };
-    }
-    eachReaction(schema, (field, reaction, reactionIndex) => {
-        reaction.action?.forEach((action, actionIndex) => {
-            (out[field]!.actions ??= []).push({
-                reactionIndex,
+        if (field.reaction?.action?.length) {
+            out[name]!.actions = field.reaction.action.map((action, actionIndex) => ({
+                reactionIndex: 0,
                 actionIndex,
                 name: action.name,
-            });
-        });
-    });
-    return out;
+            }));
+        }
+    }
+    return { ...out };
 }
 
 /**

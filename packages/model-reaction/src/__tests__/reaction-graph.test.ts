@@ -61,15 +61,12 @@ describe('eachReactionEdge', () => {
             b: { type: 'number', default: 0 },
             sum: {
                 type: 'number',
-                reaction: [
-                    { fields: ['a', 'b'], computed: (v) => v.a + v.b },
-                    { fields: ['a'], computed: (v) => v.a },
-                ],
+                reaction: { fields: ['a', 'b', 'a'], computed: (v) => v.a + v.b },
             },
         };
         const visited: Array<[string, string]> = [];
         eachReactionEdge(schema, (computed, dep) => visited.push([computed, dep]));
-        // a appears twice (once per reaction), b once — raw, not deduped.
+        // Repeated dependencies remain raw here; consumers dedupe them.
         expect(visited).toEqual([
             ['sum', 'a'],
             ['sum', 'b'],
@@ -128,16 +125,13 @@ describe('dependency edges: primitive == runtime == graph', () => {
             },
         },
         {
-            name: 'multiple reactions on one field with a repeated dep',
+            name: 'one reaction with a repeated dep',
             schema: {
                 a: { type: 'number', default: 0 },
                 b: { type: 'number', default: 0 },
                 sum: {
                     type: 'number',
-                    reaction: [
-                        { fields: ['a', 'b'], computed: (v) => v.a + v.b },
-                        { fields: ['a'], computed: (v) => v.a },
-                    ],
+                    reaction: { fields: ['a', 'b', 'a'], computed: (v) => v.a + v.b },
                 },
             },
         },

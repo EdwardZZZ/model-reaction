@@ -32,7 +32,12 @@ export function cloneDefault<V>(value: V, seen?: WeakMap<object, any>): V {
     const copy: Record<string, unknown> = {};
     seen.set(value as object, copy);
     for (const key of Object.keys(value as Record<string, unknown>)) {
-        copy[key] = cloneDefault((value as Record<string, unknown>)[key], seen);
+        Object.defineProperty(copy, key, {
+            value: cloneDefault((value as Record<string, unknown>)[key], seen),
+            enumerable: true,
+            writable: true,
+            configurable: true,
+        });
     }
     return copy as unknown as V;
 }

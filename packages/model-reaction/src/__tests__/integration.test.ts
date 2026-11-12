@@ -8,7 +8,7 @@
  *
  * 覆盖范围：
  *   1.  README 全部代码片段（同步 / 异步校验、自定义规则、类型化事件、
- *       transform、settled、setFields、failFast、错误格式化）
+ *       transform、settled、setFields、首错校验、错误格式化）
  *   2.  Reaction 系统的 action 回调、多 reaction、循环依赖
  *   3.  事件系统、dirty 数据生命周期、dispose 资源回收
  *   4.  端到端注册表单流程（Best Practices §4）
@@ -122,10 +122,10 @@ describe('Integration Tests — Full Documentation Scenarios', () => {
             const notFoundCb = jest.fn();
             userModel.on('field:not-found', notFoundCb);
 
-            await userModel.setField(
+            await expect(userModel.setField(
                 'nonexistentField' as unknown as keyof User,
                 'value' as never
-            );
+            )).rejects.toThrow('nonexistentField');
 
             expect(notFoundCb).toHaveBeenCalled();
             expect(notFoundCb.mock.calls[0][0].code).toBe('field_not_found');
@@ -290,7 +290,7 @@ describe('Integration Tests — Full Documentation Scenarios', () => {
             expect(validationCb.mock.calls[0][0].field).toBe('name');
 
             // @ts-expect-error — testing non-existent field
-            await model.setField('missing', 'x');
+            await expect(model.setField('missing', 'x')).rejects.toThrow('missing');
             expect(fieldNotFoundCb).toHaveBeenCalled();
 
             model.dispose();
@@ -476,30 +476,10 @@ describe('Integration Tests — Full Documentation Scenarios', () => {
     });
 
     // =========================================================================
-    // 9. README — ModelOptions: failFast
+    // 9. README — first-error validation
     // =========================================================================
-    describe('README: failFast validation strategy', () => {
-        test('should stop after first error when failFast is true', async () => {
-            const model = createModel({
-                field: {
-                    type: 'string',
-                    validator: [
-                        ValidationRules.required.withMessage('Required'),
-                        new Rule('len', 'Too short', () => false),
-                        new Rule('fmt', 'Bad format', () => false)
-                    ],
-                    default: ''
-                }
-            }, { failFast: true });
-
-            await model.setField('field', '');
-            expect(model.validationErrors.field).toHaveLength(1);
-            expect(model.validationErrors.field![0]!.message).toBe('Required');
-
-            model.dispose();
-        });
-
-        test('should report all errors when failFast is false (default)', async () => {
+    describe('README: first-error validation strategy', () => {
+        test('should stop after first error', async () => {
             const model = createModel({
                 field: {
                     type: 'string',
@@ -513,7 +493,27 @@ describe('Integration Tests — Full Documentation Scenarios', () => {
             });
 
             await model.setField('field', '');
-            expect(model.validationErrors.field).toHaveLength(3);
+            expect(model.validationErrors.field).toHaveLength(1);
+            expect(model.validationErrors.field![0]!.message).toBe('Required');
+
+            model.dispose();
+        });
+
+        test('should expose only the first error for a field', async () => {
+            const model = createModel({
+                field: {
+                    type: 'string',
+                    validator: [
+                        ValidationRules.required.withMessage('Required'),
+                        new Rule('len', 'Too short', () => false),
+                        new Rule('fmt', 'Bad format', () => false)
+                    ],
+                    default: ''
+                }
+            });
+
+            await model.setField('field', '');
+            expect(model.validationErrors.field).toHaveLength(1);
 
             model.dispose();
         });
@@ -873,10 +873,10 @@ describe('Integration Tests — Full Documentation Scenarios', () => {
     });
 
     // =========================================================================
-    // 20. Multiple reactions on a single field (array syntax)
+    // 20. One reaction with multiple actions
     // =========================================================================
-    describe('FieldSchema.reaction as array', () => {
-        test('should support multiple reactions on one field', async () => {
+    describe('FieldSchema.reaction', () => {
+        test('should support multiple actions on one computation', async () => {
             const actionSpy = jest.fn();
 
             interface Schema {
@@ -889,17 +889,11 @@ describe('Integration Tests — Full Documentation Scenarios', () => {
                 output: {
                     type: 'string',
                     default: '',
-                    reaction: [
-                        {
-                            fields: ['input'],
-                            computed: (vals) => vals.input.toUpperCase()
-                        },
-                        {
-                            fields: ['input'],
-                            computed: (vals) => vals.input.toUpperCase(),
-                            action: [actionSpy]
-                        }
-                    ]
+                    reaction: {
+                        fields: ['input'],
+                        computed: (vals) => vals.input.toUpperCase(),
+                        action: [actionSpy, actionSpy]
+                    }
                 }
             });
 
@@ -1206,7 +1200,7 @@ describe('Integration Tests — Full Documentation Scenarios', () => {
     // 32. setFields 包含不存在的字段
     // =========================================================================
     describe('Edge: setFields with non-existent field key', () => {
-        test('should return false and emit field:not-found for unknown key', async () => {
+        test('should reject before committing and emit field:not-found for unknown key', async () => {
             const notFoundCb = jest.fn();
 
             interface Schema {
@@ -1220,9 +1214,9 @@ describe('Integration Tests — Full Documentation Scenarios', () => {
             model.on('field:not-found', notFoundCb);
 
             // @ts-expect-error — testing runtime behaviour
-            const result = await model.setFields({ name: 'ok', ghost: 'nope' });
+            await expect(model.setFields({ name: 'ok', ghost: 'nope' })).rejects.toThrow('ghost');
 
-            expect(result).toBe(false);
+            expect(model.data.name).toBe('');
             expect(notFoundCb).toHaveBeenCalled();
 
             model.dispose();
@@ -1413,10 +1407,10 @@ describe('Integration Tests — Full Documentation Scenarios', () => {
     });
 
     // =========================================================================
-    // 39. failFast + 异步校验
+    // 39. 顺序异步校验
     // =========================================================================
-    describe('Edge: failFast with async validators', () => {
-        test('should stop after first async error in failFast mode', async () => {
+    describe('Edge: sequential async validators', () => {
+        test('should stop after first async error', async () => {
             const secondValidatorCalled = jest.fn();
 
             const model = createModel({
@@ -1431,7 +1425,7 @@ describe('Integration Tests — Full Documentation Scenarios', () => {
                     ],
                     default: ''
                 }
-            }, { failFast: true });
+            });
 
             await model.setField('field', 'test');
             expect(model.validationErrors.field).toHaveLength(1);
@@ -1464,7 +1458,7 @@ describe('Integration Tests — Full Documentation Scenarios', () => {
             expect(fieldCb).not.toHaveBeenCalled();
 
             // @ts-expect-error — testing non-existent field
-            await model.setField('nope', 'x');
+            await expect(model.setField('nope', 'x')).rejects.toThrow('nope');
             expect(fieldCb).toHaveBeenCalled();
 
             model.dispose();

@@ -98,7 +98,7 @@ function PriceLine() {
 // 4. Recommended text-input binding.
 function CouponInput() {
     const cart = useModel<Cart>();
-    const { draft, setDraft, meta, onBlur, showError } =
+    const { draft, setDraft, meta, writeError, onBlur, showError } =
         useDraftField(cart, 'coupon');
     return (
         <label>
@@ -106,9 +106,9 @@ function CouponInput() {
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
                 onBlur={onBlur}
-                disabled={meta.validating}
+                aria-busy={meta.validating}
             />
-            {showError && <span style={{ color: 'red' }}>{meta.error}</span>}
+            {showError && <span style={{ color: 'red' }}>{writeError?.message ?? meta.error}</span>}
         </label>
     );
 }
@@ -195,7 +195,7 @@ import { useDraftField } from 'model-reaction/react';
 import type { ModelReturn } from 'model-reaction';
 
 function UsernameInput({ model }: { model: ModelReturn<{ username: string }> }) {
-    const { draft, setDraft, onBlur, showError, meta } = useDraftField(model, 'username');
+    const { draft, setDraft, onBlur, showError, meta, writeError } = useDraftField(model, 'username');
     return (
         <label>
             <input
@@ -205,13 +205,13 @@ function UsernameInput({ model }: { model: ModelReturn<{ username: string }> }) 
                 aria-invalid={showError}
             />
             {meta.validating && <span>validating…</span>}
-            {showError && <span role="alert">{meta.error}</span>}
+            {showError && <span role="alert">{writeError?.message ?? meta.error}</span>}
         </label>
     );
 }
 ```
 
-`useDraftField(model, field, options?)` returns `{ draft, setDraft, meta,
+`useDraftField(model, field, options?)` returns `{ draft, setDraft, meta, writeError,
 touched, onBlur, showError, committed }`:
 
 - `draft` / `setDraft` — the local editing text and its updater; wire them to
@@ -220,6 +220,8 @@ touched, onBlur, showError, committed }`:
   don't re-implement it per input.
 - `meta` / `committed` — the underlying `useModelFieldState` metadata and the
   last committed value.
+- `writeError: Error | null` — the latest edit's setter or cleanup exception.
+  It is local to this editing session, separate from model validation errors.
 - `options.format` — how a committed/pending value renders as text on reseed
   (defaults to `String`); see the field-type contract below.
 
@@ -233,6 +235,23 @@ An edit's own successful commit preserves its original text, including `"2."`,
 when updating the draft. If local validations are still in flight, outside
 updates are reconciled when those calls finish. Older calls cannot overwrite a
 newer edit or a new model/field session.
+
+`setDraft` returns `void` and handles setter rejections and errors in their
+cleanup chain. Failed text remains visible; only the latest edit in the active
+session may publish `writeError`. New edits and model/field switches clear it.
+Thrown `Error` instances are preserved; other thrown values become an `Error`
+with a corresponding message. These exceptions do not become model errors or
+dirty data. Ordinary validation failures continue to use `meta.error`.
+
+`showError` means `touched && (writeError || meta.error)`. Prefer
+`writeError?.message ?? meta.error` when displaying it. Consumers manually
+constructing `DraftField` must add the new required `writeError` member.
+
+Only committed renders publish `format` to asynchronous callbacks, so abandoned
+Suspense renders cannot change the active input's formatter. A format-only
+change preserves current text; later outside commits use the latest committed
+format. The hook is SSR-compatible. IME composition handling remains a separate
+concern; this hook does not currently coordinate composition events.
 
 > Use the lower-level `useModelFieldState` when you need committed-value
 > semantics or are binding a non-text control. A runnable integration lives in

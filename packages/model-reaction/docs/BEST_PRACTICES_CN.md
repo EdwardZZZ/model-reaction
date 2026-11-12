@@ -12,6 +12,7 @@
 - 可安全复用结果时，在服务边界缓存远程校验结果。
 - 按后端服务特征设置 `asyncValidationTimeout`。
 - 远程 validator 不应在每次按键时执行时，先对输入做防抖，再调用 `setField`。
+- 廉价规则排在前面：字段内顺序校验，首错停止；不同字段仍可并行验证。
 
 ## 2. 错误处理
 
@@ -28,18 +29,25 @@ unsubscribe();
 ### 字段级错误处理
 - 从 `validationErrors[field]` 读取字段错误。
 - 使用 `formatValidationErrors(model.validationErrors)` 生成提交错误摘要。
+- 将写入 reject 与普通验证失败的 false 分开处理；未知 key 会在整批准备前拒绝，
+  外部 DTO 应先映射字段。
+- `useDraftField` 在 showError 下展示 `writeError?.message ?? meta.error`；
+  transform 异常留在本地，失败文本继续保留。
 
 ## 3. 复杂业务规则
 
 ### 反应系统设计
 - 保持 `computed` 为同步纯函数，不要返回 Promise；异步操作和其他副作用放在 `action`。
 - `computed` 读取的每个值都必须声明在 `reaction.fields` 中。
-- 优先用一个包含完整依赖的 reaction，避免多个 reaction 竞争写入同一目标。
+- 每字段只接受一个包含完整依赖的 reaction；独立结果拆为不同字段。
 
 ### 条件验证
 - 从 `model-reaction/validation` 导入规则构建和格式化工具。
 - 条件规则使用 `Rule.when(...)`。
 - 通过 validator 的 `data` 参数读取其他字段。
+- 直接写入的快照包含 transform 后的候选值，也包括字段自身；依赖旧值的前置条件
+  放到业务写入入口。
+- `validateAll()` 复用 committed/dirty 值，不重复 transform。
 - 将共享领域检查提取为具名规则或验证服务。
 
 ## 4. 测试策略

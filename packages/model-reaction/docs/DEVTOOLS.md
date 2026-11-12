@@ -121,7 +121,11 @@ assets (`manifest.json`, `devtools.html`, `panel.html`, `panel.css`).
 ## Using the panel
 
 - If a page hosts **more than one** model, an instance picker appears in the
-  panel header; pick which one to inspect.
+  panel header; pick which one to inspect. Selection belongs to the panel; when
+  the selected instance disappears, it falls back to a remaining instance.
+- `NaN`, `Infinity`, `-Infinity`, and `-0` use an explicit number marker through
+  JSON transport, so the tree preserves their display rather than showing null
+  or zero. Ordinary finite numbers keep their primitive representation.
 - The **Timeline** is capped by a ring buffer (default 100 entries per
   instance) so a long-lived, chatty page cannot grow memory without bound.
 - Rejected input, validation completion, dirty clearing, and reaction errors

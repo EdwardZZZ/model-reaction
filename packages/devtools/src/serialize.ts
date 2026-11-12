@@ -99,7 +99,13 @@ function serialize(
     switch (typeof value) {
         case 'undefined': return { t: 'undefined' };
         case 'string': return { t: 'primitive', v: budget.text(value) };
-        case 'number':
+        case 'number': {
+            if (Number.isNaN(value)) return { t: 'number', v: 'NaN' };
+            if (value === Infinity) return { t: 'number', v: 'Infinity' };
+            if (value === -Infinity) return { t: 'number', v: '-Infinity' };
+            if (Object.is(value, -0)) return { t: 'number', v: '-0' };
+            return { t: 'primitive', v: value };
+        }
         case 'boolean': return { t: 'primitive', v: value };
         case 'bigint': return { t: 'bigint', v: budget.text(value.toString()) };
         case 'symbol': return { t: 'symbol', v: budget.text(value.toString()) };

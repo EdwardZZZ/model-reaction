@@ -1,8 +1,22 @@
-import { validateField } from '../validation/validate-field';
+import { validateField as validateFieldInternal } from '../validation/validate-field';
 import { FieldSchema, ValidationError } from '../types';
 import { Rule, ValidationRules } from '../validation/rules';
 import { createModel, Model } from '../index';
 import { runInNewContext } from 'vm';
+
+type ValidationOptions = Parameters<typeof validateFieldInternal>[0];
+function validateField(
+    options: Pick<ValidationOptions, 'schema' | 'value' | 'field'> & Partial<ValidationOptions>
+) {
+    const isCurrent = options.isCurrent ?? (() => true);
+    return validateFieldInternal({
+        timeout: 5000,
+        data: Object.freeze({}),
+        ...options,
+        isCurrent,
+        onError: (error) => { if (isCurrent()) options.onError?.(error); },
+    });
+}
 
 describe('validateField (unit)', () => {
     beforeEach(() => {
@@ -69,6 +83,8 @@ describe('validateField (unit)', () => {
         });
 
         try {
+            await Promise.resolve();
+            await Promise.resolve();
             expect(timeout).toHaveBeenCalledTimes(1);
             expect(clear).not.toHaveBeenCalled();
             release(true);
@@ -277,7 +293,7 @@ describe('validateField (unit)', () => {
         expect(result).toBe(false);
     });
 
-    test('uses default timeout / failFast when not provided', async () => {
+    test('accepts collaborators supplied by its owner', async () => {
         const onError = jest.fn();
         const schema: FieldSchema = {
             type: 'string',
@@ -481,7 +497,7 @@ describe('validateField (unit)', () => {
         expect(onError).not.toHaveBeenCalled();
     });
 
-    test('filters all conditions before running applicable validators', async () => {
+    test('stops before later conditions when the first applicable validator fails', async () => {
         const order: string[] = [];
         const onError = jest.fn();
         const result = await validateField({
@@ -508,14 +524,14 @@ describe('validateField (unit)', () => {
         });
 
         expect(result).toBe(false);
-        expect(order).toEqual(['first condition', 'second condition', 'validate']);
+        expect(order).toEqual(['first condition', 'validate']);
         expect(onError.mock.calls.map(([error]) => error.rule)).toEqual([
-            'condition_error', 'applicable',
+            'applicable',
         ]);
     });
 
     test.each([false, true])(
-        'a failed condition stops failFast validation without reporting stale errors (current: %s)',
+        'a failed condition stops validation without reporting stale errors (current: %s)',
         async (current) => {
             const validate = jest.fn(() => false);
             const onError = jest.fn();
@@ -523,18 +539,17 @@ describe('validateField (unit)', () => {
                 schema: {
                     type: 'string',
                     validator: [
-                        { type: 'first', message: 'first', validate },
                         {
                             type: 'condition',
                             message: 'unused',
                             condition: () => { throw new Error('boom'); },
                             validate,
                         },
+                        { type: 'last', message: 'last', validate },
                     ],
                 },
                 field: 'f',
                 value: 'v',
-                failFast: true,
                 isCurrent: () => current,
                 onError,
             });
@@ -552,22 +567,19 @@ describe('validateField (unit)', () => {
         }
     );
 
-    test('runs validators concurrently and reports errors in completion order', async () => {
+    test('awaits the first validator before testing later conditions or validators', async () => {
         let release!: (value: boolean) => void;
-        let signalFast!: () => void;
         const slow = new Promise<boolean>((resolve) => { release = resolve; });
-        const fastReported = new Promise<void>((resolve) => { signalFast = resolve; });
-        const onError = jest.fn((error: ValidationError) => {
-            if (error.rule === 'fast') signalFast();
-        });
+        const onError = jest.fn();
         const validateSlow = jest.fn(() => slow);
         const validateFast = jest.fn(() => false);
+        const condition = jest.fn(() => true);
         const result = validateField({
             schema: {
                 type: 'string',
                 validator: [
                     { type: 'slow', message: 'slow', validate: validateSlow },
-                    { type: 'fast', message: 'fast', validate: validateFast },
+                    { type: 'fast', message: 'fast', condition, validate: validateFast },
                 ],
             },
             field: 'f',
@@ -577,20 +589,21 @@ describe('validateField (unit)', () => {
 
         try {
             expect(validateSlow).toHaveBeenCalledTimes(1);
-            expect(validateFast).toHaveBeenCalledTimes(1);
-            await fastReported;
-            expect(onError.mock.calls.map(([error]) => error.rule)).toEqual(['fast']);
-            release(false);
+            expect(condition).not.toHaveBeenCalled();
+            expect(validateFast).not.toHaveBeenCalled();
+            release(true);
             expect(await result).toBe(false);
-            expect(onError.mock.calls.map(([error]) => error.rule)).toEqual(['fast', 'slow']);
+            expect(condition).toHaveBeenCalledTimes(1);
+            expect(validateFast).toHaveBeenCalledTimes(1);
+            expect(onError.mock.calls.map(([error]) => error.rule)).toEqual(['fast']);
         } finally {
             release(false);
             await result;
         }
     });
 
-    describe('failFast strategy', () => {
-        test('runs all validators by default (failFast=false)', async () => {
+    describe('first-error strategy', () => {
+        test('reports only the first failed rule', async () => {
             interface S {
                 field: string;
             }
@@ -610,14 +623,12 @@ describe('validateField (unit)', () => {
             await model.setField('field', '');
 
             const errors = model.validationErrors['field'];
-            expect(errors).toHaveLength(3);
+            expect(errors).toHaveLength(1);
             expect(errors![0]!.message).toBe('Required error');
-            expect(errors![1]!.message).toBe('Length error');
-            expect(errors![2]!.message).toBe('Format error');
             model.dispose();
         });
 
-        test('stops at first error when failFast=true', async () => {
+        test('does not run later rules after failure', async () => {
             interface S {
                 field: string;
             }
@@ -633,7 +644,7 @@ describe('validateField (unit)', () => {
                 },
             };
 
-            const model = createModel<S>(schema, { failFast: true });
+            const model = createModel<S>(schema);
             await model.setField('field', '');
 
             const errors = model.validationErrors['field'];
@@ -642,7 +653,7 @@ describe('validateField (unit)', () => {
             model.dispose();
         });
 
-        test('runs subsequent rules if previous ones pass with failFast=true', async () => {
+        test('runs subsequent rules if previous ones pass', async () => {
             interface S {
                 field: string;
             }
@@ -658,7 +669,7 @@ describe('validateField (unit)', () => {
                 },
             };
 
-            const model = createModel<S>(schema, { failFast: true });
+            const model = createModel<S>(schema);
             await model.setField('field', 'short');
 
             const errors = model.validationErrors['field'];
@@ -667,7 +678,7 @@ describe('validateField (unit)', () => {
             model.dispose();
         });
 
-        test('handles async rules with failFast=true', async () => {
+        test('handles asynchronous rules sequentially', async () => {
             const asyncSpy = jest.fn();
             interface S {
                 field: string;
@@ -688,7 +699,7 @@ describe('validateField (unit)', () => {
                 },
             };
 
-            const model = createModel<S>(schema, { failFast: true });
+            const model = createModel<S>(schema);
 
             await model.setField('field', '');
             expect(asyncSpy).not.toHaveBeenCalled();

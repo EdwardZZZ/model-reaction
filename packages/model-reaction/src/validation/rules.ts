@@ -6,28 +6,24 @@
  * predicate.
  */
 
+import type { Validator } from '../types';
+
 const isFiniteNumber = (v: unknown): v is number =>
     typeof v === 'number' && Number.isFinite(v);
 
 const isString = (v: unknown): v is string => typeof v === 'string';
 
-export class Rule {
+export class Rule implements Validator {
     type: string;
     message: string;
-    validate: (
-        value: any,
-        data?: Record<string, any>
-    ) => boolean | Promise<boolean>;
-    condition?: (data: Record<string, any>) => boolean;
+    validate: Validator['validate'];
+    condition?: NonNullable<Validator['condition']>;
 
     constructor(
         type: string,
         message: string,
-        validate: (
-            value: any,
-            data?: Record<string, any>
-        ) => boolean | Promise<boolean>,
-        condition?: (data: Record<string, any>) => boolean
+        validate: Validator['validate'],
+        condition?: Validator['condition']
     ) {
         this.type = type;
         this.message = message;

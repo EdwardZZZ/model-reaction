@@ -7,6 +7,11 @@
 > 公开执行契约与破坏性迁移见 [API_CN.md](API_CN.md#action-组)。
 > 调度方向固定为：action 等待 reaction 计算落定；reaction 不等待 action。
 > 原字段级 `reaction.effects` 提案暂不推进，原 D1–D8 不再作为实现清单。
+>
+> **后续收敛已实施**：见 [DESIGN_SIMPLIFICATION_CN.md](DESIGN_SIMPLIFICATION_CN.md)。
+> 当前每字段只有一条 reaction；候选和活动组共用 `groups` 集合，不再使用
+> `pendingActions` 或集合交接。下文涉及候选表交接、reaction 数组和多条 reaction
+> 竞争的段落保留为历史设计依据，不描述当前内部结构；公开规则以 API 为准。
 
 ## 1. 目标与取舍
 

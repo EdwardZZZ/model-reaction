@@ -5,7 +5,6 @@ import {
     ModelErrorEvent,
     ModelEvents,
     ModelOptions,
-    Reaction,
     SKIP_REACTION,
     ValidationError,
 } from '../types';
@@ -26,8 +25,7 @@ interface ReactionCallbacks {
 }
 
 interface ScheduledReaction {
-    reactionStack: string[];
-    actionVersion: number;
+    timeoutId: ReturnType<typeof setTimeout>;
     endTask: () => void;
 }
 
@@ -42,13 +40,7 @@ function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
 export class ReactionSystem {
     private reactionDeps: Map<string, ReactionJob[]> = new Map();
     private initializingFields = new Set<string>();
-    private reactionTimeouts: Map<
-        string,
-        {
-            timeoutId: ReturnType<typeof setTimeout>;
-            jobs: Map<ReactionJob, ScheduledReaction>;
-        }
-    > = new Map();
+    private reactionTimeouts = new Map<string, ScheduledReaction>();
     private schema: Model;
     private options: ModelOptions;
     private callbacks: ReactionCallbacks;
@@ -78,17 +70,12 @@ export class ReactionSystem {
         // The "reaction.fields → edge" reading lives in eachReactionEdge, so
         // this index and the DevTools graph never diverge on how dependencies
         // are interpreted.
-        const jobsByField = new Map<string, Map<Reaction, ReactionJob>>();
+        const jobsByField = new Map<string, ReactionJob>();
         eachReactionEdge(this.schema, (field, depField, reaction) => {
-            let fieldJobs = jobsByField.get(field);
-            if (!fieldJobs) {
-                fieldJobs = new Map();
-                jobsByField.set(field, fieldJobs);
-            }
-            let job = fieldJobs.get(reaction);
+            let job = jobsByField.get(field);
             if (!job) {
                 job = { field, reaction };
-                fieldJobs.set(reaction, job);
+                jobsByField.set(field, job);
             }
             if (!this.reactionDeps.has(depField)) {
                 this.reactionDeps.set(depField, []);
@@ -147,25 +134,18 @@ export class ReactionSystem {
         const actionVersion = this.actionExecutor.invalidate(job.field);
         if (debounceTime > 0) {
             const scheduled = this.reactionTimeouts.get(job.field);
-            const jobs = scheduled?.jobs ?? new Map<ReactionJob, ScheduledReaction>();
             if (scheduled) {
                 clearTimeout(scheduled.timeoutId);
-                jobs.get(job)?.endTask();
-                jobs.delete(job);
+                scheduled.endTask();
             }
-            jobs.set(job, { reactionStack, actionVersion, endTask });
-            const timeoutId = setTimeout(() => {
-                this.reactionTimeouts.delete(job.field);
-                for (const [pendingJob, pending] of jobs) {
-                    this.runReaction(
-                        pendingJob,
-                        pending.reactionStack,
-                        pending.actionVersion,
-                        pending.endTask
-                    );
-                }
-            }, debounceTime);
-            this.reactionTimeouts.set(job.field, { timeoutId, jobs });
+            const pending: ScheduledReaction = {
+                endTask,
+                timeoutId: setTimeout(() => {
+                    this.reactionTimeouts.delete(job.field);
+                    this.runReaction(job, reactionStack, actionVersion, endTask);
+                }, debounceTime),
+            };
+            this.reactionTimeouts.set(job.field, pending);
         } else {
             this.runReaction(job, reactionStack, actionVersion, endTask);
         }
@@ -188,10 +168,10 @@ export class ReactionSystem {
         if (this.disposed) return;
         const { field, reaction } = job;
         try {
-            const dependentValues: Record<string, any> = {};
+            const dependentValues: Record<string, any> = Object.create(null);
             for (const f of reaction.fields) {
                 if (this.disposed) return;
-                if (!(f in this.schema)) {
+                if (!Object.prototype.hasOwnProperty.call(this.schema, f)) {
                     this.callbacks.reportError(ModelEvents.DEPENDENCY_ERROR, {
                         code: 'dependency_error',
                         field,
@@ -204,7 +184,7 @@ export class ReactionSystem {
             }
 
             if (this.disposed) return;
-            const computedValue = reaction.computed(dependentValues);
+            const computedValue = reaction.computed({ ...dependentValues });
             if (computedValue === SKIP_REACTION) return;
             if (isPromiseLike(computedValue)) {
                 // Observe a rejected promise to avoid an unhandled rejection
@@ -255,9 +235,9 @@ export class ReactionSystem {
         if (this.disposed) return;
         this.disposed = true;
         this.actionExecutor.dispose();
-        this.reactionTimeouts.forEach(({ timeoutId, jobs }) => {
+        this.reactionTimeouts.forEach(({ timeoutId, endTask }) => {
             clearTimeout(timeoutId);
-            jobs.forEach(({ endTask }) => endTask());
+            endTask();
         });
         this.reactionTimeouts.clear();
         this.reactionDeps.clear();

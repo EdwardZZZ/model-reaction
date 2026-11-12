@@ -72,6 +72,14 @@ m.dispose();                                  // ALWAYS call this in cleanup
 7. **Assuming a reaction's `computed` output skips validation** — a reaction writes its result back through the same validate-then-commit path. If the derived field has a `validator` and the computed value fails it, `data` keeps the old value and the computed value lands silently in `dirtyData`. The optional `reaction.action` fires only when that computed value passes validation — a value that lands in `dirtyData` fires neither the field change nor the `action`. Keep derived-field validators loose, or watch `dirtyData` / `reaction:error`.
 8. **Mutating a field value in place** — the model tracks field-level replacement only. The outer `data` and dirty-data records are shallow-frozen, but object/array field values are not observed or frozen. Replace a whole field with `setField()` / `setFields()` to run validation and reactions.
 
+Each field accepts one reaction, never an array. Validation runs in rule order,
+stopping at the first error; `strictMode` and `failFast` no longer exist.
+Unknown keys emit `field:not-found` and reject before any batch input is
+prepared. Direct-write validators read a shared transformed candidate snapshot,
+including their own field; `validateAll()` does not transform dirty values again.
+Structural equality is unchanged. Both React selector Hooks retain their
+distinct subscription contracts.
+
 ---
 
 ## 4. Code Skeletons (copy-paste these)
@@ -122,7 +130,7 @@ fullName: {
 import { useDraftField } from 'model-reaction/react';
 
 function Input({ model, field, label }) {
-  const { draft, setDraft, meta, onBlur, showError } =
+  const { draft, setDraft, meta, writeError, onBlur, showError } =
     useDraftField(model, field);
 
   return (
@@ -133,9 +141,9 @@ function Input({ model, field, label }) {
         onChange={(e) => setDraft(e.target.value)}
         onBlur={onBlur}
         aria-invalid={Boolean(showError)}
-        disabled={meta.validating}
+        aria-busy={meta.validating}
       />
-      {showError && <small role="alert">{meta.error}</small>}
+      {showError && <small role="alert">{writeError?.message ?? meta.error}</small>}
     </label>
   );
 }

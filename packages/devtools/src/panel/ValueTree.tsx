@@ -81,6 +81,8 @@ function LeafValue({ value }: { value: SerializedValue }): ReactElement {
             if (typeof value.v === 'boolean')
                 return <span className="mrd-val-boolean">{String(value.v)}</span>;
             return <span className="mrd-val-number">{String(value.v)}</span>;
+        case 'number':
+            return <span className="mrd-val-number">{value.v}</span>;
         case 'undefined':
             return <span className="mrd-val-undefined">undefined</span>;
         case 'bigint':
