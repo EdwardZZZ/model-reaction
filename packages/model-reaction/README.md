@@ -22,6 +22,7 @@ define the model, `setField` / `setFields` are the only write paths, failed
 values stay in `dirtyData`, and React lifecycles are explicit
 (`await setField(...)`, `dispose()` in cleanup). Coding agents can start from
 [AGENTS.md](AGENTS.md) for the short ruleset.
+See the [source architecture guide](docs/ARCHITECTURE.md) for the module map and main call paths.
 
 ## Installation
 

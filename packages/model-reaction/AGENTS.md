@@ -26,6 +26,9 @@ Three layers, nothing else:
 
 ## 2. The 5 APIs You Use 90% of the Time
 
+For the source module map, write pipeline, and dependency boundaries, see
+[docs/ARCHITECTURE_CN.md](docs/ARCHITECTURE_CN.md).
+
 ```ts
 const m = createModel(schema, options?);     // factory
 await m.setField('name', 'Ada');              // set + validate; returns boolean

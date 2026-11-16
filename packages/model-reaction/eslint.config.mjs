@@ -23,6 +23,63 @@ export default tseslint.config(
       'no-console': 'warn',
     },
   },
+  // Protect the documented module boundaries; the DevTools edge to the shared
+  // reaction graph remains intentional.
+  {
+    files: ['src/react/**/*.{ts,tsx}'],
+    rules: {
+      'no-restricted-imports': ['error', {
+        patterns: [{
+          group: ['../core/**', '../reaction/**', '../devtools/**'],
+          message: 'React adapters must depend on the public model contract, not internal runtime modules.',
+        }],
+      }],
+    },
+  },
+  {
+    files: ['src/core/**/*.{ts,tsx}'],
+    rules: {
+      'no-restricted-imports': ['error', {
+        patterns: [{
+          group: ['../react/**', '../devtools/**'],
+          message: 'Core runtime modules must not depend on UI adapters or DevTools.',
+        }],
+      }],
+    },
+  },
+  {
+    files: ['src/validation/**/*.{ts,tsx}'],
+    rules: {
+      'no-restricted-imports': ['error', {
+        patterns: [{
+          group: ['../core/**', '../reaction/**', '../react/**', '../devtools/**'],
+          message: 'Validation helpers must remain independent of model runtime and adapters.',
+        }],
+      }],
+    },
+  },
+  {
+    files: ['src/reaction/**/*.{ts,tsx}'],
+    rules: {
+      'no-restricted-imports': ['error', {
+        patterns: [{
+          group: ['../react/**', '../devtools/**', '../core/model-manager'],
+          message: 'Reaction scheduling must not depend on UI, DevTools, or the ModelManager implementation.',
+        }],
+      }],
+    },
+  },
+  {
+    files: ['src/devtools/**/*.{ts,tsx}'],
+    rules: {
+      'no-restricted-imports': ['error', {
+        patterns: [{
+          group: ['../core/**', '../react/**'],
+          message: 'DevTools must observe models through the public API, not core or React internals.',
+        }],
+      }],
+    },
+  },
   // Looser rules for tests
   {
     files: ['src/__tests__/**/*.{ts,tsx}'],

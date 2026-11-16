@@ -1,4 +1,4 @@
-import { createModel, Model, ModelEvents } from '../index';
+import { createModel, Model, ModelEvents, ModelReturn } from '../index';
 import { ValidationRules } from '../validation';
 
 describe('ModelManager - Dirty Data Management', () => {

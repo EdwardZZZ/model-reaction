@@ -1,17 +1,20 @@
 import {
-    CommitOptions,
     Model,
     ModelError,
-    ModelErrorEvent,
     ModelEvents,
     ModelOptions,
     SKIP_REACTION,
     ValidationError,
 } from '../types';
+import type { CommitOptions } from '../core/internal-types';
 import { eachReactionEdge } from './reaction-graph';
 import { PendingTasks } from '../core/pending-tasks';
 import { ActionExecutor } from './action-executor';
 import type { ReactionJob } from './reaction-job';
+
+type ReactionErrorEvent =
+    | typeof ModelEvents.REACTION_ERROR
+    | typeof ModelEvents.DEPENDENCY_ERROR;
 
 /** Internal contract between {@link ReactionSystem} and its owning model. */
 interface ReactionCallbacks {
@@ -19,7 +22,7 @@ interface ReactionCallbacks {
     setValue: (field: string, value: any, options: CommitOptions) => Promise<boolean>;
     setError: (field: string, error: ValidationError) => void;
     reportError: (
-        event: Exclude<ModelErrorEvent, 'field:not-found'>,
+        event: ReactionErrorEvent,
         error: ModelError
     ) => void;
 }

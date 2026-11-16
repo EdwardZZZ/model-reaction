@@ -1,3 +1,4 @@
+/** Public type contract for the core package entry. */
 export const ModelEvents = {
     VALIDATION_ERROR: 'validation:error',
     REACTION_ERROR: 'reaction:error',
@@ -15,11 +16,6 @@ export const ModelEvents = {
  * triggering downstream reactions.
  */
 export const SKIP_REACTION = Symbol.for('model-reaction.SKIP_REACTION');
-
-export type ModelErrorEvent =
-    | typeof ModelEvents.REACTION_ERROR
-    | typeof ModelEvents.DEPENDENCY_ERROR
-    | typeof ModelEvents.FIELD_NOT_FOUND;
 
 /** Runtime validation rule. */
 export interface Validator {
@@ -211,22 +207,4 @@ export interface ModelReturn<T = Record<string, any>> {
         callback: (value: R, prev: R) => void,
         isEqual?: (a: R, b: R) => boolean
     ) => () => void;
-}
-
-/**
- * Internal options threaded through the validate → commit pipeline.
- * Not re-exported from the package entry point (`index.ts`); it is an
- * implementation detail shared inside the library only.
- *
- * `changedFields`, when provided, collects the names of fields whose committed
- * value actually changed. Batched callers (`setFields` / `validateAll`) suppress
- * per-field reactions and use this set to fire a single reaction pass for only
- * the fields that really moved.
- */
-export interface CommitOptions {
-    origin: 'direct' | 'reaction';
-    reactionStack?: string[];
-    changedFields?: Set<string>;
-    validationData?: Readonly<Record<string, any>>;
-    initializeReactions?: boolean;
 }

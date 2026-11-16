@@ -21,6 +21,7 @@
 `setField` / `setFields` 是主要写入路径，验证失败的值进入 `dirtyData`，
 React 生命周期显式处理（`await setField(...)`，cleanup 中调用 `dispose()`）。
 Coding agent 可以先阅读 [AGENTS.md](AGENTS.md) 获取精简规则。
+源码模块图和主要调用链见[架构导览](docs/ARCHITECTURE_CN.md)。
 
 ## 安装
 

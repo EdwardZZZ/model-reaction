@@ -1,5 +1,4 @@
 import {
-    CommitOptions,
     FieldSchema,
     Model,
     ModelError,
@@ -9,6 +8,7 @@ import {
     ModelReturn,
     ValidationError,
 } from '../types';
+import type { CommitOptions } from './internal-types';
 import { validateField } from '../validation/validate-field';
 import { cloneDefault } from '../utils/clone-default';
 import { deepEqual } from '../utils/deep-equal';
@@ -136,6 +136,13 @@ export class ModelManager<
     // Public mutation API
     // -------------------------------------------------------------------------
 
+    /**
+     * Direct writes follow one pipeline: prepare every input, validate against
+     * a shared candidate snapshot, commit each valid field, then trigger one
+     * reaction pass for the fields that actually changed. A batch is not atomic:
+     * one field can commit even when a sibling fails validation.
+     */
+
     setField = async <K extends keyof T>(
         field: K,
         value: T[K]
@@ -170,7 +177,11 @@ export class ModelManager<
         });
     };
 
-    /** Shared candidate snapshot; validateAll supplies already transformed values. */
+    /**
+     * Build one candidate snapshot and validate all prepared values against it.
+     * Each field commits independently; Promise.allSettled lets every validator
+     * finish before propagating a thrown transform/validation error.
+     */
     private async validatePrepared(
         prepared: readonly PreparedFieldWrite[],
         options: CommitOptions
@@ -186,7 +197,11 @@ export class ModelManager<
         return results.every((result) => result.status === 'fulfilled' && result.value);
     }
 
-    /** Batch task and rejection handling: docs/DESIGN_SIMPLIFICATION_CN.md §4. */
+    /**
+     * Own the outer batch task and reaction boundary. The finally block ensures
+     * already committed fields still produce their reaction pass on failure;
+     * endBatch keeps `settled()` accurate across the whole operation.
+     */
     private async runBatch(
         validate: (options: CommitOptions) => Promise<boolean>,
         complete?: (allValid: boolean) => void
