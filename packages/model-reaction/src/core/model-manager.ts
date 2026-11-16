@@ -14,6 +14,11 @@ import { cloneDefault } from '../utils/clone-default';
 import { deepEqual } from '../utils/deep-equal';
 import { EventEmitter } from './event-emitter';
 import { PendingTasks } from './pending-tasks';
+import {
+    createValidationSnapshot,
+    prepareFieldWrites,
+} from './write-preparation';
+import type { PreparedFieldWrite } from './write-preparation';
 import { ReactionSystem } from '../reaction/reaction-system';
 
 /**
@@ -140,17 +145,10 @@ export class ModelManager<
 
     setFields = async (fields: Partial<T>): Promise<boolean> => {
         return this.runBatch((options) => {
-            const keys = Object.keys(fields);
-            keys.forEach((field) => this.requireField(field));
-            const prepared = keys.map((field) => {
-                const schema = this.schema[field]!;
-                const value = fields[field];
-                return {
-                    field,
-                    schema,
-                    value: schema.transform ? schema.transform(value) : value,
-                };
-            });
+            const prepared = prepareFieldWrites(
+                fields,
+                (field) => this.requireField(field)
+            );
             return this.validatePrepared(prepared, options);
         });
     };
@@ -174,13 +172,10 @@ export class ModelManager<
 
     /** Shared candidate snapshot; validateAll supplies already transformed values. */
     private async validatePrepared(
-        prepared: Array<{ field: string; schema: FieldSchema; value: unknown }>,
+        prepared: readonly PreparedFieldWrite[],
         options: CommitOptions
     ): Promise<boolean> {
-        const validationData = Object.freeze({
-            ...this.modelData,
-            ...Object.fromEntries(prepared.map(({ field, value }) => [field, value])),
-        });
+        const validationData = createValidationSnapshot(this.modelData, prepared);
         const results = await Promise.allSettled(prepared.map(({ field, schema, value }) =>
             this.validateAndCommit(field, schema, value, { ...options, validationData })
         ));
