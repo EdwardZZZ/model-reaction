@@ -466,15 +466,14 @@ derivations before adding memoization.
 
 Pause editing while submission runs. Wait for current validations and reactions,
 then validate all fields, including unvalidated defaults and rejected input.
-Validation can promote dirty values and start further reactions, so wait again
-and check current errors before saving:
+`validateAll()` also waits for work started by dirty promotion and checks the
+remaining model errors and dirty values before returning:
 
 ```tsx
 async function onSubmit() {
     await model.settled();
     const ok = await model.validateAll();
-    await model.settled();
-    if (!ok || Object.values(model.validationErrors).some((errors) => errors.length > 0)) return;
+    if (!ok) return;
     await api.save(model.data);
 }
 ```
@@ -482,6 +481,10 @@ async function onSubmit() {
 `settled()` waits for tracked model work, including Promises returned by
 actions. It does not lock out new edits or wait for fire-and-forget network
 work. The submitting UI must prevent concurrent edits and duplicate submissions.
+Before this flow, reject submission if an input has `useDraftField.writeError`
+or unreplayed text; those belong to the input layer and are outside model checks.
+Full validation runs once, so finish related cross-field corrections before it.
+See the [validation contract](API.md#validation) for failure and lifecycle details.
 
 See [the submission recipe](../examples/react-best-practices/7-6-submission-flow.tsx).
 

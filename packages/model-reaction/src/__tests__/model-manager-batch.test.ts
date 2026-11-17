@@ -349,7 +349,7 @@ describe('ModelManager - Batch Operations (setFields)', () => {
     });
 
     test.each(['setFields', 'validateAll'] as const)(
-        '%s returns after registering reactions while actions remain pending',
+        '%s preserves its completion boundary while actions remain pending',
         async (operation) => {
             let valid = true;
             let release!: () => void;
@@ -383,12 +383,24 @@ describe('ModelManager - Batch Operations (setFields)', () => {
                 const result = operation === 'setFields'
                     ? local.setFields({ source: 2 })
                     : local.validateAll();
-                expect(await result).toBe(true);
+                let completed = false;
+                const observed = result.then((value) => {
+                    completed = true;
+                    return value;
+                });
+                await new Promise<void>((resolve) => setImmediate(resolve));
+                expect(action).toHaveBeenCalledTimes(1);
+                if (operation === 'setFields') {
+                    expect(await observed).toBe(true);
+                } else {
+                    expect(completed).toBe(false);
+                }
                 let idle = false;
                 const settled = local.settled().then(() => { idle = true; });
                 await Promise.resolve();
                 expect(idle).toBe(false);
                 release();
+                expect(await observed).toBe(true);
                 await settled;
                 expect(action).toHaveBeenCalledTimes(1);
                 expect(local.data.derived).toBe(4);
@@ -525,4 +537,3 @@ describe('ModelManager - validateAll', () => {
         local.dispose();
     });
 });
-

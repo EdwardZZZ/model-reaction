@@ -280,9 +280,10 @@ demonstrates schema composition and DTO conversion.
 
 Test business boundaries: rule limits, transforms, invalid input preserved in
 dirty data, rejected computed values, stale async results, and reaction chains.
-Submission tests should wait for current work, run `validateAll()`, then wait
-for any work that validation triggered before reading the payload. Include
-server rejection and retry behavior when the application owns them.
+Submission tests should `await settled()`, then `await validateAll()` and check
+its result before reading the payload. Full validation includes settlement of
+work that it triggered. Include server rejection and retry behavior when the
+application owns them.
 
 React integration checks should cover editing text while validation is pending,
 field-specific updates, and owner cleanup. Repository contribution checks are

@@ -31,8 +31,7 @@ export function SubmitButton() {
     async function onSubmit() {
         await model.settled();
         const ok = await model.validateAll();
-        await model.settled();
-        if (!ok || Object.values(model.validationErrors).some((errors) => errors.length > 0)) return;
+        if (!ok) return;
         await api.save(model.data);
     }
     return <button onClick={onSubmit}>Submit</button>;

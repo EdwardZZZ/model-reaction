@@ -161,20 +161,31 @@ export class ModelManager<
     };
 
     validateAll = async (): Promise<boolean> => {
-        return this.runBatch((options) => {
-            return this.validatePrepared(
-                Object.keys(this.schema).map((field) => ({
-                    field,
-                    schema: this.schema[field] as FieldSchema,
-                    value: Object.prototype.hasOwnProperty.call(this.dirtyData, field)
-                        ? this.dirtyData[field as keyof T]
-                        : this.modelData[field as keyof T],
-                })),
-                options
+        let allValid = false;
+        try {
+            allValid = await this.runBatch((options) =>
+                this.validatePrepared(
+                    Object.keys(this.schema).map((field) => ({
+                        field,
+                        schema: this.schema[field] as FieldSchema,
+                        value: Object.prototype.hasOwnProperty.call(this.dirtyData, field)
+                            ? this.dirtyData[field as keyof T]
+                            : this.modelData[field as keyof T],
+                    })),
+                    options
+                )
             );
-        }, (allValid) => {
-            this.emit(ModelEvents.VALIDATION_COMPLETE, { isValid: allValid });
-        });
+        } finally {
+            await this.settled();
+        }
+
+        if (this.disposed) return false;
+
+        const valid = allValid &&
+            Object.keys(this.dirtyData).length === 0 &&
+            Object.values(this.errors).every((errors) => errors.length === 0);
+        this.emit(ModelEvents.VALIDATION_COMPLETE, { isValid: valid });
+        return valid;
     };
 
     /**
@@ -203,8 +214,7 @@ export class ModelManager<
      * endBatch keeps `settled()` accurate across the whole operation.
      */
     private async runBatch(
-        validate: (options: CommitOptions) => Promise<boolean>,
-        complete?: (allValid: boolean) => void
+        validate: (options: CommitOptions) => Promise<boolean>
     ): Promise<boolean> {
         this.ensureNotDisposed();
         const endBatch = this.pendingTasks.begin();
@@ -216,7 +226,6 @@ export class ModelManager<
             } finally {
                 this.reactionSystem.triggerReactionsForFields([...changedFields]);
             }
-            complete?.(allValid);
             return allValid;
         } finally {
             endBatch();

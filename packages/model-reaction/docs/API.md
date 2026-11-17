@@ -43,7 +43,8 @@ top level.
 > **Defaults bypass validation.** Each field's `default` is written directly
 > into `data` at construction — validators do **not** run against it. A model
 > can therefore start in an invalid state while `validationErrors` is empty.
-> Call `await validateAll()` before trusting initial `data`.
+> Before trusting initial `data`, wait for initialization with
+> `await settled()`, then call `await validateAll()`.
 >
 > **Initial reactions propagate through unchanged values.** Non-derived
 > defaults start the initial reaction pass. A successfully validated derived
@@ -103,6 +104,8 @@ with every transformed input in this call, including the field being validated.
 These candidates have not necessarily passed validation. `validateAll()` merges
 committed and dirty data without transforming values again. Validators must
 remain pure and must not mutate the snapshot or its nested field values.
+They must not await the same model's `settled()` or `validateAll()`: these
+global waits include the validator's own task.
 
 All input keys must be own fields of the schema. An unknown key emits
 `field:not-found` and rejects the whole call before any transform, validation,
@@ -273,8 +276,8 @@ Nested values must not be mutated in place.
 For writeback, use `async () => { await model.setField('field', value); }`.
 An expression returning `Promise<boolean>` does not fit `ReactionAction` and
 may create circular schema inference. Never await the same model's `settled()`
-inside an action: it waits for the current group itself. Only returned or
-awaited business Promises are tracked. Cancellation of requests, stale response
+or `validateAll()` inside an action: both wait for the current group itself.
+Only returned or awaited business Promises are tracked. Cancellation of requests, stale response
 protection, and writeback cycles remain application responsibilities.
 For side effects without a derived field, use `model.subscribe`; its callback
 Promises are not included in `settled()`.
@@ -283,9 +286,45 @@ Promises are not included in `settled()`.
 
 | Method | Description |
 | --- | --- |
-| `validateAll(): Promise<boolean>` | Validate every field and return whether all passed. |
+| `validateAll(): Promise<boolean>` | Validate every field once, wait for all tracked model work, and return the final result. |
 | `getDirtyData(): Partial<T>` | Get a stable, shallow-frozen snapshot of values that failed validation. |
 | `clearDirtyData(): void` | Clear all dirty data records. |
+
+For submission, wait for existing inputs and initialization before creating
+the full-validation candidate snapshot:
+
+```ts
+await model.settled();
+const valid = await model.validateAll();
+if (!valid) return;
+await api.save(model.data);
+```
+
+`validateAll()` validates a shared snapshot of committed and dirty values once,
+commits valid fields independently, then waits for tracked calculations,
+actions, and writebacks. The wait is global: overlapping work and already
+running actions whose host versions became stale are included. There is no
+implicit wait before taking the candidate snapshot.
+
+The result is `true` only if this pass succeeded, no dirty values remain, and
+every field's error array is empty after settlement. A failed pass stays
+`false` even if later work repairs its fields. Computation or action failures
+use existing error reporting; remaining errors or failed writebacks make the
+result `false`. An exceptional batch rejection waits for tracked work before
+propagating the original exception, without `validation:complete`.
+
+This is one full pass followed by settlement, not repeated validation of the
+final data. Action writebacks validate their written fields; they do not
+revalidate untouched cross-field rules. Complete related corrections before
+full validation or write the related fields together with `setFields()`.
+The application must pause editing, prevent duplicate submissions, and handle
+input-layer write errors separately; see [Submission Flow](REACT.md#submission-flow).
+
+Disposal during a normally completing call returns `false` and suppresses
+`validation:complete`. It releases settlement waits immediately, but does not
+cancel a field validator already awaited by the batch: that validator must
+return or reach `asyncValidationTimeout` first. Calling after disposal still
+rejects with the existing disposed error.
 
 ### Subscription
 
@@ -324,11 +363,16 @@ Subscribe via `model.on(eventName, handler)`.
 | `field:change` | A field value changes. |
 | `field:validation-complete` | A field validation finishes, including batch operations and reactions, even when its value did not change. Payload includes `field`, `isValid`, and whether the field remains dirty. |
 | `dirty-data:cleared` | `clearDirtyData()` removes one or more dirty values. Payload lists the affected fields. |
-| `validation:complete` | A validation pass finishes. |
+| `validation:complete` | `validateAll()` finishes after tracked work settles; `isValid` matches its final boolean. Not emitted on batch rejection or disposal. |
 | `validation:error` | A validation rule fails. |
 | `reaction:error` | A reaction throws or rejects. |
 | `dependency:error` | A reaction dependency is misconfigured. |
 | `field:not-found` | `setField` or `setFields` attempts to write a field absent from the schema. |
+
+The final result is checked immediately before `validation:complete`. A
+listener's writes, disposal, or new calls are subsequent operations; this
+validation call does not wait again for work started by its completion event.
+Use the event to observe the result, and keep submission-time updates outside it.
 
 ## ModelOptions
 
@@ -433,6 +477,15 @@ For full type definitions, see [`src/types.ts`](../src/types.ts).
 
 These changes are breaking and require updating consumers:
 
+- `validateAll()` now waits for all tracked model work after its full pass and
+  includes remaining dirty values and errors in its boolean. Keep
+  `await model.settled(); const valid = await model.validateAll();` before
+  submission; remove the second settlement and repeated model error checks.
+  Preserve UI write-error handling and submission locks.
+  `validation:complete` now fires after settlement with the final result.
+  Never await the same model's `validateAll()` or `settled()` inside actions
+  or validators; move that orchestration to the external entry point.
+  Gate-based callers must release action gates before awaiting full validation.
 - Unwrap single-entry `reaction` arrays. Rewrite multiple rules as one business
   calculation or split independent results into separate fields; merging
   dependency lists mechanically does not preserve the old semantics.

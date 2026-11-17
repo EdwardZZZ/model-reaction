@@ -52,6 +52,11 @@ setFields ┘     ├─ prepareFieldWrites：先解析整批 schema，再各执
 ```
 
 - `validateAll()` 使用同一校验提交流程，但直接读取 `dirtyData` 或已提交值，不重复执行 transform。
+  在 `runBatch()` 释放 compute 任务后，通过 `finally` 等待 `settled()`，异常路径
+  同样收尾。正常完成时检查本轮结果与当前 dirty、errors，发送
+  `validation:complete` 并返回；不会为这个等待再登记任务。
+- `setField()` / `setFields()` 在批次结束后返回，下游工作可能仍在进行。完整校验
+  等待全部追踪工作，不重复校验，也不在创建候选快照前隐式等待。
 - reaction 写回走 `updateField()`，保留 `origin`、reaction stack 和初始化上下文。
 - 每个字段分别提交，所以 `setFields()` 不是全有或全无事务；一个字段失败不回滚其他有效字段。
 - `ModelManager` 保留请求 ID、状态更新、事件和提交逻辑。抽取 helper 时优先选择无状态的准备或计算逻辑，不把状态拆成多个所有者。
@@ -83,9 +88,10 @@ setFields ┘     ├─ prepareFieldWrites：先解析整批 schema，再各执
 6. 任务释放幂等。销毁移除等待组并立即释放 settlement；已启动 Promise 的
    拒绝仍被观察，销毁后不再向模型报告错误。
 
-compute 计数覆盖输入准备、校验、防抖等待、计算写回、reaction 登记与批次完成事件；
+compute 计数覆盖输入准备、校验、防抖等待、计算写回、reaction 登记与批次释放；
 action 计数覆盖整组生命周期。reaction 不等待 action，`settled()` 等待两类计数，
-同模型的 action 内不能等待它。
+`validateAll()` 在释放批次后复用这个全局等待。同模型的 action 或 validator 内
+不能 await 这两个方法。完整校验的完成事件在落定后发送，监听者更新属于后续工作。
 
 循环与缺失依赖诊断基于声明的计算图和运行时 reaction 路径。action 闭包中的读写
 无法推断，因此不能在构造期完整检查副作用回写循环。

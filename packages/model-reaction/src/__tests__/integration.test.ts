@@ -1347,16 +1347,21 @@ describe('Integration Tests — Full Documentation Scenarios', () => {
     // 37. validateAll 将 dirtyData 晋升到 data 并触发 reaction
     // =========================================================================
     describe('Edge: validateAll promotes dirtyData and triggers reactions', () => {
-        test('should update data and trigger reaction for promoted dirty fields', async () => {
+        test('submits promoted dirty fields and settled derived data with two calls', async () => {
             interface Schema {
                 input: string;
                 mirror: string;
             }
 
+            let allowNew = false;
+            const save = jest.fn();
             const model = createModel<Schema>({
                 input: {
                     type: 'string',
-                    validator: [ValidationRules.required],
+                    validator: [
+                        ValidationRules.required,
+                        new Rule('allowed', 'not yet', (value) => value !== 'new' || allowNew),
+                    ],
                     default: 'old'
                 },
                 mirror: {
@@ -1367,16 +1372,19 @@ describe('Integration Tests — Full Documentation Scenarios', () => {
                         computed: (vals) => `mirror:${vals.input}`
                     }
                 }
-            });
-
-            await model.setField('input', '');
-            expect(model.getDirtyData()).toHaveProperty('input', '');
-            expect(model.getField('input')).toBe('old');
+            }, { debounceReactions: 16 });
 
             await model.setField('input', 'new');
-            expect(model.getField('input')).toBe('new');
-            await new Promise(r => setTimeout(r, 10));
-            expect(model.getField('mirror')).toBe('mirror:new');
+            expect(model.getDirtyData()).toHaveProperty('input', 'new');
+            expect(model.getField('input')).toBe('old');
+
+            allowNew = true;
+            await model.settled();
+            const valid = await model.validateAll();
+            if (valid) save(model.data);
+            expect(valid).toBe(true);
+            expect(save).toHaveBeenCalledWith({ input: 'new', mirror: 'mirror:new' });
+            expect(model.getDirtyData()).toEqual({});
 
             model.dispose();
         });

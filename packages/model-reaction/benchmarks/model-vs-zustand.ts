@@ -1,3 +1,5 @@
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-nocheck
 /* eslint-disable no-console */
 /**
  * model-reaction vs zustand 性能基准测试

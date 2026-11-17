@@ -41,7 +41,7 @@ createModel<S extends Record<string, FieldSchema>>(
 > **默认值不经过校验。** 每个字段的 `default` 在构造时被直接写入 `data`，
 > 验证器**不会**对其运行。因此 model 可能一开始就处于非法状态，而
 > `validationErrors` 却是空的。在信任初始 `data` 之前，请先
-> `await validateAll()`。
+> 先 `await settled()` 等待初始化，再 `await validateAll()`。
 >
 > **初始化反应会经过未变化的值继续传播。** 非派生字段的默认值启动初始反应流程。
 > 派生值通过校验后，即使等于自身默认值，也会继续初始化下游，但不会为未变化的值
@@ -88,6 +88,8 @@ createModel<S extends Record<string, FieldSchema>>(
 已提交数据叠加本次全部经过 transform 的输入，包括正在验证的字段自身。
 候选值不代表已经通过验证。`validateAll()` 合并已提交数据与脏数据，不再重复
 transform。验证器必须保持纯函数，不能修改快照及其嵌套字段值。
+验证器不能 await 同一模型的 `settled()` 或 `validateAll()`，这两个全局等待入口
+会包含验证器自身的任务。
 
 全部输入 key 必须是 schema 的自有字段。遇到未知 key，先发送 `field:not-found`
 再 reject，整批不开始 transform、validation 或提交；按输入顺序报告首个未知字段。
@@ -232,7 +234,8 @@ Promise 拒绝，但不再记录错误或发送事件，并立即释放挂起的
 
 回写推荐 `async () => { await model.setField('field', value); }` 块体。
 直接返回 `Promise<boolean>` 不符合 `ReactionAction`，表达式体还可能形成 schema
-类型推导循环。action 内不能等待同一模型的 `settled()`，因为它会等待当前组自身。
+类型推导循环。action 内不能等待同一模型的 `settled()` 或 `validateAll()`，
+因为两者都会等待当前组自身。
 只有返回或 await 的业务 Promise 才会被跟踪。请求取消、过期响应保护和回写循环
 由业务负责。不需要派生字段的副作用使用 `model.subscribe`，其回调 Promise
 不纳入 `settled()`。
@@ -241,9 +244,36 @@ Promise 拒绝，但不再记录错误或发送事件，并立即释放挂起的
 
 | 方法 | 说明 |
 | --- | --- |
-| `validateAll(): Promise<boolean>` | 验证所有字段，返回是否全部通过 |
+| `validateAll(): Promise<boolean>` | 对全部字段校验一次，等待模型全部追踪工作落定，返回最终结果 |
 | `getDirtyData(): Partial<T>` | 获取稳定的浅冻结脏数据快照 |
 | `clearDirtyData(): void` | 清空所有脏数据记录 |
+
+提交前先等待已有输入写入与初始化落定，再创建完整校验的候选快照：
+
+```ts
+await model.settled();
+const valid = await model.validateAll();
+if (!valid) return;
+await api.save(model.data);
+```
+
+`validateAll()` 对已提交值与 dirty 值组成的共享快照校验一次，独立提交有效字段，
+再等待受追踪的计算、action 与回写。等待范围是整个模型，包含重叠任务以及宿主版本
+失效后仍在运行的旧 action；创建候选快照前没有隐式等待。
+
+只有本轮校验全部通过、落定后没有 dirty 值且全部字段错误数组为空，才返回 `true`。
+本轮失败不会因后续修复而转为成功。计算或 action 失败沿用现有错误处理；
+收尾时仍存在的错误或失败回写使结果为 `false`。批次异常拒绝时，先等待受追踪工作
+收尾，再传播原异常，不发送 `validation:complete`。
+
+这里执行一次完整校验再等待落定，不循环校验最终数据。action 回写只校验写入字段，
+不会重验未写字段的跨字段规则。相关修正应在完整校验前完成，或通过 `setFields()`
+同批写入相关字段。业务仍需暂停编辑、阻止重复提交，并单独处理输入层写入异常，
+见 [提交流程](REACT_CN.md#提交流程)。
+
+正常执行期间销毁会使结果为 `false`，不发送 `validation:complete`。销毁立即释放
+落定等待，但不会取消批次已经 await 的字段验证器；该验证器仍需返回或达到
+`asyncValidationTimeout`。已销毁后调用仍按现有规则以 disposed 异常拒绝。
 
 ### 订阅
 
@@ -281,11 +311,15 @@ off();
 | `field:change` | 字段值变化时 |
 | `field:validation-complete` | 字段校验完成时触发，包括批量操作和 reactions；即使字段值没有变化也会触发，payload 包含 `field`、`isValid` 和字段是否仍为 dirty |
 | `dirty-data:cleared` | `clearDirtyData()` 清除一个或多个脏值时触发；payload 列出受影响字段 |
-| `validation:complete` | 一轮验证完成时 |
+| `validation:complete` | `validateAll()` 等待追踪工作落定后完成时；`isValid` 与最终 boolean 一致。批次异常拒绝或销毁时不发送 |
 | `validation:error` | 某条验证规则失败时 |
 | `reaction:error` | 反应执行抛出错误或 Promise 拒绝时 |
 | `dependency:error` | reaction 依赖配置错误时 |
 | `field:not-found` | `setField` 或 `setFields` 尝试写入 schema 中不存在的字段时 |
+
+最终结果在发送 `validation:complete` 前检查。监听者发起的写入、销毁或新调用
+属于后续操作，本轮校验不会再次等待完成事件产生的工作。用该事件观察结果，
+提交期间的更新应放在事件之外。
 
 ## ModelOptions
 
@@ -387,6 +421,13 @@ const custom = formatValidationErrors(
 
 这组变更不向后兼容，升级时需要修改调用处：
 
+- `validateAll()` 现在在完整校验后等待模型全部追踪工作，并把剩余 dirty 值与错误
+  纳入 boolean。提交前保留
+  `await model.settled(); const valid = await model.validateAll();`，
+  删除第二次等待和重复模型错误检查，保留 UI 写入异常处理与提交锁。
+  `validation:complete` 改为落定后发送最终结果。action 与 validator 内不能
+  await 同一模型的 `validateAll()` 或 `settled()`，将编排移到外部入口。
+  使用 action gate 的调用方必须先释放 gate，再 await 完整校验。
 - 单项 `reaction` 数组直接解包；多项按业务改为一条计算规则，或把独立结果拆成不同
   字段。机械合并依赖列表不保留旧语义。
 - 删除 `strictMode` 和 `failFast`。未知字段固定在 `field:not-found` 后 reject，

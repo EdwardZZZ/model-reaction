@@ -30,6 +30,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and the `packages/devtools/` workspace package.
 
 ### Changed
+- **Breaking (behavior):** `validateAll()` now waits for all tracked model work
+  after its full pass and returns `false` if dirty values or errors remain.
+  `validation:complete` fires after settlement with the final result. Submission
+  uses `await model.settled(); const valid = await model.validateAll();`; remove
+  the second wait and repeated model error checks. Actions and validators must
+  not await either global waiting method on the same model. Public signatures
+  and the shorter `setField` / `setFields` wait remain unchanged. See
+  [validation](docs/API.md#validation) and its migration notes.
 - **Breaking:** `reaction.action` is now an array of no-argument functions
   reading the model through a closure. Only the host's latest eligible group
   starts after calculation settles; each item checks calculation again.

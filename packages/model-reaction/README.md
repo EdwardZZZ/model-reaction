@@ -70,6 +70,7 @@ const user = createModel<User>({
 await user.setField('name', 'John');
 await user.setField('age', 30);
 
+await user.settled();
 const ok = await user.validateAll();
 console.log(ok, user.data); // true { name: 'John', age: 30 }
 ```
@@ -82,6 +83,11 @@ only at the top level.
 
 Always `await setField(...)` so validation has settled before you read `data`;
 always call `dispose()` from your cleanup path when the model's owner unmounts.
+
+For submission, first `await settled()`, then `await validateAll()`. Full
+validation waits for tracked calculations and actions and checks remaining
+dirty values and errors before returning; see [validation](docs/API.md#validation).
+
 The model supports shallow data and tracks changes at the field level. `data` and `getDirtyData()` return
 stable, shallow-frozen snapshots; `getField()` returns the field value. For an
 object, array, or mutable built-in field value such as `Date`, replace the whole
@@ -135,8 +141,9 @@ scheduled reaction for each field can start its group, if its computation commit
 Items run in array order and wait for calculation to settle before each call;
 returned Promises are included in `settled()`. Initialization and unchanged
 computed values can still trigger a group. Direct changes to the host field
-cancel its remaining items without triggering a new group. See the
-[action contract and migration](docs/API.md#action-groups) before upgrading
+cancel its remaining items without triggering a new group. Actions and
+validators must not await the same model's `settled()` or `validateAll()`.
+See the [action contract and migration](docs/API.md#action-groups) before upgrading
 from single-function actions.
 
 ### Dirty Data

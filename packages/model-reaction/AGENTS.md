@@ -24,7 +24,7 @@ mutable built-ins such as `Date` through `setField` / `setFields`.
 | Write a batch | `await model.setFields({ a, b })` |
 | Read committed state | `model.data` / `model.getField(name)` |
 | Revalidate dirty and committed values | `await model.validateAll()` |
-| Wait for model work, outside actions | `await model.settled()` |
+| Wait for model work, outside actions and validators | `await model.settled()` |
 | Observe a value outside React | `model.subscribe(selector, callback)` |
 | Release an owned instance | `model.dispose()` |
 
@@ -32,6 +32,11 @@ Writes return `Promise<boolean>`: validation failure resolves `false`;
 exceptional writes reject. Failed values stay out of `data`.
 `await setField` covers the field's validation and commit, not the full
 downstream chain.
+For submission, use `await model.settled(); const valid = await model.validateAll();`.
+Full validation checks one candidate snapshot, then waits for all tracked work
+and includes remaining dirty values and errors in its result. It does not
+repeat cross-field validation after action writeback. Never await the same
+model's `settled()` or `validateAll()` inside a validator.
 
 Each field accepts one reaction. Rules run condition/validation in order and
 stop at the first error; `strictMode` and `failFast` no longer exist.
@@ -57,7 +62,8 @@ and actions.
 through a closure. The latest eligible host group starts after calculation
 settles; each item checks calculation again. New host versions cancel
 unstarted items; running Promises remain tracked. Never await the same model's
-`settled()` inside an action. Details: [action groups](docs/API.md#action-groups).
+`settled()` or `validateAll()` inside an action. Details:
+[action groups](docs/API.md#action-groups).
 
 Use `useDraftField` for text inputs and show
 `writeError?.message ?? meta.error` under `showError`. Non-text controls can use

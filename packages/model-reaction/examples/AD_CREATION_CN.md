@@ -183,9 +183,7 @@ async function submitAd(model: AdDraftModel,
   requestId: string, version: number): Promise<SubmitAdResponse> {
   await model.settled();
   const valid = await model.validateAll();
-  await model.settled();
-  if (!valid || Object.keys(model.getDirtyData()).length ||
-      Object.values(model.validationErrors).some((errors) => errors.length > 0)) {
+  if (!valid) {
     throw new Error('请先修正本地校验错误');
   }
   const data = model.data;
@@ -199,6 +197,9 @@ async function submitAd(model: AdDraftModel,
 ```
 
 本例未包含 UI 锁定和网络错误展示；调用方用 `try` / `catch` / `finally` 管理提交状态。
+`validateAll()` 已等待计算与 action 收尾，并检查模型 dirty 值与错误；它只做一次
+完整校验，不会因 action 改写预算而自动重验其他字段的跨字段规则。预算等关联修正
+应在完整校验前完成，或同批写入相关字段。
 `requestId` 与版本由应用维护，不使用内部 action 版本作为业务幂等键。
 服务端已接受而本地回填失败时，重新获取详情，不将它当作提审未成功而发起新请求。
 

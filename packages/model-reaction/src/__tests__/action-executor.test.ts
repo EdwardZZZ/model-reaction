@@ -329,17 +329,26 @@ describe('action computation barriers', () => {
             );
             await model.setField('source', 1);
             await started.promise;
+            let validation: Promise<boolean> | undefined;
             if (operation === 'validateAll') {
                 valid = false;
                 expect(await model.setField('target', 7)).toBe(false);
                 valid = true;
-                await model.validateAll();
+                let completed = false;
+                validation = model.validateAll().then((result) => {
+                    completed = true;
+                    return result;
+                });
+                await drain();
+                expect(model.data.target).toBe(7);
+                expect(completed).toBe(false);
             } else if (operation === 'setFields') {
                 await model.setFields({ target: 7 });
             } else {
                 await model.setField('target', 7);
             }
             gate.resolve();
+            if (validation) expect(await validation).toBe(true);
             await model.settled();
             expect(model.data.target).toBe(7);
             expect(next).not.toHaveBeenCalled();

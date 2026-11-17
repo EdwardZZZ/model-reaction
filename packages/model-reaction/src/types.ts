@@ -17,7 +17,7 @@ export const ModelEvents = {
  */
 export const SKIP_REACTION = Symbol.for('model-reaction.SKIP_REACTION');
 
-/** Runtime validation rule. */
+/** Pure validation rule; never await this model's global waiting methods. */
 export interface Validator {
     type: string;
     message: string;
@@ -56,6 +56,7 @@ export interface ModelEventMap<T = Record<string, any>> {
         field: keyof T & string;
         value: T[keyof T];
     };
+    /** Final validation result after tracked work settles; see docs/API.md. */
     [ModelEvents.VALIDATION_COMPLETE]: { isValid: boolean };
     [ModelEvents.FIELD_VALIDATION_COMPLETE]: {
         field: keyof T & string;
@@ -65,6 +66,7 @@ export interface ModelEventMap<T = Record<string, any>> {
     [ModelEvents.DIRTY_DATA_CLEARED]: { fields: Array<keyof T & string> };
 }
 
+/** Return tracked work; never await this model's settled/validateAll. See docs/API.md. */
 export type ReactionAction = () => void | PromiseLike<void>;
 
 /**
@@ -187,6 +189,7 @@ export interface ModelReturn<T = Record<string, any>> {
     setField: <K extends keyof T>(field: K, value: T[K]) => Promise<boolean>;
     getField: <K extends keyof T>(field: K) => T[K];
     setFields: (fields: Partial<T>) => Promise<boolean>;
+    /** Validate once, await tracked work, then check dirty values and errors; see docs/API.md. */
     validateAll: () => Promise<boolean>;
     on: <E extends keyof ModelEventMap<T>>(
         event: E,

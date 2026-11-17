@@ -68,6 +68,7 @@ const user = createModel<User>({
 await user.setField('name', 'John');
 await user.setField('age', 30);
 
+await user.settled();
 const ok = await user.validateAll();
 console.log(ok, user.data); // true { name: 'John', age: 30 }
 ```
@@ -78,6 +79,10 @@ console.log(ok, user.data); // true { name: 'John', age: 30 }
 
 始终 `await setField(...)`，确保验证完成后再读取 `data`；
 当 model 的 owner 卸载时，始终在 cleanup 路径里调用 `dispose()`。
+
+提交前先 `await settled()`，再 `await validateAll()`。完整校验会等待受追踪的
+计算与 action，并在返回前检查剩余 dirty 值与错误，见 [校验契约](docs/API_CN.md#验证)。
+
 模型只支持浅层数据，按字段跟踪变化。`data` 和 `getDirtyData()` 返回稳定的浅冻结快照；
 `getField()` 返回字段值。对于对象、数组或 Date 等可变内建对象字段，请通过
 `setField()` 或 `setFields()` 整体替换；原地修改不会被观察，也不会触发校验或
@@ -124,6 +129,7 @@ TypeScript 会按字段的 `type` 检查返回值，因此 `full` 只能返回�
 字段只有最新调度且成功提交的 reaction 能启动一组 action。数组项按顺序执行，
 每次调用前都等待计算落定，返回的 Promise 纳入 `settled()`。初始化及相等计算值
 仍可触发一组；直接修改宿主字段会取消其未启动项，但不会自行触发新组。
+action 与 validator 内不能 await 同一模型的 `settled()` 或 `validateAll()`。
 从单函数 action 升级前，请阅读 [执行契约与迁移](docs/API_CN.md#action-组)。
 
 ### 脏数据

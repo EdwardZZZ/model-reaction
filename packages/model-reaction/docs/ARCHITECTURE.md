@@ -53,6 +53,13 @@ setFields┘    ├─ prepareFieldWrites: resolve the whole batch, then transfo
 ```
 
 - `validateAll()` shares the validation/commit path but reads dirty or committed values without transforming them again.
+  After `runBatch()` releases its compute task, it awaits `settled()` in a
+  `finally` block, including rejection paths. On normal completion it checks
+  the pass result plus current dirty values and errors, emits
+  `validation:complete`, and returns. It adds no tracked task for this wait.
+- `setField()` / `setFields()` return after the batch; downstream work may
+  remain. Full validation waits for all tracked work, without repeating the
+  pass or implicitly waiting before creating its candidate snapshot.
 - Reaction writeback uses `updateField()` and preserves its origin, reaction stack, and initialization context.
 - Fields commit independently, so `setFields()` is not an all-or-nothing transaction.
 - `ModelManager` keeps request IDs, state updates, events, and commit logic. Extract stateless preparation or calculation helpers; avoid splitting state ownership.
@@ -96,10 +103,12 @@ migration examples remain in [API.md](API.md#action-groups).
    with post-disposal model error reporting suppressed.
 
 The compute count covers input preparation, validation, debounce waits,
-computed writeback, reaction registration, and batch completion events. The
+computed writeback, reaction registration, and batch release. The
 action count covers whole groups. Reactions never await actions;
-`settled()` waits for both counts and must not be awaited by an action on the
-same model.
+`settled()` waits for both counts, and `validateAll()` reuses that global wait
+after releasing its batch. Neither method may be awaited by an action or
+validator on the same model. The full-validation completion event runs after
+settlement; listener updates are subsequent work.
 
 Cycle and missing-dependency diagnostics follow the declared calculation
 graph and runtime reaction paths. Closure reads and writes inside actions

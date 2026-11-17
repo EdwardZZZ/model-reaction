@@ -427,21 +427,23 @@ const summary = useModelComputed(
 ## 提交流程
 
 提交期间暂停编辑。先等待当前校验与 reactions 完成，再校验全部字段，包括未经
-校验的默认值和被拒输入。校验可能把 dirty 值提升到 data 并启动后续 reactions，
-因此保存前需要再次等待，并检查当前错误：
+校验的默认值和被拒输入。`validateAll()` 也会等待 dirty 值提升引起的后续工作，
+并在返回前检查剩余模型错误与 dirty 值：
 
 ```tsx
 async function onSubmit() {
     await model.settled();
     const ok = await model.validateAll();
-    await model.settled();
-    if (!ok || Object.values(model.validationErrors).some((errors) => errors.length > 0)) return;
+    if (!ok) return;
     await api.save(model.data);
 }
 ```
 
 `settled()` 等待模型追踪的工作，包括 action 返回的 Promise；它不会锁住新编辑，
 也不会等待未返回给 action 调度器的网络任务。提交中的 UI 应阻止并发编辑和重复提交。
+进入这个流程前，若输入存在 `useDraftField.writeError` 或尚未重放的文本，应阻止
+提交；它们属于输入层，不在模型检查范围内。完整校验只运行一次，相关跨字段修正
+应先完成。失败与生命周期细节见 [校验契约](API_CN.md#验证)。
 
 见 [提交 Recipe](../examples/react-best-practices/7-6-submission-flow.tsx)。
 

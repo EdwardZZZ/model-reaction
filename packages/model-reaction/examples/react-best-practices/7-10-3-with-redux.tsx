@@ -51,8 +51,7 @@ export function EditUserPage() {
         if (!current) return;
         await current.settled();
         const ok = await current.validateAll();
-        await current.settled();
-        if (!ok || Object.values(current.validationErrors).some((errors) => errors.length > 0)) return;
+        if (!ok) return;
         dispatch(saveUser(current.data));
     }
 
