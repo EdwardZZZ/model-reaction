@@ -8,15 +8,17 @@
 
 ## 模块与业务约束
 
-页面 owner 创建一个编辑模型；业务模块负责 Schema 组合、批量写入、DTO 转换与接口
-编排；组件负责输入和展示。片段共享扁平字段空间，不能出现重复字段名。
+各业务模块导出字段定义对象，用对象展开组合成 `AdCreation`，再交给 `createModel`。
+页面 owner 管理生成的编辑实例；业务模块负责字段规则、批量写入、DTO 转换与接口
+编排；组件负责输入和展示。各定义片段共享扁平字段空间，不能出现重复字段名。
 
 | 模块 | 字段 |
 | --- | --- |
-| 基础 | `id`、`name`、`status` |
-| 创意 | `title`、`description`、`imageUrl`、`landingPageUrl` |
-| 投放 | `budget`、`dailyBudget`、`startDate`、`endDate`、`platforms` |
-| 提示 | `ready`、`blockReason` |
+| 基础 `basic` | `id`、`name`、`status` |
+| 出价与预算 `bidding` | `budget`、`dailyBudget` |
+| 投放 `targeting` | `startDate`、`endDate`、`platforms` |
+| 创意 `creative` | `title`、`description`、`imageUrl`、`landingPageUrl` |
+| 提示 `audit` | `ready`、`blockReason` |
 
 | 约束 | 本例规则 | 最终负责方 |
 | --- | --- | --- |
@@ -32,30 +34,17 @@
 
 ## Schema 组合
 
+`bidding`、`targeting`、`creative` 等模块都是当前 API 接受的字段定义对象。
+用 `satisfies Model` 检查定义，并保留具体字段类型供 `createModel` 推导。
+组合只需 `{ ...bidding, ...targeting, ...creative }`；本例额外组合基础和提示字段，
+所有字段在同一个实例中共享校验快照、reaction 依赖图与 `settled()`。
+
 ```ts
-import { createModel, type Model, type ModelReturn } from 'model-reaction';
+import { createModel, type Model } from 'model-reaction';
 import { Rule, ValidationRules } from 'model-reaction/validation';
 
-type AdStatus = 'draft' | 'pending' | 'approved' | 'rejected' | 'active' | 'paused';
-interface AdDraft {
-  id: string;
-  name: string;
-  status: AdStatus;
-  title: string;
-  description: string;
-  imageUrl: string;
-  landingPageUrl: string;
-  budget: number;
-  dailyBudget: number;
-  startDate: Date;
-  endDate: Date;
-  platforms: string[];
-  ready: boolean;
-  blockReason: string;
-}
-
-const statuses: readonly AdStatus[] =
-  ['draft', 'pending', 'approved', 'rejected', 'active', 'paused'];
+const statuses =
+  ['draft', 'pending', 'approved', 'rejected', 'active', 'paused'] as const;
 const validDate = new Rule('date', '日期无效', (value) =>
   value instanceof Date && Number.isFinite(value.getTime()));
 const finiteAmount = new Rule('amount', '预算必须为有限数值', (value) =>
@@ -75,41 +64,44 @@ const afterStart = new Rule('dateOrder', '结束时间必须晚于开始时间',
   value instanceof Date && data?.startDate instanceof Date &&
   value.getTime() > data.startDate.getTime());
 
-const creativeSchema: Model<Pick<AdDraft,
-  'title' | 'description' | 'imageUrl' | 'landingPageUrl'>> = {
-  title: { type: 'string', default: '',
-    validator: [ValidationRules.required, ValidationRules.maxLength(20)] },
-  description: { type: 'string', default: '',
-    validator: [ValidationRules.required, ValidationRules.maxLength(100)] },
-  imageUrl: { type: 'string', default: '', validator: [httpUrl] },
-  landingPageUrl: { type: 'string', default: '', validator: [httpUrl] },
-};
-
-function createAdDraftModel(id: string, now = Date.now()): ModelReturn<AdDraft> {
-  const basicSchema: Model<Pick<AdDraft, 'id' | 'name' | 'status'>> = {
+function createAdDraftModel(id: string, now = Date.now()) {
+  const basic = {
     id: { type: 'string', default: id, validator: [ValidationRules.required] },
     name: { type: 'string', default: '', validator: [
       ValidationRules.required, ValidationRules.minLength(3), ValidationRules.maxLength(50),
     ] },
-    status: { type: 'enum', default: 'draft',
+    status: { type: 'enum', values: statuses, default: 'draft' as const,
       validator: [new Rule('status', '状态无效', (value) => statuses.includes(value))] },
-  };
-  const targetingSchema: Model<Pick<AdDraft,
-    'budget' | 'dailyBudget' | 'startDate' | 'endDate' | 'platforms'>> = {
+  } satisfies Model;
+
+  const bidding = {
     budget: { type: 'number', default: 1000,
       validator: [finiteAmount, ValidationRules.min(100)] },
     dailyBudget: { type: 'number', default: 100,
       validator: [finiteAmount, ValidationRules.min(10), withinBudget] },
+  } satisfies Model;
+
+  const targeting = {
     startDate: { type: 'date', default: new Date(now), validator: [validDate] },
     endDate: { type: 'date', default: new Date(now + 30 * 86400000),
       validator: [validDate, afterStart] },
-    platforms: { type: 'array', default: [], validator: [
+    platforms: { type: 'array', default: [] as string[], validator: [
       new Rule('platforms', '至少选择一个平台', (value) =>
         Array.isArray(value) && value.length > 0 &&
         value.every((item) => typeof item === 'string' && item.length > 0)),
     ] },
-  };
-  const auditSchema: Model<Pick<AdDraft, 'ready' | 'blockReason'>> = {
+  } satisfies Model;
+
+  const creative = {
+    title: { type: 'string', default: '',
+      validator: [ValidationRules.required, ValidationRules.maxLength(20)] },
+    description: { type: 'string', default: '',
+      validator: [ValidationRules.required, ValidationRules.maxLength(100)] },
+    imageUrl: { type: 'string', default: '', validator: [httpUrl] },
+    landingPageUrl: { type: 'string', default: '', validator: [httpUrl] },
+  } satisfies Model;
+
+  const audit = {
     ready: { type: 'boolean', default: false, reaction: {
       fields: ['name', 'title', 'description', 'imageUrl', 'landingPageUrl', 'platforms'],
       computed: (v) => Boolean(v.name && v.title && v.description &&
@@ -119,12 +111,27 @@ function createAdDraftModel(id: string, now = Date.now()): ModelReturn<AdDraft> 
       fields: ['ready'],
       computed: (v) => v.ready ? '' : '请补全名称、创意内容和投放平台',
     } },
+  } satisfies Model;
+
+  const AdCreation = {
+    ...basic,
+    ...bidding,
+    ...targeting,
+    ...creative,
+    ...audit,
   };
-  return createModel<AdDraft>({
-    ...basicSchema, ...creativeSchema, ...targetingSchema, ...auditSchema,
-  }, { debounceReactions: 16 });
+
+  return createModel(AdCreation, { debounceReactions: 16 });
 }
+
+type AdDraftModel = ReturnType<typeof createAdDraftModel>;
+type AdDraft = AdDraftModel['data'];
 ```
+
+本例将定义片段集中写在创建函数中，便于复制运行，并按传入的 ID 与时间设置默认值。
+实际项目可按模块导出静态片段，依赖动态默认值的片段通过工厂生成，再在创建入口展开
+组合。`AdDraftModel` 与 `AdDraft` 从返回类型提取，无需另写完整字段接口或
+`Model<Pick<...>>`。
 
 修改投放组合时使用 `setFields`，让跨字段规则看到同批候选值。仅修改 `budget`
 不会自动重验 `dailyBudget`，仅修改 `startDate` 也不会重验 `endDate`；可在业务入口
@@ -140,6 +147,9 @@ function createAdDraftModel(id: string, now = Date.now()): ModelReturn<AdDraft> 
 先结束当前编辑写入，等待模型落定、完整校验并等待其后续计算，然后读取 payload。
 请求期间禁止继续编辑，并处理重复点击；请求失败保持 `draft`，收到成功响应后才
 更新 `pending`。生产应用以服务端返回的实体和版本为准。
+
+模块划分与接口结构分别维护：本例预算字段在 `bidding` 中定义，出站时按服务端契约
+放进 `targeting`。`toSubmitDTO` 显式组装接口字段，并将日期转换为 ISO 字符串。
 
 ```ts
 interface SubmitAdRequest {
@@ -160,7 +170,7 @@ interface SubmitAdRequest {
 interface FieldIssue { field: string; code: string; message: string }
 interface SubmitAdResponse { success: boolean; issues?: FieldIssue[] }
 
-function toSubmitDTO(data: Readonly<AdDraft>, requestId: string,
+function toSubmitDTO(data: AdDraft, requestId: string,
   version: number): SubmitAdRequest {
   return {
     id: data.id, name: data.name, status: 'draft', requestId, version,
@@ -176,7 +186,7 @@ function toSubmitDTO(data: Readonly<AdDraft>, requestId: string,
   };
 }
 
-async function submitAd(model: ModelReturn<AdDraft>,
+async function submitAd(model: AdDraftModel,
   api: (request: SubmitAdRequest) => Promise<SubmitAdResponse>,
   requestId: string, version: number): Promise<SubmitAdResponse> {
   await model.settled();
