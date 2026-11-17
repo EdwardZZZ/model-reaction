@@ -1,10 +1,11 @@
 import { PendingTasks } from '../core/pending-tasks';
+import type { ReactionAction } from '../types';
 import type { ReactionJob } from './reaction-job';
 
 interface ActionGroup {
     job: ReactionJob;
     version: number;
-    index: number;
+    actions: ReactionAction[];
     running: boolean;
     endTask: () => void;
 }
@@ -39,10 +40,14 @@ export class ActionExecutor {
     register(job: ReactionJob, version: number): void {
         if (this.disposed || this.fieldActionVersion.get(job.field) !== version) return;
         if (!job.reaction.action?.length) return;
+        const actions = job.reaction.action.filter((action, index, all) => all.lastIndexOf(action) === index);
+        for (const group of this.groups) {
+            group.actions = group.actions.filter((action) => !actions.includes(action));
+        }
         const group: ActionGroup = {
             job,
             version,
-            index: 0,
+            actions,
             running: false,
             endTask: this.tasks.begin('action'),
         };
@@ -69,14 +74,14 @@ export class ActionExecutor {
             .filter((group) => !group.running)
             .sort((a, b) => this.fieldOrder.get(a.job.field)! - this.fieldOrder.get(b.job.field)!);
         for (const group of ready) {
-            if (!this.isCurrent(group)) {
+            if (!this.isCurrent(group) || !group.actions.length) {
                 this.finish(group);
                 continue;
             }
             if (!this.tasks.isComputeIdle) return;
             group.running = true;
             try {
-                const action = group.job.reaction.action![group.index]!;
+                const action = group.actions.shift()!;
                 const result = action();
                 void Promise.resolve(result).then(
                     () => this.completeItem(group),
@@ -90,8 +95,7 @@ export class ActionExecutor {
 
     private completeItem(group: ActionGroup): void {
         group.running = false;
-        group.index++;
-        if (!this.isCurrent(group) || group.index >= group.job.reaction.action!.length) {
+        if (!this.isCurrent(group) || !group.actions.length) {
             this.finish(group);
         } else {
             this.scheduleFlush();

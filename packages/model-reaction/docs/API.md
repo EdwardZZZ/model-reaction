@@ -253,8 +253,12 @@ to become idle immediately before its no-argument call. It then waits for that
 item's PromiseLike before considering the next item. An unrelated calculation
 pauses remaining items; a new host version cancels them. Already started
 functions continue, and a new valid group starts from index zero without waiting
-for an old function to finish. Duplicate function references execute once per
-array position; empty arrays do nothing.
+for an old function to finish. Empty arrays do nothing.
+
+Pending functions within each model keep only their last array position in the
+last registered group; matching references are removed from older pending lists.
+For example, `[save, log, save]` executes `log` then `save`. Distinct wrappers are
+distinct functions. Group scheduling and already started calls are unchanged.
 
 Groups ready in the same scheduler turn are attempted in schema field order.
 Each group waits independently for its own Promise. A synchronous write starting
@@ -510,6 +514,9 @@ These changes are breaking and require updating consumers:
   successful computation. A later skip or failure cancels earlier actions even
   when an earlier value commits. Remaining items can be cancelled after a new
   host version; combine operations in one item when they must complete together.
+- Pending actions keep only the last registered occurrence of each function
+  reference within a model. Use distinct wrappers when repeated array positions
+  or host fields must each execute the function.
 - Import `ValidationRules`, `Rule`, `formatValidationErrors`, and the
   `ValidationErrorFormatter` type from `model-reaction/validation`.
   Browser UMD consumers also load `dist/validation.js`; helpers are on the

@@ -1,4 +1,4 @@
-import { createModel, Reaction, SKIP_REACTION } from '../index';
+import { createModel, Reaction, ReactionAction, SKIP_REACTION } from '../index';
 import { ActionExecutor } from '../reaction/action-executor';
 import { PendingTasks } from '../core/pending-tasks';
 
@@ -663,10 +663,8 @@ describe('action computation barriers', () => {
         expect(values).toEqual([
             [20, 99],
             [20, 99],
-            [20, 99],
-            [20, 99],
         ]);
-        expect(action.mock.calls).toEqual([[], [], [], []]);
+        expect(action.mock.calls).toEqual([[], []]);
     });
 
     test('keeps a late valid write without restoring its superseded action', async () => {
@@ -753,7 +751,7 @@ describe('action computation barriers', () => {
         }
     );
 
-    test('preserves separate hosts when they share the same reaction and action references', async () => {
+    test('computes separate hosts but calls their shared action only once', async () => {
         const values: number[][] = [];
         const action = jest.fn(() => {
             values.push([model.data.first, model.data.second]);
@@ -772,11 +770,8 @@ describe('action computation barriers', () => {
         );
         await model.setField('source', 2);
         await model.settled();
-        expect(values).toEqual([
-            [4, 4],
-            [4, 4],
-        ]);
-        expect(action).toHaveBeenCalledTimes(2);
+        expect(values).toEqual([[4, 4]]);
+        expect(action).toHaveBeenCalledTimes(1);
     });
 
     test('keeps captured snapshot values stable while later items read a newer batch', async () => {
@@ -908,6 +903,68 @@ describe('action computation barriers', () => {
     );
 });
 
+describe('ActionExecutor function deduplication', () => {
+    const cleanups: Array<() => void> = [];
+    function setup() {
+        const tasks = new PendingTasks();
+        const executor = new ActionExecutor(['first', 'second'], tasks, jest.fn());
+        cleanups.push(() => {
+            executor.dispose();
+            tasks.dispose();
+        });
+        const register = (field: string, action: ReactionAction[]) => {
+            executor.register(
+                { field, reaction: { fields: [], computed: () => 1, action } },
+                executor.invalidate(field)
+            );
+        };
+        return { tasks, register };
+    }
+    afterEach(() => {
+        cleanups.splice(0).forEach((dispose) => dispose());
+    });
+
+    test('keeps only the last array position of a function', async () => {
+        const { tasks, register } = setup();
+        const order: string[] = [];
+        const shared = () => { order.push('shared'); };
+        register('first', [
+            shared,
+            () => { order.push('before'); },
+            shared,
+            () => { order.push('after'); },
+        ]);
+        await tasks.settled();
+        expect(order).toEqual(['before', 'shared', 'after']);
+    });
+
+    test.each([
+        ['first', 'second'],
+        ['second', 'first'],
+    ])('keeps the last registration from %s then %s, regardless of schema order', async (earlier, later) => {
+        const { tasks, register } = setup();
+        const end = tasks.begin();
+        const gate = deferred();
+        const shared = jest.fn();
+        const earlierRest = jest.fn();
+        const laterRest = jest.fn();
+        register(earlier, [shared, earlierRest]);
+        register(later, [() => gate.promise, shared, laterRest]);
+        end();
+        let idle = false;
+        const settled = tasks.settled().then(() => { idle = true; });
+        await drain();
+        expect(earlierRest).toHaveBeenCalledTimes(1);
+        expect(shared).not.toHaveBeenCalled();
+        expect(laterRest).not.toHaveBeenCalled();
+        expect(idle).toBe(false);
+        gate.resolve();
+        await settled;
+        expect(shared).toHaveBeenCalledTimes(1);
+        expect(laterRest).toHaveBeenCalledTimes(1);
+    });
+});
+
 describe('ActionExecutor task lifecycle', () => {
     test('rechecks computation after an idle notification and cancels a waiting group immediately', async () => {
         const tasks = new PendingTasks();
@@ -931,10 +988,11 @@ describe('ActionExecutor task lifecycle', () => {
         tasks.dispose();
     });
 
-    test('cancels a candidate at handoff before the next group starts', async () => {
+    test.each(['cancel', 'replace'])('drops superseded data before the next group starts (%s)', async (operation) => {
         const tasks = new PendingTasks();
         const second = jest.fn();
-        const executor = new ActionExecutor(['first', 'second'], tasks, jest.fn());
+        const onError = jest.fn();
+        const executor = new ActionExecutor(['first', 'second', 'third'], tasks, onError);
         const end = tasks.begin();
         executor.register(
             {
@@ -944,7 +1002,11 @@ describe('ActionExecutor task lifecycle', () => {
                     computed: () => 1,
                     action: [
                         () => {
-                            executor.invalidate('second');
+                            if (operation === 'cancel') executor.invalidate('second');
+                            else executor.register(
+                                { field: 'third', reaction: { fields: [], computed: () => 1, action: [second] } },
+                                executor.invalidate('third')
+                            );
                         },
                     ],
                 },
@@ -957,7 +1019,8 @@ describe('ActionExecutor task lifecycle', () => {
         );
         end();
         await tasks.settled();
-        expect(second).not.toHaveBeenCalled();
+        expect(second).toHaveBeenCalledTimes(operation === 'cancel' ? 0 : 1);
+        expect(onError).not.toHaveBeenCalled();
         executor.dispose();
         tasks.dispose();
     });

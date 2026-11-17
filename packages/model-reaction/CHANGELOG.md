@@ -43,6 +43,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   starts after calculation settles; each item checks calculation again.
   Direct host changes cancel unstarted items, while started Promises remain
   tracked. See the [action migration](docs/API.md#action-groups).
+- **Breaking (behavior):** pending action items now merge by function reference
+  within each model, retaining the last registered occurrence. Group scheduling
+  and already started calls are unchanged; distinct wrappers remain independent.
 - **Breaking:** each field now accepts one `reaction`; arrays (including empty
   arrays) fail at construction before initialization. Unwrap single entries;
   refactor multiple calculations by business result instead of merging them

@@ -89,6 +89,8 @@ migration examples remain in [API.md](API.md#action-groups).
    captured version is current. The group acquires one action task immediately
    and keeps it across readiness, item execution, and inter-item waits. No
    separate pending-candidate map or collection handoff is needed.
+   Each group stores its unstarted functions in an `actions` queue. Registration
+   keeps the last occurrence of each reference and removes it from older queues.
 4. Compute idle schedules a microtask flush. Each flush takes a ready snapshot
    in schema field order. Immediately before every item, check disposal,
    version, and compute idle synchronously, then call it without an intervening
