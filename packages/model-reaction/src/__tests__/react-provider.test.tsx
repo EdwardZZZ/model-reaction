@@ -13,7 +13,7 @@ import {
 import type { ModelReturn } from '../types';
 
 // ---------------------------------------------------------------------------
-// Provider-owned model lifecycle (AGENTS.md §3 pitfall #5)
+// Provider-owned model lifecycle (docs/REACT.md#model-lifecycle-in-react)
 //
 // Verifies that wrapping `createModel(...)` in a Context Provider with a
 // `useEffect` cleanup actually triggers `dispose()` exactly once when the
@@ -312,4 +312,3 @@ describe('Field', () => {
         spy.mockRestore();
     });
 });
-

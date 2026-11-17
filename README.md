@@ -3,66 +3,12 @@
 A [pnpm workspace](https://pnpm.io/workspaces) containing the `model-reaction`
 library, its browser DevTools extension, and a demo app.
 
-## model-reaction
-
-`model-reaction` is a type-safe data model library for TypeScript. It keeps
-validated data as the committed source of truth, preserves rejected input
-separately as dirty data, and recomputes derived fields through explicit
-dependency reactions. Optional React bindings provide fine-grained
-subscriptions without adding React to the core package.
-
-- **Validation** — synchronous and asynchronous rules, including conditional
-  and cross-field validation.
-- **Reactions** — automatically recompute derived fields when declared
-  dependencies change.
-- **Dirty-data tracking** — retain invalid user input without replacing the
-  last committed value.
-- **Typed events and React bindings** — observe model changes through typed
-  subscriptions or optional React hooks.
-
-### Installation
-
-```bash
-npm install model-reaction
-
-# Optional React bindings (React >=18)
-npm install model-reaction react
-```
-
-### Quick start
-
-```ts
-import { createModel } from 'model-reaction';
-import { ValidationRules } from 'model-reaction/validation';
-
-const user = createModel({
-  firstName: {
-    type: 'string',
-    default: '',
-    validator: [ValidationRules.required],
-  },
-  lastName: { type: 'string', default: '' },
-  fullName: {
-    type: 'string',
-    default: '',
-    reaction: {
-      fields: ['firstName', 'lastName'],
-      computed: ({ firstName, lastName }) =>
-        `${firstName} ${lastName}`.trim(),
-    },
-  },
-});
-
-await user.setFields({ firstName: 'Ada', lastName: 'Lovelace' });
-await user.settled();
-console.log(user.data.fullName); // Ada Lovelace
-
-user.dispose();
-```
-
-See the library documentation for the complete API and usage guidance:
+For installation and a quick start, see the library README:
 [English](packages/model-reaction/README.md) |
 [中文](packages/model-reaction/README_CN.md).
+The documentation index covers API contracts, React, architecture, and examples:
+[English](packages/model-reaction/docs/README.md) |
+[中文](packages/model-reaction/docs/README_CN.md).
 
 ## Packages
 
@@ -101,6 +47,8 @@ pnpm --filter model-reaction-demo run dev     # demo dev server
 ├── pnpm-workspace.yaml
 └── tsconfig.base.json    # shared compiler options (each package extends it)
 ```
+
+Library contribution rules and required checks: [AGENTS.md](packages/model-reaction/AGENTS.md).
 
 ## License
 

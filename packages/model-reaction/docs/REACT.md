@@ -3,7 +3,9 @@
 The package ships a React adapter at `model-reaction/react`. It exposes a
 small set of hooks and components designed so each subscriber re-renders
 only when its watched slice actually changes.
-This page is the canonical React contract; README and best practices link here.
+This page is the canonical React contract; README and examples link here.
+
+[中文版本](REACT_CN.md) | English
 
 [← Back to README](../README.md)
 
@@ -351,7 +353,7 @@ Why this works:
   abandons cannot leak a model.
 - Each effect setup creates one model and its cleanup disposes that same
   instance. Children mount only after the model is ready.
-- See [`src/__tests__/react.test.tsx`](../src/__tests__/react.test.tsx)
+- See [`react-provider.test.tsx`](../src/__tests__/react-provider.test.tsx)
   → "Provider-owned model dispose lifecycle" for the unit tests that
   pin this behaviour.
 
@@ -477,9 +479,9 @@ async function onSubmit() {
 }
 ```
 
-`settled()` waits for tracked model work; it does not lock out new edits or
-await arbitrary network work launched inside an `action`. The submitting UI
-must prevent concurrent edits and duplicate submissions.
+`settled()` waits for tracked model work, including Promises returned by
+actions. It does not lock out new edits or wait for fire-and-forget network
+work. The submitting UI must prevent concurrent edits and duplicate submissions.
 
 See [the submission recipe](../examples/react-best-practices/7-6-submission-flow.tsx).
 
@@ -493,4 +495,5 @@ on the server.
 
 The [CLI runner](../examples/react-bindings-runner.tsx) performs an SSR smoke
 check; mounted subscription and StrictMode behavior are covered in
-[React tests](../src/__tests__/react.test.tsx).
+[provider tests](../src/__tests__/react-provider.test.tsx) and
+[selector tests](../src/__tests__/react-selectors.test.tsx).

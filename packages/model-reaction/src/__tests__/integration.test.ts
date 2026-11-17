@@ -3,15 +3,15 @@
  *
  * 与本目录其他 `*.test.ts` 不同，本文件不对应任何单一 src 模块；它通过
  * 公共 API（`createModel` / `Rule` / `ValidationRules` / `ModelEvents` /
- * `formatValidationErrors`）端到端验证 README、BEST_PRACTICES、REACT 等文档中
- * 列出的全部使用示例，确保文档中的用法与运行时行为保持一致。
+ * `formatValidationErrors`）端到端验证 README、ADVANCED、REACT 中的核心场景，
+ * 确保文档中的用法与运行时行为保持一致。
  *
  * 覆盖范围：
- *   1.  README 全部代码片段（同步 / 异步校验、自定义规则、类型化事件、
+ *   1.  README / ADVANCED 核心场景（同步 / 异步校验、自定义规则、类型化事件、
  *       transform、settled、setFields、首错校验、错误格式化）
- *   2.  Reaction 系统的 action 回调、多 reaction、循环依赖
+ *   2.  Reaction 系统的 action 组、多字段 reaction、循环依赖
  *   3.  事件系统、dirty 数据生命周期、dispose 资源回收
- *   4.  端到端注册表单流程（Best Practices §4）
+ *   4.  端到端注册表单流程
  *   5.  各类边界场景：异步超时、校验器抛错、reaction 计算抛错、
  *       依赖字段缺失、相同值短路、空 schema、并发 setField 竞态、
  *       debounce 合并、validateAll 升级 dirtyData 等共 20+ edge case
@@ -737,7 +737,7 @@ describe('Integration Tests — Full Documentation Scenarios', () => {
 
     // =========================================================================
     // 16. End-to-end: complete form submission flow
-    //     (Best Practices §4 Integration Testing)
+    //     (docs/ADVANCED.md#testing-application-models)
     // =========================================================================
     describe('End-to-End: Complete form submission flow', () => {
         interface RegistrationForm {

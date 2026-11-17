@@ -3,6 +3,8 @@
 This guide maps the current `src/` modules and their main call paths. Public
 behavior is specified by [API.md](API.md), [REACT.md](REACT.md), and the READMEs.
 
+[中文版本](ARCHITECTURE_CN.md) | English
+
 ## Module map
 
 ```mermaid
@@ -54,6 +56,78 @@ setFields┘    ├─ prepareFieldWrites: resolve the whole batch, then transfo
 - Reaction writeback uses `updateField()` and preserves its origin, reaction stack, and initialization context.
 - Fields commit independently, so `setFields()` is not an all-or-nothing transaction.
 - `ModelManager` keeps request IDs, state updates, events, and commit logic. Extract stateless preparation or calculation helpers; avoid splitting state ownership.
+
+## Action Scheduling
+
+This section records internal scheduling invariants. Public behavior and
+migration examples remain in [API.md](API.md#action-groups).
+
+| Owner | State and responsibility |
+| --- | --- |
+| `ReactionSystem` | One `ReactionJob` and at most one pending debounced computation per host; dependency index and runtime path diagnostics |
+| `ActionExecutor` | Host versions, one group set, schema field order, and a coalesced microtask flush |
+| `PendingTasks` | Separate `compute` / `action` counts, compute-idle notification, and `settled()` completion |
+| `ModelManager` | Validation request IDs, committed state, and host-field errors |
+
+1. Scheduling a host reaction advances its action version. A successful direct
+   write that changes the host also advances it; reaction writeback does not.
+   Internal `origin: 'direct' | 'reaction'` distinguishes these paths.
+   Validation request IDs remain separate because they protect commits, not
+   action eligibility.
+2. Capture the version when scheduling, including in the debounce closure.
+   Never read the latest version when an older computation finishes. On
+   debounce replacement, acquire the new task before releasing the old one;
+   on timer fire, remove the waiting record before running user code.
+3. After a computed value validates and commits, register a group only if its
+   captured version is current. The group acquires one action task immediately
+   and keeps it across readiness, item execution, and inter-item waits. No
+   separate pending-candidate map or collection handoff is needed.
+4. Compute idle schedules a microtask flush. Each flush takes a ready snapshot
+   in schema field order. Immediately before every item, check disposal,
+   version, and compute idle synchronously, then call it without an intervening
+   `await`. A previous item may have started fresh calculations, so the check
+   is required for every item.
+5. Groups await their own returned Promises independently. A newer version
+   cancels unstarted items; an already running item remains observed and may
+   overlap a newer group. Failure stops only its group, but an old item's late
+   failure can still update the host's errors under existing error handling.
+6. Task release is idempotent. Disposal removes waiting groups and releases
+   pending settlement immediately; started Promise rejections remain observed,
+   with post-disposal model error reporting suppressed.
+
+The compute count covers input preparation, validation, debounce waits,
+computed writeback, reaction registration, and batch completion events. The
+action count covers whole groups. Reactions never await actions;
+`settled()` waits for both counts and must not be awaited by an action on the
+same model.
+
+Cycle and missing-dependency diagnostics follow the declared calculation
+graph and runtime reaction paths. Closure reads and writes inside actions
+cannot be inferred; there is no complete construction-time check for
+side-effect writeback cycles.
+
+## Retained Design Decisions
+
+- **Structural equality:** keep `deepEqual`; equal-content replacement objects
+  do not become changes solely because their references differ. Switching to
+  `Object.is` would alter downstream validation, reactions, and action
+  cancellation as well as `Date`, `NaN`, and signed-zero behavior.
+- **Two selector Hooks:** `useModelSelector` filters model notifications and
+  resubscribes when its selector/comparator changes; `useModelComputed`
+  subscribes by model and compares snapshots. Shared render-local caching
+  protects concurrent renders; merging the Hooks would change a subscription
+  policy. The public choice is documented in [REACT.md](REACT.md#usemodelselector-vs-usemodelcomputed).
+- **One reaction per field:** identify jobs by host, retain trigger-pass
+  deduplication, and keep separate jobs when hosts reuse a reaction object.
+- **One validation policy:** rules execute condition/validation in order and
+  stop at the first error. Batch keys are prechecked before input values are
+  read or transformed; fields then validate and commit independently.
+- **Safe field dictionaries:** only own schema keys count as fields. Storage
+  and snapshots must support names such as `constructor` and `__proto__`
+  without inherited reads or prototype setters.
+- **UI boundaries:** local editing text and write exceptions belong in draft
+  bindings; core dirty data contains failed model values. React and DevTools
+  remain optional entry points, with no UI policy added to core state.
 
 ## Dependency rules
 

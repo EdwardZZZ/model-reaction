@@ -2,6 +2,8 @@
 
 Reference for the public `model-reaction` API surface.
 
+[中文版本](API_CN.md) | English
+
 [← Back to README](../README.md)
 
 ---

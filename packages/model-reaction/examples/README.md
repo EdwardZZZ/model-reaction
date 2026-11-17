@@ -1,72 +1,49 @@
-# model-reaction Examples
+# Examples
 
-[中文版本](README_CN.md) | English
+[中文版本](README_CN.md) | English | [Documentation](../docs/README.md)
 
-This directory provides various usage examples for the `model-reaction` library.
+## Runnable Examples
 
-## Available Examples
+Run each command from the repository root.
 
-### Basic Usage Example (basic-usage.ts)
-Demonstrates the basic functionality of the library, including model creation, field settings, validation, etc.
+| Example | Focus | Command |
+| --- | --- | --- |
+| [Basic usage](basic-usage.ts) | Creation, writes, validation | `pnpm --filter model-reaction run example:basic` |
+| [Reactions](reaction-system.ts) | Dependency calculations and actions | `pnpm --filter model-reaction run example:reaction` |
+| [Async validation](async-validation.ts) | Remote-style uniqueness check | `pnpm --filter model-reaction run example:async` |
+| [Events](event-listening.ts) | Changes and validation events | `pnpm --filter model-reaction run example:event` |
+| [Complex form](complex-form.ts) | Cross-field rules and errors | `pnpm --filter model-reaction run example:complex` |
+| [Dirty data](dirty-data-conditional.ts) | Rejected input and conditional rules | `pnpm --filter model-reaction run example:dirty` |
+| [Deep dependency chain](multi-record-deep-deps.ts) | Five layers across 100 records | `pnpm --filter model-reaction run example:multi-record` |
+| [React bindings](react-bindings.tsx) | Fields, selectors, draft, and ownership | `pnpm --filter model-reaction run example:react` |
 
-### Reaction System Example (reaction-system.ts)
-Shows the dependency reaction system, which automatically triggers calculations and operations when specified fields change.
-
-### Async Validation Example (async-validation.ts)
-Demonstrates how to use asynchronous validation rules, such as username uniqueness checks.
-
-### Event Listening Example (event-listening.ts)
-Shows how to listen for events such as field changes and validation completion.
-
-### Complex Form Example (complex-form.ts)
-Demonstrates field correlation, dependency validation, and error handling mechanisms in complex form scenarios.
-
-### Dirty Data & Conditional Validation Example (dirty-data-conditional.ts)
-Demonstrates how failed input is diverted to `dirtyData` (retrievable via `getDirtyData()` / clearable via `clearDirtyData()`) instead of polluting `data`, and how `Rule.when(predicate)` makes a rule apply only when a cross-field condition holds.
-
-### React Bindings Example (react-bindings.tsx)
-Shows field-level and selector-level React subscriptions, provider ownership,
-the recommended `useDraftField` binding, form metadata, local drafts, and schema type inference. The package script
-uses `react-bindings-runner.tsx` for an SSR smoke check through `react-dom/server`.
+The React command executes [its SSR runner](react-bindings-runner.tsx).
 Importing the component file does not execute the runner.
 
-### Multi-record Deep Dependency Example (multi-record-deep-deps.ts)
-Builds a larger deterministic schema and runs a five-layer reaction chain
-across 100 records.
+## Reference Recipes
 
-### React Best Practices Snippets (react-best-practices/)
-Additional React-focused snippets covering stable selectors, `ModelProvider`,
-`Field`, touched-state handling, submission flow, lifecycle cleanup, and
-comparisons with zustand / Redux. These files are intended as reference
-patterns rather than CLI-runnable examples.
+| Topic | Reference |
+| --- | --- |
+| Stable and inline selectors | [Stable selector](react-best-practices/7-2-stable-selector.tsx), [computed selector](react-best-practices/7-2bis-model-computed.tsx) |
+| Provider and committed-value controls | [Provider](react-best-practices/7-3-model-provider.tsx), [Field](react-best-practices/7-4-field-render-prop.tsx) |
+| Error display, submission, and cleanup | [Touched](react-best-practices/7-5-touched.tsx), [submission](react-best-practices/7-6-submission-flow.tsx), [lifecycle](react-best-practices/7-8-lifecycle.tsx) |
+| Application stores | [zustand](react-best-practices/7-10-2-with-zustand.tsx), [Redux](react-best-practices/7-10-3-with-redux.tsx), [comparison](react-best-practices/7-10-5-cheat-sheet.ts) |
+| Ad-creation domain (Chinese) | [Schema composition, submission DTO, and draft recovery](AD_CREATION_CN.md) |
 
-## Running Examples
-
-From the repository root:
-
-```bash
-pnpm --filter model-reaction run example:basic
-pnpm --filter model-reaction run example:reaction
-pnpm --filter model-reaction run example:async
-pnpm --filter model-reaction run example:event
-pnpm --filter model-reaction run example:complex
-pnpm --filter model-reaction run example:dirty
-pnpm --filter model-reaction run example:multi-record
-pnpm --filter model-reaction run example:react
-```
-
-> Files under `examples/react-best-practices/` are also reference snippets and
-> are not standalone CLI programs.
+These are reference patterns, not standalone CLI programs. Module-level model
+fixtures omit ownership for brevity; apply the
+[owner lifecycle](../docs/REACT.md#model-lifecycle-in-react) in applications.
+React contracts live in [REACT.md](../docs/REACT.md), and store integration
+guidance in [COMPARISON.md](../docs/COMPARISON.md).
 
 ## Validation
 
-All examples import public package entries. Repository runners resolve these
-entries to source through `tsconfig.examples.json`; copied examples use the
-installed package normally.
+Examples import public package entries. Repository runners resolve them to
+source through `tsconfig.examples.json`; copied examples use the installed
+package.
 
 `pnpm --filter model-reaction run typecheck` checks source, tests, and a separate
-examples project. CI uses this command; lint also includes `.ts` and `.tsx`
-examples. The examples project excludes the three optional zustand / Redux
-snippets (`7-10-2`, `7-10-3`, `7-10-5`) and their aggregate `index.ts`, because
-their third-party dependencies and application glue are not installed here.
-React contracts live in [REACT.md](../docs/REACT.md).
+examples project; lint includes `.ts` / `.tsx` examples. Three optional store
+snippets (`7-10-2`, `7-10-3`, `7-10-5`) and their aggregate `index.ts` are
+excluded from example typecheck because their dependencies and application
+glue are not installed. Markdown recipes are not included in that check.

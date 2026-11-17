@@ -1,5 +1,5 @@
 /**
- * BEST_PRACTICES §7.2bis — `useModelComputed`
+ * docs/REACT.md#usemodelselector-vs-usemodelcomputed — `useModelComputed`
  *
  * The subscription depends only on the model. Snapshot reads use the current
  * render's selector, so inline selectors can close over props. Use `shallow`

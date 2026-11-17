@@ -1,5 +1,5 @@
 /**
- * BEST_PRACTICES §7.4 — `<Field>` for committed-value controls
+ * docs/REACT.md#hooks--components — `<Field>` for committed-value controls
  *
  * Use the `<Field>` render-prop form for controls such as selects that can
  * bind directly to committed data without an edit-in-progress text value.

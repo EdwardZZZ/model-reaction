@@ -1,5 +1,5 @@
 /**
- * BEST_PRACTICES §7.3 — Avoid prop drilling with `<ModelProvider>`
+ * docs/REACT.md#basic-example — Avoid prop drilling with `<ModelProvider>`
  *
  * Wrap the form root once, then descendants pull the model out via
  * `useModel<T>()` without prop-drilling.

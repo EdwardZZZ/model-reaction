@@ -2,6 +2,8 @@
 
 Patterns beyond the README quick start.
 
+[中文版本](ADVANCED_CN.md) | English
+
 [← Back to README](../README.md)
 
 ---
@@ -15,6 +17,9 @@ Patterns beyond the README quick start.
 - [Transformation and Asynchronous Validation](#transformation-and-asynchronous-validation)
 - [Waiting for Async Operations](#waiting-for-async-operations)
 - [Schema Type Inference](#schema-type-inference)
+- [Model Organization](#model-organization)
+- [Performance and Error Handling](#performance-and-error-handling)
+- [Testing Application Models](#testing-application-models)
 
 ---
 
@@ -234,3 +239,51 @@ Schema inference describes the runtime value, including a mismatched default
 because defaults intentionally bypass validation. Explicit `createModel<T>` is
 an assertion by the caller that the schema initializes that shape. For object
 and array fields without useful defaults, provide an explicit data type.
+
+## Model Organization
+
+Keep one model for fields that share a lifecycle and dependency graph. Split a
+large schema into focused modules, then spread the fragments into one flat
+schema. Field names must be unique across fragments: object spread replaces an
+earlier definition silently. Separate models are useful for independently owned
+forms; cross-model coordination belongs in application code.
+
+Extract reusable checks into named rules and put orchestration in domain
+functions. Keep `computed` synchronous and pure, declare every input in
+`reaction.fields`, and use separate fields for independent computed results.
+Async work and side effects belong in action groups; see the
+[action contract](API.md#action-groups).
+
+Use an explicit domain interface for shared contracts and schema inference for
+small local models. `FieldSchema.type` is metadata, not runtime validation:
+untyped input still needs validators. Map API payloads to known field keys
+before writing them. The [ad-creation recipe](../examples/AD_CREATION_CN.md)
+demonstrates schema composition and DTO conversion.
+
+## Performance and Error Handling
+
+- Put cheap rules first. A field runs rules sequentially and stops at its first
+  error; different fields can validate concurrently.
+- Cache reusable remote checks at the service boundary and configure
+  `asyncValidationTimeout` for that service.
+- Debounce input before `setField` when remote validation should not run on
+  every keystroke. `debounceReactions` only delays derived calculations.
+- Use field or selector subscriptions for narrow views. Hook choice, draft
+  buffering, and model ownership are documented in [React bindings](REACT.md).
+- A `false` write result is a validation failure; rejected writes are separate
+  exceptions. Read `validationErrors[field]` or use
+  `formatValidationErrors` from `model-reaction/validation` for a summary.
+  Subscribe to typed error events for logging and always unsubscribe in cleanup.
+  Text bindings display `writeError?.message ?? meta.error` under `showError`.
+
+## Testing Application Models
+
+Test business boundaries: rule limits, transforms, invalid input preserved in
+dirty data, rejected computed values, stale async results, and reaction chains.
+Submission tests should wait for current work, run `validateAll()`, then wait
+for any work that validation triggered before reading the payload. Include
+server rejection and retry behavior when the application owns them.
+
+React integration checks should cover editing text while validation is pending,
+field-specific updates, and owner cleanup. Repository contribution checks are
+maintained in [AGENTS.md](../AGENTS.md).

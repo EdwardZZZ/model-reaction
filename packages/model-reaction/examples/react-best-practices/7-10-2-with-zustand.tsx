@@ -1,5 +1,5 @@
 /**
- * BEST_PRACTICES §7.10.2 — Combine with zustand for global state
+ * docs/COMPARISON.md#combining-a-store-and-a-model — Combine with zustand
  *
  * Rule of thumb:
  *   zustand        owns *application* state (open / closed, current

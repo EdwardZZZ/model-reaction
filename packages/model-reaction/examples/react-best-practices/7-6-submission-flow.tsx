@@ -1,5 +1,5 @@
 /**
- * BEST_PRACTICES §7.6 — Submission flow
+ * docs/REACT.md#submission-flow — Submission flow
  *
  * Submission and lifecycle contract: docs/REACT.md.
  */

@@ -1,7 +1,9 @@
 # React 绑定
 
 包内置了 React 适配层，入口为 `model-reaction/react`，提供一组 hook 与组件，每个订阅者只在自己关心的切片真正变化时重渲染。
-本页统一维护 React 技术契约，README 与最佳实践通过链接引用。
+本页统一维护 React 技术契约，README 与示例通过链接引用。
+
+[English Version](REACT.md) | 中文
 
 [← 返回 README](../README_CN.md)
 
@@ -323,7 +325,7 @@ function App() {
 - React commit 后才创建 model，因此被 React 放弃的 render 不会遗留 model。
 - 每次 effect setup 创建一个 model，对应 cleanup 释放同一个实例；model
   就绪后子组件才会挂载。
-- 相关单测见 [`src/__tests__/react.test.tsx`](../src/__tests__/react.test.tsx)
+- 相关单测见 [`react-provider.test.tsx`](../src/__tests__/react-provider.test.tsx)
   中的 "Provider-owned model dispose lifecycle"。
 
 ### 修复 B：per-route 实例
@@ -438,8 +440,8 @@ async function onSubmit() {
 }
 ```
 
-`settled()` 等待模型追踪的工作，不会锁住新编辑，也不会等待 `action` 内任意启动
-的网络任务。提交中的 UI 应阻止并发编辑和重复提交。
+`settled()` 等待模型追踪的工作，包括 action 返回的 Promise；它不会锁住新编辑，
+也不会等待未返回给 action 调度器的网络任务。提交中的 UI 应阻止并发编辑和重复提交。
 
 见 [提交 Recipe](../examples/react-best-practices/7-6-submission-flow.tsx)。
 
@@ -451,4 +453,5 @@ Hooks 基于 `useSyncExternalStore`。SSR 每个请求创建独立 model，等�
 因为服务器不会运行 effects。
 
 [CLI runner](../examples/react-bindings-runner.tsx) 执行 SSR 冒烟检查；
-挂载后的订阅与 StrictMode 行为由 [React 测试](../src/__tests__/react.test.tsx) 覆盖。
+挂载后的订阅与 StrictMode 行为由 [Provider 测试](../src/__tests__/react-provider.test.tsx)
+和 [selector 测试](../src/__tests__/react-selectors.test.tsx) 覆盖。

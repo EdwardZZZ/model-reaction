@@ -202,17 +202,9 @@ For the breaking API changes in the unreleased version, see the
 
 ## Documentation
 
-| Topic | Link |
-| --- | --- |
-| API Reference | [docs/API.md](docs/API.md) |
-| Advanced patterns (async validation, custom rules, cross-field, `settled()`, type inference) | [docs/ADVANCED.md](docs/ADVANCED.md) |
-| React bindings & selector hooks | [docs/REACT.md](docs/REACT.md) |
-| Best practices | [docs/BEST_PRACTICES.md](docs/BEST_PRACTICES.md) |
-| Comparison with Redux & zustand | [docs/COMPARISON.md](docs/COMPARISON.md) |
-| DevTools browser extension | [docs/DEVTOOLS.md](docs/DEVTOOLS.md) |
-| Scenario-based technical solution (Chinese) | [docs/TECHNICAL_SOLUTION.md](docs/TECHNICAL_SOLUTION.md) |
-| Runnable examples | [`examples/`](examples/) |
-| For coding agents / LLMs (high-density quickstart) | [AGENTS.md](AGENTS.md) |
+Use the [documentation index](docs/README.md) to find the API reference,
+advanced patterns, React bindings, integrations, DevTools, architecture,
+examples, and contribution rules.
 
 ## License
 

@@ -1,5 +1,5 @@
 /**
- * BEST_PRACTICES §7.10.5 — Code-style cheat sheet
+ * docs/COMPARISON.md#one-field-in-three-styles — Code-style comparison
  *
  * The same `name: required` requirement, three styles. Only the
  * `model-reaction` variant is fully self-contained — the other two

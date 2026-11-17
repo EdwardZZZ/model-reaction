@@ -9,7 +9,7 @@ interface ActionGroup {
     endTask: () => void;
 }
 
-/** Action group lifecycle and per-item barriers; see docs/DESIGN_SIMPLIFICATION_CN.md §6. */
+/** Action group lifecycle and per-item barriers; see docs/ARCHITECTURE.md#action-scheduling. */
 export class ActionExecutor {
     private fieldActionVersion = new Map<string, number>();
     private groups = new Set<ActionGroup>();

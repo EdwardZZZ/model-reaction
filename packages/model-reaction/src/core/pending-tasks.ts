@@ -1,4 +1,4 @@
-/** Shared computation and action lifecycle; see docs/DESIGN_EFFECT_DEPS_CN.md §4.4. */
+/** Shared computation and action lifecycle; see docs/ARCHITECTURE.md#action-scheduling. */
 export class PendingTasks {
     private counts = { compute: 0, action: 0 };
     private computeIdleListeners = new Set<() => void>();

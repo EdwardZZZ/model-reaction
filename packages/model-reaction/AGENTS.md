@@ -1,249 +1,125 @@
-# AGENTS.md
+# Coding Agent Guide
 
-> A high-density guide for **coding agents / LLMs** working on or with the
-> `model-reaction` library. Read this **before** README when you only have
-> a few KB of context budget.
-
----
+Read this before modifying the library. [Documentation](docs/README.md) lists
+the owning guides; public contracts live in API, React, and DevTools.
 
 ## 1. Mental Model
 
-```
-schema  ─►  ModelManager  ─►  data            (committed source of truth)
-                          ├─►  dirtyData      (unvalidated user input)
-                          └─►  reactions      (auto-derived fields)
-```
+- `data` holds committed values. Writes validate first; schema defaults are
+  seeded directly and bypass validation.
+- `dirtyData` holds each field's latest failed model value. Read or clear it
+  through `getDirtyData()` / `clearDirtyData()`, not internal state.
+- Reactions derive field values from declared dependencies. Construction runs
+  an initial reaction pass; await `settled()` to observe its completion.
 
-Three layers, nothing else:
+The model tracks top-level field replacement. Snapshots are stable and
+shallow-frozen; nested values are not observed. Replace objects, arrays, and
+mutable built-ins such as `Date` through `setField` / `setFields`.
 
-1. `data` — committed values live here. Writes must pass validation; schema
-   defaults are the documented exception and are seeded directly.
-2. `dirtyData` — last user input that **failed** validation, indexed by field.
-3. `reactions` — derived values recomputed when their declared `fields`
-   change. They write back into `data`.
+## 2. Writes and Validation
 
----
-
-## 2. The 5 APIs You Use 90% of the Time
-
-For the source module map, write pipeline, and dependency boundaries, see
-[docs/ARCHITECTURE_CN.md](docs/ARCHITECTURE_CN.md).
-
-```ts
-const m = createModel(schema, options?);     // factory
-await m.setField('name', 'Ada');              // set + validate; returns boolean
-m.getField('name');                           // read
-await m.validateAll();                        // re-validate every field
-m.dispose();                                  // ALWAYS call this in cleanup
-```
-
-**Discriminating rules:**
-
-| Need | API |
+| Need | Public API |
 | --- | --- |
-| Set one field with validation | `setField(name, value)` |
-| Set many fields in one validation+reaction pass | `setFields({ a, b })` |
-| Read current value | `getField(name)` or `m.data.name` |
-| Get failed input back | `getDirtyData()` |
-| React to change outside React | `subscribe(selector, callback)` |
-| Inspect schema for tooling | iterate the schema literal directly (it's a plain object) |
+| Write one field | `await model.setField(name, value)` |
+| Write a batch | `await model.setFields({ a, b })` |
+| Read committed state | `model.data` / `model.getField(name)` |
+| Revalidate dirty and committed values | `await model.validateAll()` |
+| Wait for model work, outside actions | `await model.settled()` |
+| Observe a value outside React | `model.subscribe(selector, callback)` |
+| Release an owned instance | `model.dispose()` |
 
----
+Writes return `Promise<boolean>`: validation failure resolves `false`;
+exceptional writes reject. Failed values stay out of `data`.
+`await setField` covers the field's validation and commit, not the full
+downstream chain.
 
-## 3. The 8 Pitfalls You'll Hit
+Each field accepts one reaction. Rules run condition/validation in order and
+stop at the first error; `strictMode` and `failFast` no longer exist.
+Unknown keys emit `field:not-found` and reject before any batch value is read
+or transformed. Fields commit independently: `setFields` is not a transaction.
+Direct-write validators see a shared transformed candidate snapshot, including
+their own new value. `validateAll` does not transform dirty values again.
+Put old-value preconditions in the business write entry point.
 
-1. **Forgetting `await`** — `setField` returns `Promise<boolean>` (true = passed validation). If you don't await, validation may still be in-flight.
+Import rule builders and error formatting from `model-reaction/validation`.
+Field `type` metadata does not perform runtime validation; defaults may be
+invalid until explicitly validated. Structural equality remains unchanged.
+Migration details: [API.md](docs/API.md#api-simplification-migration-unreleased).
 
-2. **Reading `data` after a failed `setField`** — failed values go to `dirtyData`, not `data`. Use `getDirtyData()` to retrieve them.
+## 3. Reactions and React
 
-3. **Async work or side effects inside `reaction.computed`** — `computed` MUST
-   be synchronous and pure. It must not return a Promise. Put asynchronous work
-   and other side effects in `reaction.action`, an array of no-argument
-   functions that read the model through a closure. Each item waits for
-   calculation to settle; only the host's latest valid reaction can start a
-   group. New host versions cancel remaining items. Never await the same
-   model's `settled()` inside an action.
+`computed` must be synchronous and pure, with all inputs declared in `fields`.
+Its output follows the validation/commit path; invalid output enters dirty
+data and cannot start actions. `SKIP_REACTION` skips that computation's write
+and actions.
 
-4. **Not calling `dispose()`** — leaves reaction timers, listeners, and pending
-   work active for as long as the model remains reachable. Wire disposal to the
-   owner's cleanup path (React effect, test `afterEach`, server shutdown).
+`action` is an optional array of no-argument functions reading the model
+through a closure. The latest eligible host group starts after calculation
+settles; each item checks calculation again. New host versions cancel
+unstarted items; running Promises remain tracked. Never await the same model's
+`settled()` inside an action. Details: [action groups](docs/API.md#action-groups).
 
-5. **Sharing one model across React trees without dispose** — see [docs/REACT.md](docs/REACT.md). Use `useEffect` cleanup or instantiate per route.
+Use `useDraftField` for text inputs and show
+`writeError?.message ?? meta.error` under `showError`. Non-text controls can use
+`useModelFieldState`. Preserve the distinct subscription policies of
+`useModelSelector` and `useModelComputed`.
+The owner creates and disposes the model; components unsubscribe in cleanup.
+Do not use a route-independent singleton for independently owned editors.
+Complete recipes: [React bindings](docs/REACT.md) and [examples](examples/README.md).
 
-6. **Assuming `default` values are validated** — `default`s are written straight into `data` at construction and **bypass validation entirely**. A model can start in an invalid state with an empty `validationErrors`. If initial validity matters (e.g. before reading `data` to submit), call `await validateAll()` first. Note: defaults do **not** bypass reactions — after seeding defaults, the constructor runs one initial reaction pass so derived fields start with a correct computed value (await `settled()` to observe it). Only the *validation* of the seeded defaults is skipped.
+## 4. Source Boundaries
 
-7. **Assuming a reaction's `computed` output skips validation** — a reaction writes its result back through the same validate-then-commit path. If the derived field has a `validator` and the computed value fails it, `data` keeps the old value and the computed value lands silently in `dirtyData`. The optional `reaction.action` fires only when that computed value passes validation — a value that lands in `dirtyData` fires neither the field change nor the `action`. Keep derived-field validators loose, or watch `dirtyData` / `reaction:error`.
-8. **Mutating a field value in place** — the model tracks field-level replacement only. The outer `data` and dirty-data records are shallow-frozen, but object/array field values are not observed or frozen. Replace a whole field with `setField()` / `setFields()` to run validation and reactions.
+[Architecture](docs/ARCHITECTURE.md) owns the module map, write pipeline,
+action lifecycle, and retained design decisions.
 
-Each field accepts one reaction, never an array. Validation runs in rule order,
-stopping at the first error; `strictMode` and `failFast` no longer exist.
-Unknown keys emit `field:not-found` and reject before any batch input is
-prepared. Direct-write validators read a shared transformed candidate snapshot,
-including their own field; `validateAll()` does not transform dirty values again.
-Structural equality is unchanged. Both React selector Hooks retain their
-distinct subscription contracts.
+- `ModelManager` alone owns model data, validation freshness, and errors.
+- Reaction code accesses the model through callbacks.
+- React consumes public types/events; core does not import React or DevTools.
+- DevTools reads public model state and shares dependency parsing.
+- Keep internal options/types out of package exports.
+- Support own schema keys such as `constructor` and `__proto__`.
+- Keep files focused; document complex background in Markdown and use a short
+  reference in code. Compose schemas from uniquely named field fragments.
 
----
+## 5. Deliberate Omissions
 
-## 4. Code Skeletons (copy-paste these)
+Do not add or simulate these core capabilities:
 
-### 4.1 Form model
-
-```ts
-import { createModel } from 'model-reaction';
-import { ValidationRules } from 'model-reaction/validation';
-
-export const userModel = createModel({
-  name: {
-    type: 'string',
-    default: '',
-    validator: [
-      ValidationRules.required.withMessage('Name required'),
-      ValidationRules.minLength(2).withMessage('Min 2 chars'),
-    ],
-  },
-  email: {
-    type: 'string',
-    default: '',
-    validator: [
-      ValidationRules.required,
-      ValidationRules.email.withMessage('Bad email'),
-    ],
-  },
-});
-```
-
-### 4.2 Cross-field reaction
-
-```ts
-fullName: {
-  type: 'string',
-  default: '',
-  reaction: {
-    fields: ['firstName', 'lastName'],
-    computed: ({ firstName, lastName }) =>
-      `${firstName} ${lastName}`.trim(),
-  },
-},
-```
-
-### 4.3 React form field
-
-```tsx
-import { useDraftField } from 'model-reaction/react';
-
-function Input({ model, field, label }) {
-  const { draft, setDraft, meta, writeError, onBlur, showError } =
-    useDraftField(model, field);
-
-  return (
-    <label>
-      <span>{label}</span>
-      <input
-        value={draft}
-        onChange={(e) => setDraft(e.target.value)}
-        onBlur={onBlur}
-        aria-invalid={Boolean(showError)}
-        aria-busy={meta.validating}
-      />
-      {showError && <small role="alert">{writeError?.message ?? meta.error}</small>}
-    </label>
-  );
-}
-```
-
-`useDraftField` is the default recommendation for text inputs. Use the lower-level
-`useModelFieldState` for non-text controls or when the UI intentionally reflects
-only committed model values.
-
-### 4.4 Selector subscription
-
-```ts
-const unsub = model.subscribe(
-  (data) => data.cart.totalCents,
-  (next, prev) => console.log('total changed', prev, '→', next)
-);
-// later: unsub()
-```
-
-### 4.5 Iterate the schema literal
-
-```ts
-// schema is just a plain object — no helper API needed.
-for (const [name, field] of Object.entries(schema)) {
-  console.log(name, field.type, field.validator?.length ?? 0);
-}
-```
-
----
-
-## 5. What's NOT in this Library
-
-These are **deliberate omissions**. Don't add them; don't fake them.
-
-| Missing | Why |
+| Omission | Application alternative |
 | --- | --- |
-| Per-field `touched` state in the core model | Belongs to UI lifecycle, not to domain data. `useDraftField` owns it for the standard text-input flow; use component-local state with lower-level bindings. |
-| `commitDirty(field)` / `resetDirty(field)` | Computed fields that depend on a dirty field could be poisoned. Reset by recreating the model. |
-| Arbitrary side-effect from validators | Validators are pure boolean tests. Use reactions for side-effects. |
-| Synchronous batching across `setField` calls | Each `setField` is its own validation cycle. Use `setFields({ ... })` to batch validation + a single reaction pass — its cross-field validators also see the merged batch, so co-dependent fields can be set together. |
-| True all-or-nothing transactional writes | `setFields` is **not atomic**: each field commits independently; valid fields land in `data` even if a sibling fails (return value is the AND of all fields). Use an application-level preflight or a disposable candidate model before mutating the live model when all-or-nothing behavior is required. |
-| Plugin / middleware system | Compose at the schema level (factory functions returning a single variant such as `FieldSchema<'string'>`, so spreading one keeps `reaction.computed` checked against its `type`). |
-| `model.describe()` schema introspection | The schema literal is already a plain object; iterate it directly (see §4.5). |
+| Core `touched` or draft text | UI state; `useDraftField` owns the standard text-input flow |
+| `commitDirty` / `resetDirty` | Recreate the model to reset; do not bypass validation |
+| Side effects in validators | Pure checks in validators; side effects in actions or business orchestration |
+| Synchronous batching across separate setters | Use `setFields` |
+| All-or-nothing transactions | Application preflight or a disposable candidate model |
+| Plugin / middleware framework | Compose schema fragments and named domain functions |
+| `model.describe()` introspection | Iterate the plain schema literal |
 
----
+## 6. Required Checks
 
-## 6. When You're About to Modify the Library
-
-This package lives in a pnpm monorepo (`packages/model-reaction`). From the repo
-root, run **all three** before submitting:
+From the repository root, run all three before submitting:
 
 ```bash
 pnpm --filter model-reaction run lint
-pnpm --filter model-reaction run typecheck        # source + tests + checked examples (CI gate)
-pnpm --filter model-reaction run test --silent    # full suite, including doc scenarios
+pnpm --filter model-reaction run typecheck
+pnpm --filter model-reaction run test --silent
 ```
 
-(Or `cd packages/model-reaction` and use the equivalent `npm run lint` /
-`npm run typecheck` / `npx jest --silent` commands.)
-
-Then run the React example's SSR smoke check (mounted behavior is covered by
-the React suite):
+Typecheck covers source, tests, and checked examples. Then run the React
+example SSR smoke check; mounted behavior is covered by the React suite:
 
 ```bash
 pnpm --filter model-reaction run example:react
 ```
 
-If you touched anything the DevTools extension relies on (the reaction
-dependency edges, in particular), also run its suite — the lock-in test there
-guards the shared `eachReactionEdge` contract:
+If the change affects DevTools integration or reaction dependency edges,
+also run:
 
 ```bash
 pnpm --filter model-reaction-devtools run test
 ```
 
-**Files that act as living spec — touch with care:**
-
-| File | Role |
-| --- | --- |
-| [src/__tests__/integration.test.ts](src/__tests__/integration.test.ts) | Every README code snippet runs as a test here. Breaking this = breaking the docs contract. |
-| [src/types.ts](src/types.ts) | Public type surface. Adding a method here means updating `index.ts` AND `ModelManager` AND README + README_CN. |
-| [README.md](README.md) / [README_CN.md](README_CN.md) | Always update both languages in the same patch. |
-
----
-
-## 7. Glossary
-
-| Term | Meaning |
-| --- | --- |
-| `data` | Committed source of truth. Writes are validated; defaults are seeded directly. Read via `m.data` or `getField`. |
-| `dirtyData` | Last user input whose validation **failed**, indexed by field. Cleared by `clearDirtyData()` or by next successful `setField` of that field. |
-| `reaction.computed` | Synchronous pure function: `deps -> derived value`; must not return a Promise. |
-| `reaction.action` | Optional no-argument function array. The host's latest valid reaction starts a group after calculation settles; each item waits for calculation again. |
-| `settled()` | Promise that resolves when validations, calculations, and action groups finish. Never await it inside the same model's action. |
-| `verify-then-commit` | Set-field protocol: validate first, write to `data` only on pass; otherwise write to `dirtyData`. |
-| `commitValid` | Internal: when `validateAll` finds the dirty value now passes, promote it from `dirtyData` to `data`. |
-
----
-
-If anything in this file conflicts with [README.md](README.md) / [README_CN.md](README_CN.md), the READMEs win. Open an issue and we'll fix this file.
+Keep English and Chinese document pairs in sync. Public type changes require
+checking [src/types.ts](src/types.ts), exports, implementation, and public
+documentation. [Integration tests](src/__tests__/integration.test.ts) protect
+core documentation scenarios; they do not cover every fenced snippet.

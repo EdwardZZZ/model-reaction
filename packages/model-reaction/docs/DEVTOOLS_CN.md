@@ -2,6 +2,8 @@
 
 一个用于在运行时检视 `model-reaction` 模型的浏览器扩展：实时数据树、字段依赖关系图，以及变更时间线。
 
+[English Version](DEVTOOLS.md) | 中文
+
 [← 返回 README](../README_CN.md)
 
 ---
@@ -92,8 +94,9 @@ const model = createModel(schema); // 现在会出现在面板中
 pnpm --filter model-reaction-devtools run build
 ```
 
-该命令会把四个扩展执行环境（页面 agent、content 中继、background worker、React 面板）
-打包进 `packages/devtools/dist/`，并连同静态资源（`manifest.json`、`devtools.html`、
+该命令会把四个主要扩展执行环境（页面 agent、content 中继、background worker、
+React 面板）及注册面板的 DevTools 页面打包进 `packages/devtools/dist/`，
+并连同静态资源（`manifest.json`、`devtools.html`、
 `panel.html`、`panel.css`）一起复制过去。
 
 ## 在 Chrome 中加载
@@ -148,10 +151,11 @@ agent 仍会在已提交变更后刷新。注销或释放时移除两种订阅�
 「如何把 `reaction.fields` 读成边」的唯一定义处。核心的 reaction 调度器（`collectReactions`）
 使用同一个原语，且有一个锁定测试
 （[reaction-graph.test.ts](../src/__tests__/reaction-graph.test.ts)）断言：原语、运行时索引、
-DevTools 图三者一致 —— 因此面板永远不会显示与运行时行为不符的依赖图。
+DevTools 图在覆盖的 Schema 中一致。图只表达声明的计算依赖，不代表 action 闭包
+读写或实时执行状态。
 每个已注册模型只构建一次字段元数据，依赖图直接从同一份依赖列表投影，
 后续读取复用这两个结构。
-共享 `eachReaction` 遍历还提供可选 `actions` 元数据：
+字段元数据循环同时提供可选 `actions` 元数据：
 `{ reactionIndex, actionIndex, name }[]`，为空时省略。相同函数引用不合并。
 这些声明不暴露候选、版本、屏障或执行状态；action 只绘制在字段内部，
 不添加为计算图节点或计算依赖边。

@@ -3,6 +3,8 @@
 A browser extension for inspecting `model-reaction` models at runtime: the
 live data tree, the field dependency graph, and a timeline of changes.
 
+[中文版本](DEVTOOLS_CN.md) | English
+
 [← Back to README](../README.md)
 
 ---
@@ -103,9 +105,10 @@ From the repository root:
 pnpm --filter model-reaction-devtools run build
 ```
 
-This bundles all four extension contexts (page agent, content relay, background
-worker, React panel) into `packages/devtools/dist/`, alongside the copied static
-assets (`manifest.json`, `devtools.html`, `panel.html`, `panel.css`).
+This bundles the four main extension contexts (page agent, content relay,
+background worker, React panel) plus the DevTools page that registers the panel
+into `packages/devtools/dist/`, alongside the copied static assets
+(`manifest.json`, `devtools.html`, `panel.html`, `panel.css`).
 
 ## Loading it in Chrome
 
@@ -171,11 +174,12 @@ The dependency graph is derived from the schema through a shared primitive,
 how `reaction.fields` is read as edges. The core reaction scheduler
 (`collectReactions`) uses the same primitive, and a lock-in test
 ([reaction-graph.test.ts](../src/__tests__/reaction-graph.test.ts)) asserts the
-primitive, the runtime index, and the DevTools graph all agree — so the panel
-can never show a dependency graph that disagrees with runtime behaviour.
+primitive, the runtime index, and the DevTools graph agree for the covered
+schemas. The diagram represents declared calculation dependencies, not
+action closure reads/writes or live execution state.
 Field metadata is built once per registered model; the graph projects those
 same dependency lists. Subsequent reads reuse both structures.
-The shared `eachReaction` traversal also adds optional `actions` metadata:
+The field-metadata loop also adds optional `actions` metadata:
 `{ reactionIndex, actionIndex, name }[]`, omitted when empty. Function references
 are not merged. These declarations do not expose candidates, versions,
 barriers, or execution status. Actions are drawn inside fields and never added

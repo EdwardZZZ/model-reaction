@@ -2,6 +2,8 @@
 
 超出 README 快速上手范围的常用模式。
 
+[English Version](ADVANCED.md) | 中文
+
 [← 返回 README](../README_CN.md)
 
 ---
@@ -15,6 +17,9 @@
 - [字段转换与异步验证](#字段转换与异步验证)
 - [等待异步操作](#等待异步操作)
 - [Schema 类型推导](#schema-类型推导)
+- [模型组织](#模型组织)
+- [性能与错误处理](#性能与错误处理)
+- [业务模型测试](#业务模型测试)
 
 ---
 
@@ -230,3 +235,41 @@ const status = createModel({
 Schema 推导反映运行时值：默认值会绕过校验，因此与 `type` 不匹配的默认值也会
 包含在推导类型里。显式调用 `createModel<T>` 表示调用方保证 schema 能初始化该类型。
 对象或数组没有可推导的默认值时，建议显式提供数据类型。
+
+## 模型组织
+
+共享生命周期和依赖图的字段放在同一个模型中。大型 Schema 按职责拆成模块，再
+展开为单个扁平 Schema。片段之间的字段名必须唯一：对象展开会静默覆盖前面的定义。
+各自拥有独立生命周期的表单可以使用不同模型；跨模型协调由应用负责。
+
+把复用校验提取为具名规则，把编排放进业务函数。`computed` 保持同步、纯计算，
+所有输入都在 `reaction.fields` 中声明；独立计算结果拆成不同字段。
+异步工作和副作用放进 action 组，执行规则见 [action 契约](API_CN.md#action-组)。
+
+共享领域契约使用显式接口，小型局部模型可以使用 Schema 推导。
+`FieldSchema.type` 是元数据，不是运行时校验；非类型化输入仍需 validator。
+写入前把 API payload 映射为已知字段。[广告创编示例](../examples/AD_CREATION_CN.md)
+展示了 Schema 组合与 DTO 转换。
+
+## 性能与错误处理
+
+- 廉价规则放在前面。字段内顺序执行、首错停止；不同字段可以并行校验。
+- 在服务边界缓存可复用的远端校验，并按服务耗时配置 `asyncValidationTimeout`。
+- 远端校验不应逐键触发时，在调用 `setField` 前做输入防抖。
+  `debounceReactions` 只延迟派生计算。
+- 使用字段或 selector 订阅缩小更新范围。Hook 选择、draft 缓冲与所有权统一见
+  [React 绑定](REACT_CN.md)。
+- 写入返回 `false` 表示校验失败，Promise reject 属于另一类异常。
+  读取 `validationErrors[field]`，或从 `model-reaction/validation` 导入
+  `formatValidationErrors` 汇总错误。用类型化错误事件记录日志，cleanup 中解绑。
+  文本绑定在 `showError` 时展示 `writeError?.message ?? meta.error`。
+
+## 业务模型测试
+
+测试业务边界：规则上下限、transform、无效输入保留在 dirty data、计算值被拒、
+异步旧结果以及 reaction 链。提交流程先等待当前工作，再调用 `validateAll()`，
+然后等待校验触发的后续工作，最后读取 payload。应用负责服务端提交时，补充
+服务端拒绝与重试场景。
+
+React 集成检查覆盖校验在途时继续编辑、字段级更新与 owner 清理。
+仓库贡献所需检查统一维护在 [AGENTS.md](../AGENTS.md)。

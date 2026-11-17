@@ -157,7 +157,7 @@ export function attachToDevtools(
 /**
  * Derive a per-field {@link DevtoolsFieldInfo} map from a schema literal. Pure
  * and side-effect free — the schema is a plain object, so this just reads it
- * (see AGENTS.md §4.5). Reaction dependencies are read through the shared
+ * (see AGENTS.md §5). Reaction dependencies are read through the shared
  * {@link eachReactionEdge} primitive so this and the runtime reaction index
  * interpret `reaction.fields` identically.
  */

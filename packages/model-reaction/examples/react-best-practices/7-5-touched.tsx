@@ -1,5 +1,5 @@
 /**
- * BEST_PRACTICES §7.5 — Touched semantics
+ * docs/REACT.md#controlled-inputs-under-strict--async-validation — Touched semantics
  *
  * `useDraftField` keeps `touched` in the React adapter rather than the model
  * and exposes `onBlur` / `showError` for the standard text-input flow.

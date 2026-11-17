@@ -1,322 +1,136 @@
-# model-reaction vs zustand vs Redux
+# model-reaction, zustand, and Redux Toolkit
 
-[中文版本](COMPARISON_CN.md) | English
+[中文版本](COMPARISON_CN.md) | English | [Documentation](README.md)
 
-This document compares `model-reaction` against the two most popular state
-solutions in the ecosystem — **Redux (Toolkit)** and **zustand** — to help
-you pick the right tool.
+`model-reaction` provides field validation, derived values, and rejected-input
+tracking for a domain entity. Redux Toolkit and zustand provide application
+state containers. Choose by the state being managed; a form model can coexist
+with an application store.
 
-> The three libraries operate at **different layers of abstraction**.
-> Redux and zustand are "state containers" (where state lives), while
-> `model-reaction` is a "model layer" (what rules state must satisfy and
-> how fields interact). They are not mutually exclusive — combining them
-> often works better than picking one.
+## Capabilities and Boundaries
 
----
+| Concern | Redux Toolkit | zustand | model-reaction |
+| --- | --- | --- | --- |
+| Modeling | Slices, reducers, actions | Stores with `set` / `get` | Flat field schema |
+| Updates | Immutable reducer updates with Immer | Immutable updates by convention; Immer optional | Validated field replacement, shallow-frozen snapshots |
+| Derived values | Selectors; `createSelector` available | Selectors or application logic | Declared `reaction.fields` and pure `computed` |
+| Async work | Thunks, listener middleware, RTK Query | Application actions or integrations | Async validators and `reaction.action` groups |
+| Field validation and dirty data | Application or form-library logic | Application or form-library logic | Built-in validators, `validationErrors`, `getDirtyData()` |
+| React subscription | React Redux selectors | Store selectors | Field bindings and selector Hooks |
+| Completion | Depends on the async integration | Depends on application actions | `settled()` covers model validation, calculation, and actions |
+| Persistence | Application logic or integrations | Persist middleware | Application-owned serialization and recovery |
+| Inspection | Redux DevTools integration | DevTools middleware | [Dedicated extension](DEVTOOLS.md) |
 
-## 1. One-line Positioning
+Selectors derive values for readers; a model reaction validates and commits a
+derived field, which can trigger further reactions. Those operations have
+different semantics and costs. Cycle diagnostics concern declared calculation
+dependencies, not arbitrary action closure writes.
 
-| Library | Positioning |
-|---------|-------------|
-| **Redux (Toolkit)** | Single global store + immutable updates + strict unidirectional flow → an **application-level state container** |
-| **zustand** | Minimal hook-based **general-purpose state container** with direct `set` / `get` APIs and multi-store support |
-| **model-reaction** | Schema-driven **domain model / form layer** with built-in validation, reactions, dirty-data, and unified error handling |
+## Choosing a Boundary
 
----
+- Use a model for an edited entity whose fields need validation, dirty input,
+  or a managed calculation graph.
+- Use zustand for directly managed application state such as drawer visibility,
+  theme, or the currently selected entity.
+- Use Redux Toolkit when an application benefits from reducer-based updates,
+  action tracing, and its middleware/query integrations.
+- Keep server caches in a query layer, such as RTK Query or TanStack Query.
 
-## 2. Feature Matrix
+A large form can remain one model composed from schema fragments. Use
+independent models when their owners have independent lifecycles. Coordinating
+those models requires application code.
 
-| Dimension | Redux Toolkit | zustand | model-reaction |
-|-----------|---------------|---------|----------------|
-| API surface | Medium (store/reducer/action/slice/selector) | Minimal (`create`/`set`/`get`) | Medium (schema-first, centralized) |
-| Modeling style | Imperative reducers | Imperative store | **Declarative schema** |
-| Update model | Immutable reducers (Immer built-in) | Immutable updates by convention; Immer optional | Field replacement + shallow-frozen snapshots |
-| Scope | Single global | Multi-store / slice | **One model per domain** |
-| Validation | ❌ none | ❌ none | ✅ sync / async / conditional / cross-field |
-| Derived values | reselect | selectors + middleware | ✅ **schema-level reactions** |
-| Side effects | redux-thunk / saga / observable | manual / middleware | ✅ `reaction.action` |
-| Dirty data | DIY | DIY | ✅ `getDirtyData()` |
-| Async coordination | middleware ecosystem | DIY | ✅ Built-in `settled()` |
-| Subscription granularity | whole-store + selectors | store + selectors | ✅ **field-level + selector-level** |
-| DevTools | ✅ first-class Redux DevTools | ✅ via middleware | ✅ browser extension (see [DEVTOOLS.md](DEVTOOLS.md)) |
-| Persistence | redux-persist | persist middleware | ❌ not yet |
-| TypeScript | Heavy RTK inference | Lean | **Schema infers data type** |
-| Learning curve | Medium-high | Low | Medium |
-| Ecosystem | Huge | Large | Small |
+## One Field in Three Styles
 
----
+These excerpts show where a required-name rule lives. The Redux and zustand
+examples below store rejected text in `name`; the model keeps it in `dirtyData`
+and `useDraftField` displays the editing text. They are not equivalent form
+implementations. Imports and application setup are omitted.
 
-## 3. Mental Model
-
-```
-Redux:           action -> reducer (pure) -> new state -> view
-zustand:         set(state) -> view
-model-reaction:  setField -> [transform] -> [validate] -> commit -> [reaction] -> view
-```
-
-- **Redux**: every change must go through an action — strong discipline,
-  traceable, time-travelable.
-- **zustand**: write it however you like, functional or imperative; minimal
-  constraints.
-- **model-reaction**: every change carries domain semantics — *validate ->
-  commit / dirty-data -> trigger dependents*.
-
----
-
-## 4. Pros & Cons
-
-### 4.1 Redux Toolkit
-
-**Pros**
-- Strongest discipline for large teams: every change has an action;
-  auditing, replay, and testing are easy.
-- Most mature DevTools and plugin ecosystem (time travel, persist, saga,
-  observable).
-- The default choice for complex cross-page / cross-module state machines.
-
-**Cons**
-- Verbose (still more code than zustand even after RTK simplification).
-- Awkward for forms: writing an action / reducer per field is a nightmare.
-- No validation, no derived values (need reselect), no async (need
-  middleware) out of the box.
-
-### 4.2 zustand
-
-**Pros**
-- Minimal: `create((set) => ({...}))` and you're done.
-- Mature middleware ecosystem (persist / immer / devtools /
-  subscribeWithSelector) and natural multi-store / slice patterns.
-- Lowest mental overhead and migration cost.
-
-**Cons**
-- No constraints → easy to make a mess in large projects.
-- No validation, no schema, no dirty-data, no error classification.
-- Form / domain-model scenarios require building everything from scratch.
-
-### 4.3 model-reaction
-
-**Pros**
-- **Schema-first**: types / validators / defaults / reactions / transforms
-  declared together, easy to skim.
-- **Validation built-in**: sync / async / conditional / cross-field, plus
-  `dirtyData` + `validationErrors` + `formatValidationErrors`.
-- **Reactions built-in**: `fields → computed → action`, with automatic
-  scheduling from declared dependencies and circular-dependency detection.
-- **Field-level subscriptions**: `useModelField` watches one field in React;
-  outside React, `subscribe((data) => data[field], callback)` observes its value.
-- **Async coordination**: `settled()` waits for *all* pending reactions
-  and validations in one line.
-- **Error classification**: typed model error events — cleaner
-  than try/catch inside reducers.
-
-**Cons**
-- **Not a general-purpose store**: not designed for UI / routing / global
-  shared state.
-- **Thin ecosystem**: a dedicated DevTools extension exists, but there is no
-  persistence or middleware ecosystem.
-- **Weak multi-store coordination**: cross-model orchestration is manual
-  (wired by hand via `subscribe`). Note this refers to linking
-  **multiple independent models**, not "large forms must be split into
-  models" — the right approach for a large form is a **single model composed
-  from schema fragments** (`{ ...baseSchema, ...contactSchema }`), so the
-  `reaction` cross-field dependency graph stays managed within one model and
-  actually sidesteps this weakness; you only truly need multiple models when
-  the sections have **different lifecycles** (e.g. a step wizard where each
-  step is disposed / reused independently).
-- **Writes must be awaited**: `setField` returns a Promise (validation is
-  async).
-- **React integration is now solid (`ModelProvider` / `useDraftField` /
-  `useModelFieldState`)** but community resources lag far behind RTK and
-  zustand.
-
----
-
-## 5. Same Feature, Three Implementations
-
-Requirement: a `name` field with required validation and inline error
-rendering.
-
-### 5.1 Redux Toolkit
+### Redux Toolkit
 
 ```ts
-// slice
 const userSlice = createSlice({
   name: 'user',
   initialState: { name: '', errors: {} as Record<string, string> },
   reducers: {
-    setName: (s, a: PayloadAction<string>) => {
-      s.name = a.payload;
-      if (!a.payload) s.errors.name = 'required';
-      else delete s.errors.name;
+    setName: (state, action: PayloadAction<string>) => {
+      state.name = action.payload;
+      if (!action.payload) state.errors.name = 'required';
+      else delete state.errors.name;
     },
   },
 });
 
-// component
-const name = useSelector((s: RootState) => s.user.name);
-const error = useSelector((s: RootState) => s.user.errors.name);
-dispatch(setName(value));
+const name = useSelector((state: RootState) => state.user.name);
+const error = useSelector((state: RootState) => state.user.errors.name);
+dispatch(userSlice.actions.setName(value));
 ```
 
-### 5.2 zustand
+### zustand
 
 ```ts
 const useUser = create<{
   name: string;
-  errors: Record<string, string | undefined>;
-  setName: (v: string) => void;
+  error: string | undefined;
+  setName: (value: string) => void;
 }>((set) => ({
   name: '',
-  errors: {},
-  setName: (v) =>
-    set((s) => ({
-      name: v,
-      errors: v
-        ? { ...s.errors, name: undefined }
-        : { ...s.errors, name: 'required' },
-    })),
+  error: undefined,
+  setName: (value) => set({ name: value, error: value ? undefined : 'required' }),
 }));
 
-// component
-const name = useUser((s) => s.name);
-const error = useUser((s) => s.errors.name);
+const name = useUser((state) => state.name);
+const error = useUser((state) => state.error);
 useUser.getState().setName(value);
 ```
 
-### 5.3 model-reaction
+### model-reaction
 
 ```ts
 const userModel = createModel<{ name: string }>({
   name: { type: 'string', default: '', validator: [ValidationRules.required] },
 });
 
-// component
 const { draft, setDraft, meta, writeError, onBlur, showError } =
   useDraftField(userModel, 'name');
 // Bind draft/setDraft; display writeError?.message ?? meta.error under showError.
 ```
 
-Validation logic, error state, and field subscriptions are all built-in,
-and types are inferred end-to-end.
+The complete [comparison snippet](../examples/react-best-practices/7-10-5-cheat-sheet.ts)
+requires optional Redux and zustand dependencies. Model ownership and input
+binding are specified in [React bindings](REACT.md).
 
----
+## Combining a Store and a Model
 
-## 6. Decision Tree
+The application store can own which editor is open. The editor owner creates
+and disposes its model. After [submission checks](REACT.md#submission-flow) and
+server acceptance, publish the accepted entity to the store.
 
+| Integration | Reference |
+| --- | --- |
+| zustand owns global UI state; a model owns editor fields | [zustand snippet](../examples/react-best-practices/7-10-2-with-zustand.tsx) |
+| Redux Toolkit owns application entities; a model handles form editing | [Redux snippet](../examples/react-best-practices/7-10-3-with-redux.tsx) |
+
+Avoid maintaining two independently editable copies of the same form fields.
+Keep editing text and UI flags local where appropriate; see
+[controlled inputs](REACT.md#controlled-inputs-under-strict--async-validation).
+These integrations are optional; the library does not install either store.
+
+## Measuring Performance
+
+The repository includes an exploratory
+[model-vs-zustand benchmark](../benchmarks/model-vs-zustand.ts). From the
+repository root, with `tsx` and `zustand` available:
+
+```bash
+pnpm --filter model-reaction exec tsx benchmarks/model-vs-zustand.ts
 ```
-Is it a form / domain entity / has cross-field validation?
-├─ Yes → model-reaction
-│        └─ Also need global UI state? Combine: model-reaction + zustand
-│
-└─ No (general state) →
-    ├─ Big team / strict auditing / complex state machine → Redux Toolkit
-    ├─ Small / mid project, minimalism preferred       → zustand
-    └─ Existing Redux project, just adding forms       → drop model-reaction next to Redux
-```
 
----
-
-## 7. They Are Not Mutually Exclusive
-
-Real projects often combine them:
-
-| Project Type | Recommended Stack |
-|--------------|-------------------|
-| Mid-size SPA + complex forms | **zustand** (global) + **model-reaction** (per form / domain object) |
-| Large enterprise app | **Redux Toolkit** (app skeleton) + **model-reaction** (business form layer) |
-| Form-heavy app | **model-reaction** alone, with `ModelProvider` |
-| Tiny demo / internal tool | **zustand** alone |
-
----
-
-## 8. Real Benchmarks (model-reaction vs zustand)
-
-### 8.1 Methodology
-
-- Script: [`benchmarks/model-vs-zustand.ts`](../benchmarks/model-vs-zustand.ts)
-- Run: `npx tsx benchmarks/model-vs-zustand.ts`
-- Each scenario implements the same semantics twice (zustand vanilla
-  store vs `model-reaction`), runs 10–30 iterations and reports the
-  **median (ms)**. Lower is better.
-- Environment: macOS 26.5 / arm64 / Node v24.13.0 / zustand 4.5.7.
-  Numbers vary across machines and should only be read as **order of
-  magnitude**.
-
-### 8.2 Measured Numbers
-
-These historical measurements predate the subscription API simplification.
-The current benchmark uses `subscribe(data => data.a, callback)` for its
-single-field scenarios; re-run it before comparing current performance.
-
-| Scenario | zustand | model-reaction | Ratio |
-| --- | --- | --- | --- |
-| Create 1000 instances | 0.04 ms | 4.45 ms | ~118× |
-| 1000 writes (no validation, serial `await`) | 0.04 ms | 0.41 ms | ~10× |
-| 1000 writes (with required validator) | 0.05 ms | 0.67 ms | ~13× |
-| Single-field subscribe + 1000 writes | 0.05 ms | 0.40 ms | ~8× |
-| Field isolation (1000 subscribers / 1000 writes to other field) | 7.34 ms | 7.45 ms | ~1.0× |
-| Derived value (reaction triggered 1000 times) | 0.05 ms | 1.15 ms | ~22× |
-
-### 8.3 How to Read These Numbers
-
-- **Absolute cost is tiny.** A single `setField` is about
-  **0.4–0.7 microseconds**. For human-driven interaction (tens of events
-  per second) the difference is unobservable; the gap only shows in
-  tight 1000-iteration loops.
-- **zustand is the lower bound.** It's a pub/sub + shallow merge with no
-  extra work. The extra time in `model-reaction` buys you: `setField`
-  unified as a Promise (covering sync + async validators), built-in
-  `transform / validator / dirtyData / reactionSystem`, classified
-  errors, and field-level subscriptions.
-- **Creation is 118× slower.** Every model constructs an
-  `EventEmitter`, a `ReactionSystem`, and the
-  dependency graph. This is a **one-time cost** — a typical SPA creates
-  one model per form, not 1000 in a loop.
-- **Field isolation matches zustand (~1×).** With 1000 subscribers, the
-  notification cost is essentially the same. This is the hot path for
-  forms ("N field subscribers, a couple of fields written rapidly"),
-  and `model-reaction`'s field-level routing keeps up.
-- **Derived values (22×).** In micro-benchmarks reactions are about an
-  order of magnitude slower than selectors, but **the absolute number is
-  still ~1.15ms for 1000 updates**, plenty for real forms. In return
-  you get centralized dependency declarations, cycle detection, and
-  debouncing.
-- **Validation gap (13×) is expected.** With zustand you'd hand-roll the
-  same logic, so this comparison is really "built-in validation + error
-  state + dirty data" vs "a single inline `if`" — informational only.
-
-### 8.4 When the gap matters
-
-- ❌ **Regular forms** (dozens of fields, human-typing rate): negligible.
-- ❌ **Business domain models** (update rate < 100 Hz): negligible.
-- ⚠️ **High-frequency streaming updates** (charts, chat, collaborative
-  editing, per-frame mass updates): keep raw state in zustand and use
-  `model-reaction` only on the subset that actually needs validation
-  or reactions.
-- ⚠️ **Millions of model instances alive simultaneously**: the creation
-  cost will dominate — but at that scale you usually want a specialized
-  approach (ECS-like) rather than a general state container.
-
-### 8.5 TL;DR
-
-**`model-reaction`'s extra overhead is the steady unit price of having
-domain semantics built in.** Single operations stay sub-millisecond,
-the gap with zustand grows linearly (not catastrophically), and once
-you actually need schema + validation + reactions + field
-subscriptions, hand-building the equivalent on top of zustand quickly
-costs more in lines of code and mental load than the runtime delta.
-
----
-
-## 9. TL;DR
-
-- **Want discipline and ecosystem?** → Redux
-- **Want lightweight and fast?** → zustand
-- **Want schema, validation, reactions, dirty-data out of the box?** →
-  model-reaction
-
-They live at **different abstraction levels**: Redux / zustand are state
-containers; `model-reaction` is a model layer. The former answers "where
-does state live?", the latter answers "what rules must state satisfy and
-how do fields interact?". Composing them is usually more pleasant than
-picking one and forcing it everywhere.
+The script reports median timings for creation, writes, subscriptions, and
+derived work. It does not implement equivalent validation, dirty-data, or
+reaction-completion behavior on both sides. Record the runtime, dependency
+versions, machine, and schema with any reported timings.
+Measure the application's actual schema, async work, and render path before
+making performance decisions; keep high-frequency raw data outside a form
+model when it does not need model semantics.

@@ -1,25 +1,4 @@
-/**
- * Index for the React best-practices demos.
- *
- * Each module corresponds to a sub-section of `BEST_PRACTICES.md` §7.
- * They are focused reference snippets, not standalone CLI programs. Snippets
- * that use module-level fixtures omit ownership setup for brevity; production
- * code should apply the owner lifecycle shown in §7.8.
- *
- * | Section | File |
- * | ------- | ---- |
- * | 7.1 — Pick the right hook                   | see `examples/react-bindings.tsx` (covers `useDraftField`, `useModelField`, `useModelFields`, `useModelSelector`, `useModelFieldState`) |
- * | 7.2 — Stable selector references            | `7-2-stable-selector.tsx`     |
- * | 7.2bis — `useModelComputed`                 | `7-2bis-model-computed.tsx`   |
- * | 7.3 — Avoid prop drilling with `<ModelProvider>` | `7-3-model-provider.tsx`  |
- * | 7.4 — `<Field>` for committed-value controls | `7-4-field-render-prop.tsx`  |
- * | 7.5 — Touched semantics                     | `7-5-touched.tsx`             |
- * | 7.6 — Submission flow                       | `7-6-submission-flow.tsx`     |
- * | 7.8 — Lifecycle and cleanup                 | `7-8-lifecycle.tsx`           |
- * | 7.10.2 — Combine with zustand               | `7-10-2-with-zustand.tsx`     |
- * | 7.10.3 — Combine with Redux Toolkit         | `7-10-3-with-redux.tsx`       |
- * | 7.10.5 — Code-style cheat sheet             | `7-10-5-cheat-sheet.ts`       |
- */
+/** Reference snippets and owner-lifecycle notes are indexed in examples/README.md. */
 export * from './7-2-stable-selector';
 export * from './7-2bis-model-computed';
 export * from './7-3-model-provider';

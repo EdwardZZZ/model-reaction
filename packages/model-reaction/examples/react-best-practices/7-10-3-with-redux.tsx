@@ -1,5 +1,5 @@
 /**
- * BEST_PRACTICES §7.10.3 — Combine with Redux Toolkit
+ * docs/COMPARISON.md#combining-a-store-and-a-model — Combine with Redux Toolkit
  *
  * In Redux apps, keep RTK as the application skeleton and drop a
  * `model-reaction` model wherever you would otherwise spawn a slice

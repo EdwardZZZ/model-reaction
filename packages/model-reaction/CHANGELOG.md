@@ -30,6 +30,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and the `packages/devtools/` workspace package.
 
 ### Changed
+- **Breaking:** `reaction.action` is now an array of no-argument functions
+  reading the model through a closure. Only the host's latest eligible group
+  starts after calculation settles; each item checks calculation again.
+  Direct host changes cancel unstarted items, while started Promises remain
+  tracked. See the [action migration](docs/API.md#action-groups).
 - **Breaking:** each field now accepts one `reaction`; arrays (including empty
   arrays) fail at construction before initialization. Unwrap single entries;
   refactor multiple calculations by business result instead of merging them
@@ -110,10 +115,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Extracted `eachReactionEdge` (`src/reaction/reaction-graph.ts`) as the single
   definition of how a schema's `reaction.fields` are read as dependency edges.
   Both the runtime reaction index (`ReactionSystem.collectReactions`) and the
-  DevTools dependency graph consume it, so they cannot diverge; a lock-in test
-  asserts the primitive, the runtime index, and the graph all agree.
+  DevTools dependency graph consume it; a lock-in test asserts agreement for
+  the covered schemas.
 
 ### Docs
+- Consolidated document navigation; merged best-practice guidance into advanced
+  usage and comparison, and completed design decisions into architecture.
+  The ad-creation scenario now lives in
+  [examples/AD_CREATION_CN.md](examples/AD_CREATION_CN.md).
 - Clarified the separate subscription policies of `useModelSelector` and
   `useModelComputed`. Both share snapshot caching; `shallow` retains equivalent
   container results across updates and avoids unrelated re-renders.
@@ -205,9 +214,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Breaking:** replaced `getValidationSummary()` and
   `ModelOptions.errorFormatter` with standalone `formatValidationErrors`.
 - **Breaking:** stopped exporting the internal `ValidateFieldOptions` type.
-- Reworked the ad-creation technical solution document to align with the current
-  `model-reaction` API guidance, and moved it from the repository root to
-  `docs/TECHNICAL_SOLUTION.md`.
+- Reworked the ad-creation technical solution document to align with the
+  `model-reaction` API guidance, and moved it from the repository root into
+  the package documentation. The current recipe is
+  [examples/AD_CREATION_CN.md](examples/AD_CREATION_CN.md).
 - `settled()` now waits for both pending reaction timeouts AND in-flight async
   reactions/validations, instead of resolving on a fixed timer.
 - `validateAll()` suppresses per-field reactions and triggers a single batched

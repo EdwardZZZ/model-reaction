@@ -2,6 +2,8 @@
 
 `model-reaction` 对外公开 API 的参考文档。
 
+[English Version](API.md) | 中文
+
 [← 返回 README](../README_CN.md)
 
 ---

@@ -1,5 +1,5 @@
 /**
- * BEST_PRACTICES §7.8 — Lifecycle and cleanup
+ * docs/REACT.md#model-lifecycle-in-react — Lifecycle and cleanup
  *
  * Create a model after the owner commits, then dispose that same instance when
  * the owner and its subscribers unmount.

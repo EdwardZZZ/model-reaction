@@ -187,17 +187,8 @@ draft 行为、非文本控件、transform 和错误展示，详见
 
 ## 文档
 
-| 主题 | 链接 |
-| --- | --- |
-| API 参考 | [docs/API_CN.md](docs/API_CN.md) |
-| 高级用法（异步验证、自定义规则、跨字段、`settled()`、类型推导） | [docs/ADVANCED_CN.md](docs/ADVANCED_CN.md) |
-| React 绑定与选择器 hooks | [docs/REACT_CN.md](docs/REACT_CN.md) |
-| 最佳实践 | [docs/BEST_PRACTICES_CN.md](docs/BEST_PRACTICES_CN.md) |
-| 与 Redux、zustand 对比 | [docs/COMPARISON_CN.md](docs/COMPARISON_CN.md) |
-| DevTools 浏览器扩展 | [docs/DEVTOOLS_CN.md](docs/DEVTOOLS_CN.md) |
-| 场景化技术方案 | [docs/TECHNICAL_SOLUTION.md](docs/TECHNICAL_SOLUTION.md) |
-| 可运行示例 | [`examples/`](examples/) |
-| 给编码代理 / LLM 的高密度入门指南 | [AGENTS.md](AGENTS.md) |
+通过[文档导航](docs/README_CN.md)查找 API 参考、高级用法、React 绑定、集成、
+DevTools、架构、示例与贡献约定。
 
 ## 许可证
 

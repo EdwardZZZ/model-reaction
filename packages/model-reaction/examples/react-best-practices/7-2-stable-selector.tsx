@@ -1,5 +1,5 @@
 /**
- * BEST_PRACTICES §7.2 — Stable selector references
+ * docs/REACT.md#usemodelselector-vs-usemodelcomputed — Stable selector references
  *
  * Pass a stable `selector` reference to `useModelSelector` to avoid extra
  * subscriptions. When the selector returns a fresh container,
