@@ -35,11 +35,8 @@ interface HookModelInstance {
     getDependencyGraph(): InstanceState['graph'];
     getSnapshot(): {
         data: Record<string, unknown>;
-        dirtyData: Record<string, unknown>;
-        errors: Record<string, Array<{ field: string; message: string; rule?: string }>>;
     };
     subscribe(listener: (change: { field: string; value: unknown; timestamp: number }) => void): () => void;
-    subscribeSnapshot?(listener: () => void): () => void;
 }
 
 const HOOK_KEY = '__MODEL_REACTION_DEVTOOLS_HOOK__';
@@ -105,7 +102,7 @@ export function installAgent(
                 seq: 0,
                 snapshotQueued: false,
             };
-            const unsubscribeChanges = instance.subscribe((change) => {
+            entry.unsubscribe = instance.subscribe((change) => {
                 const record: ChangeEntry = {
                     seq: entry.seq++,
                     field: change.field,
@@ -122,11 +119,6 @@ export function installAgent(
                 // refresh the whole instance once at the end of this microtask.
                 scheduleSnapshot(entry);
             });
-            const unsubscribeSnapshot = instance.subscribeSnapshot?.(() => scheduleSnapshot(entry));
-            entry.unsubscribe = () => {
-                unsubscribeChanges();
-                unsubscribeSnapshot?.();
-            };
             tracked.set(instance.id, entry);
             post({ source: AGENT_SOURCE, kind: 'instance-added', instance: toState(entry) });
         },

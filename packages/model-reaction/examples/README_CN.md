@@ -8,14 +8,14 @@
 
 | 示例 | 内容 | 命令 |
 | --- | --- | --- |
-| [基本使用](basic-usage.ts) | 创建、写入与校验 | `pnpm --filter model-reaction run example:basic` |
+| [基本使用](basic-usage.ts) | 同步写入与派生值 | `pnpm --filter model-reaction run example:basic` |
 | [Reaction](reaction-system.ts) | 依赖计算与 action | `pnpm --filter model-reaction run example:reaction` |
-| [异步校验](async-validation.ts) | 模拟远端查重 | `pnpm --filter model-reaction run example:async` |
-| [事件](event-listening.ts) | 字段变更与校验事件 | `pnpm --filter model-reaction run example:event` |
-| [复杂表单](complex-form.ts) | 跨字段规则与错误 | `pnpm --filter model-reaction run example:complex` |
-| [脏数据](dirty-data-conditional.ts) | 被拒输入与条件规则 | `pnpm --filter model-reaction run example:dirty` |
+| [异步 action](async-action.ts) | 远端检查与过期响应保护 | `pnpm --filter model-reaction run example:async` |
+| [事件](event-listening.ts) | 提交字段变更 | `pnpm --filter model-reaction run example:event` |
+| [复杂表单](complex-form.ts) | 计算链与业务提交 | `pnpm --filter model-reaction run example:complex` |
+| [业务检查](business-validation.ts) | 预检与条件提交检查 | `pnpm --filter model-reaction run example:business` |
 | [深层依赖链](multi-record-deep-deps.ts) | 100 条记录、五层计算 | `pnpm --filter model-reaction run example:multi-record` |
-| [React 绑定](react-bindings.tsx) | 字段、selector、draft 与所有权 | `pnpm --filter model-reaction run example:react` |
+| [React 绑定](react-bindings.tsx) | 直接字段绑定、selector 与所有权 | `pnpm --filter model-reaction run example:react` |
 
 React 命令执行独立的 [SSR runner](react-bindings-runner.tsx)；导入组件文件不会运行它。
 
@@ -25,12 +25,12 @@ React 命令执行独立的 [SSR runner](react-bindings-runner.tsx)；导入组�
 | --- | --- |
 | 稳定与内联 selector | [稳定 selector](react-best-practices/7-2-stable-selector.tsx)、[computed selector](react-best-practices/7-2bis-model-computed.tsx) |
 | Provider 与已提交值控件 | [Provider](react-best-practices/7-3-model-provider.tsx)、[Field](react-best-practices/7-4-field-render-prop.tsx) |
-| 错误展示、提交与清理 | [Touched](react-best-practices/7-5-touched.tsx)、[提交](react-best-practices/7-6-submission-flow.tsx)、[生命周期](react-best-practices/7-8-lifecycle.tsx) |
+| 提交与清理 | [提交](react-best-practices/7-6-submission-flow.tsx)、[生命周期](react-best-practices/7-8-lifecycle.tsx) |
 | 应用 store | [zustand](react-best-practices/7-10-2-with-zustand.tsx)、[Redux](react-best-practices/7-10-3-with-redux.tsx)、[对比](react-best-practices/7-10-5-cheat-sheet.ts) |
 | 广告创编 | [Schema 组合、提审 DTO 与草稿恢复](AD_CREATION_CN.md) |
 
 这些文件为参考模式，不是独立 CLI 程序。模块级模型 fixture 为简洁省略了所有权
-配置，应用中需采用 [owner 生命周期](../docs/REACT_CN.md#react-中的-model-生命周期)。
+配置，应用中需采用 [owner 生命周期](../docs/REACT_CN.md#react-中的模型生命周期)。
 React 契约统一见 [REACT_CN.md](../docs/REACT_CN.md)，store 集成见
 [COMPARISON_CN.md](../docs/COMPARISON_CN.md)。
 

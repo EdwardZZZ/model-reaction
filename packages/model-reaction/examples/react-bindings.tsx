@@ -18,7 +18,6 @@
  */
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { createModel, type ModelReturn } from 'model-reaction';
-import { ValidationRules } from 'model-reaction/validation';
 import {
     Field,
     ModelProvider,
@@ -27,7 +26,6 @@ import {
     useModelFields,
     useModelFieldState,
     useModelSelector,
-    useDraftField,
 } from 'model-reaction/react';
 
 // 1. Define the model. Use an explicit interface for the cleanest types.
@@ -46,20 +44,18 @@ export function createCartModel() {
         name:   {
             type: 'string',
             default: '',
-            validator: [ValidationRules.required],
         },
     });
 }
 
-// 2. Recommended controlled text input; the local draft prevents rejected
-//    intermediate values from snapping back to the last committed value.
+// 2. Bind text directly to the synchronous field value and setter.
 function NameInput() {
     const cart = useModel<Cart>();
-    const { draft, setDraft } = useDraftField(cart, 'name');
+    const [name, setName] = useModelFieldState(cart, 'name');
     return (
         <input
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
+            value={name}
+            onChange={(e) => setName(e.target.value)}
         />
     );
 }
@@ -98,11 +94,11 @@ function CouponBadge() {
     return summary.hasCoupon ? <span>Coupon: {summary.coupon}</span> : null;
 }
 
-// 6. Validation metadata has its own event subscriptions.
-function ValidationSummary() {
+// 6. Business feedback is derived by the application.
+function NameSummary() {
     const cart = useModel<Cart>();
-    const [, , meta] = useModelFieldState(cart, 'name');
-    return meta.error ? <span style={{ color: 'red' }}>Invalid name</span> : null;
+    const name = useModelField(cart, 'name');
+    return name.trim() ? null : <span>Name is required before submission</span>;
 }
 
 // 7. Top-level app — create after commit and dispose that instance in cleanup.
@@ -133,11 +129,10 @@ export function CartContents() {
             <QtyValue />
             <Total />
             <CouponBadge />
-            <ValidationSummary />
+            <NameSummary />
             <Summary />
             <CouponField />
             <QtyControl />
-            <NameFieldWithBlur />
         </div>
     );
 }
@@ -155,7 +150,7 @@ function Summary() {
 function CouponField() {
     return (
         <Field<Cart, 'coupon'> name="coupon">
-            {({ value, setValue, meta }) => (
+            {({ value, setValue }) => (
                 <label>
                     <select
                         value={value}
@@ -164,9 +159,6 @@ function CouponField() {
                         <option value="">No coupon</option>
                         <option value="SAVE10">SAVE10</option>
                     </select>
-                    {meta.error ? (
-                        <span style={{ color: 'red' }}>{meta.error}</span>
-                    ) : null}
                 </label>
             )}
         </Field>
@@ -174,51 +166,18 @@ function CouponField() {
 }
 
 // 7d. `useModelFieldState` example for a non-text control.
-//     Demonstrates `validating`, `dirty`, `error` metadata.
+//     The setter commits synchronously.
 function QtyControl() {
     const cart = useModel<Cart>();
-    const [qty, setQty, meta] = useModelFieldState(cart, 'qty');
+    const [qty, setQty] = useModelFieldState(cart, 'qty');
     return (
         <input
             type="range"
             min={1}
             max={10}
-            data-validating={meta.validating}
-            data-dirty={meta.dirty}
             value={qty}
             onChange={(e) => void setQty(Number(e.target.value))}
         />
-    );
-}
-
-// 7e. Real-world controlled text input with touched / blur / error display.
-//     `useDraftField` owns the local draft and standard edit-lifecycle state:
-//       - `writeError?.message ?? meta.error` for the message,
-//       - `meta.validating` to indicate pending validation,
-//       - `meta.dirty` if you want to flag rejected writes.
-function NameFieldWithBlur() {
-    const cart = useModel<Cart>();
-    const { draft, setDraft, meta, writeError, onBlur, showError } =
-        useDraftField(cart, 'name');
-    return (
-        <label style={{ display: 'block' }}>
-            <span>Name</span>
-            <input
-                value={draft}
-                aria-busy={meta.validating}
-                onChange={(e) => setDraft(e.target.value)}
-                onBlur={onBlur}
-                aria-invalid={showError}
-                style={{
-                    borderColor: showError ? 'red' : undefined,
-                }}
-            />
-            {showError ? (
-                <span role="alert" style={{ color: 'red' }}>
-                    {writeError?.message ?? meta.error}
-                </span>
-            ) : null}
-        </label>
     );
 }
 

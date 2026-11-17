@@ -190,34 +190,10 @@ export function serializeRecord(
 export function serializeSnapshot(
     raw: {
         data: Record<string, unknown>;
-        dirtyData: Record<string, unknown>;
-        errors: Snapshot['errors'];
     },
     options: SerializeOptions = DEFAULT_SERIALIZE_OPTIONS
 ): Snapshot {
     const budget = new Budget(options);
     const data = recordValues(raw.data, budget);
-    const dirtyData = recordValues(raw.dirtyData, budget);
-    const errors: Snapshot['errors'] = {};
-    let count = 0;
-    for (const key of ownKeys(raw.errors)) {
-        if (count++ >= options.maxItems || !budget.key(key) || !budget.take()) {
-            budget.truncated = true;
-            break;
-        }
-        const list: Snapshot['errors'][string] = [];
-        for (const error of raw.errors[key]!) {
-            if (list.length >= options.maxItems || !budget.take()) {
-                budget.truncated = true;
-                break;
-            }
-            list.push({
-                field: budget.text(error.field),
-                message: budget.text(error.message),
-                ...(error.rule === undefined ? {} : { rule: budget.text(error.rule) }),
-            });
-        }
-        Object.defineProperty(errors, key, { value: list, enumerable: true });
-    }
-    return { data, dirtyData, errors, ...(budget.truncated ? { truncated: true } : {}) };
+    return { data, ...(budget.truncated ? { truncated: true } : {}) };
 }

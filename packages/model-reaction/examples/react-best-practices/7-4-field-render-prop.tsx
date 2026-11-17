@@ -22,19 +22,17 @@ export function PlanFieldDemo() {
     return (
         <ModelProvider model={userModel}>
             <Field<User, 'plan'> name="plan">
-                {({ value, setValue, meta }) => (
+                {({ value, setValue }) => (
                     <label>
                         <select
                             value={value}
                             onChange={(e) =>
                                 setValue(e.target.value as User['plan'])
                             }
-                            aria-invalid={!!meta.error}
                         >
                             <option value="free">Free</option>
                             <option value="pro">Pro</option>
                         </select>
-                        {meta.error && <span>{meta.error}</span>}
                     </label>
                 )}
             </Field>

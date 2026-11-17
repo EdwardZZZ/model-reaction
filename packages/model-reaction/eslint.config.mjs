@@ -48,17 +48,6 @@ export default tseslint.config(
     },
   },
   {
-    files: ['src/validation/**/*.{ts,tsx}'],
-    rules: {
-      'no-restricted-imports': ['error', {
-        patterns: [{
-          group: ['../core/**', '../reaction/**', '../react/**', '../devtools/**'],
-          message: 'Validation helpers must remain independent of model runtime and adapters.',
-        }],
-      }],
-    },
-  },
-  {
     files: ['src/reaction/**/*.{ts,tsx}'],
     rules: {
       'no-restricted-imports': ['error', {

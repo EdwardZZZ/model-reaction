@@ -92,7 +92,7 @@ function round(n: number): number {
 }
 
 function createRecordModel() {
-  return createModel(buildSchema(), { debounceReactions: 0 });
+  return createModel(buildSchema());
 }
 
 // ---- 2. 构造 100 条输入数据（每条 10 个输入字段） ----
@@ -128,7 +128,7 @@ async function runExample() {
 
   // 批量写入输入字段，触发 5 层 reaction 级联
   const tWriteStart = performance.now();
-  await Promise.all(models.map(({ input, model }) => model.setFields(input)));
+  models.forEach(({ input, model }) => model.setFields(input));
   const tWriteEnd = performance.now();
 
   // 等待 reaction 全部完成

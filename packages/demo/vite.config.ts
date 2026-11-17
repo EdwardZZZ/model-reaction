@@ -16,7 +16,6 @@ export default defineConfig({
         alias: {
             'model-reaction/devtools': lib('devtools/index.ts'),
             'model-reaction/react': lib('react/index.ts'),
-            'model-reaction/validation': lib('validation/index.ts'),
             'model-reaction': lib('index.ts'),
         },
     },

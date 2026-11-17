@@ -11,18 +11,14 @@ import {
 /** A controllable fake of the library's `DevtoolsModelInstance`. */
 function makeFakeInstance(id: number) {
     let listener: ((c: { field: string; value: unknown; timestamp: number }) => void) | null = null;
-    let snapshotListener: (() => void) | null = null;
     const data: Record<string, unknown> = { firstName: '', fullName: '' };
-    let dirtyData: Record<string, unknown> = {};
-    let errors: Record<string, Array<{ field: string; message: string }>> = {};
     return {
         id,
         getFields: () => ({
-            firstName: { type: 'string', hasDefault: true, validatorCount: 0, reactionDeps: [] },
+            firstName: { type: 'string', hasDefault: true, reactionDeps: [] },
             fullName: {
                 type: 'string',
                 hasDefault: true,
-                validatorCount: 0,
                 reactionDeps: ['firstName'],
             },
         }),
@@ -30,20 +26,7 @@ function makeFakeInstance(id: number) {
             nodes: ['firstName', 'fullName'],
             edges: [{ from: 'firstName', to: 'fullName' }],
         }),
-        getSnapshot: () => ({ data: { ...data }, dirtyData, errors }),
-        subscribeSnapshot: (l: () => void) => {
-            snapshotListener = l;
-            return () => { snapshotListener = null; };
-        },
-        rejectInput() {
-            dirtyData = { firstName: '' };
-            errors = { firstName: [{ field: 'firstName', message: 'required' }] };
-            snapshotListener?.();
-        },
-        clearDirty() {
-            dirtyData = {};
-            snapshotListener?.();
-        },
+        getSnapshot: () => ({ data: { ...data } }),
         subscribe: (l: (c: { field: string; value: unknown; timestamp: number }) => void) => {
             listener = l;
             return () => {
@@ -173,45 +156,26 @@ describe('page agent', () => {
         });
     });
 
-    test('refreshes rejected input without adding timeline entries and removes both subscriptions', async () => {
+    test('removes the change subscription on unregister', async () => {
         const received = collectAgentMessages();
         dispose = installAgent(window);
         const inst = makeFakeInstance(7);
         getHook().register(inst);
-        inst.rejectInput();
-        inst.rejectInput();
+        inst.emitChange('firstName', 'Grace');
         await flush();
         await flush();
         const snapshots = received.filter(
             (m): m is Extract<AgentMessage, { kind: 'snapshot' }> => m.kind === 'snapshot'
         );
         expect(snapshots).toHaveLength(1);
-        expect(snapshots[0]?.snapshot.dirtyData.firstName).toEqual({ t: 'primitive', v: '' });
-        expect(snapshots[0]?.snapshot.errors.firstName?.[0]?.message).toBe('required');
-        expect(received.filter((m) => m.kind === 'change')).toHaveLength(0);
-
-        inst.clearDirty();
-        await flush();
-        await flush();
-        expect(received.filter((m) => m.kind === 'snapshot')).toHaveLength(2);
+        expect(snapshots[0]?.snapshot.data.firstName).toEqual({ t: 'primitive', v: 'Grace' });
+        expect(received.filter((m) => m.kind === 'change')).toHaveLength(1);
         getHook().unregister(7);
-        inst.rejectInput();
-        inst.emitChange('firstName', 'Ada');
-        await flush();
-        await flush();
-        expect(received.filter((m) => m.kind === 'snapshot')).toHaveLength(2);
-        expect(received.filter((m) => m.kind === 'change')).toHaveLength(0);
-    });
-
-    test('supports older instances without snapshot subscriptions', async () => {
-        const received = collectAgentMessages();
-        dispose = installAgent(window);
-        const { subscribeSnapshot: _unused, ...inst } = makeFakeInstance(8);
-        getHook().register(inst);
         inst.emitChange('firstName', 'Ada');
         await flush();
         await flush();
         expect(received.filter((m) => m.kind === 'snapshot')).toHaveLength(1);
+        expect(received.filter((m) => m.kind === 'change')).toHaveLength(1);
     });
 
     test('does not send a queued snapshot after the instance is unregistered', async () => {

@@ -9,7 +9,6 @@
  * side) cannot catch.
  */
 import { createModel } from 'model-reaction/devtools';
-import { ValidationRules } from 'model-reaction/validation';
 import { installAgent } from '../page-agent';
 import {
     isAgentMessage,
@@ -96,14 +95,14 @@ describe('library ↔ page-agent end-to-end', () => {
         model.dispose();
     });
 
-    test('failed validation surfaces in the agent snapshot as dirtyData', async () => {
+    test('synchronous transformed writes refresh committed snapshots', async () => {
         const received = collect();
         dispose = installAgent(window);
         const model = createModel({
             email: {
                 type: 'string',
                 default: '',
-                validator: [ValidationRules.email.withMessage('bad email')],
+                transform: (value) => value.trim(),
             },
         });
         await flush();
@@ -116,10 +115,8 @@ describe('library ↔ page-agent end-to-end', () => {
         );
         const id = added!.instance.id;
 
-        await model.setField('email', 'nope');
-        await model.settled();
-
-        // Rejected input must refresh automatically without a panel request.
+        expect(model.setField('email', ' user@example.com ')).toBeUndefined();
+        expect(model.data.email).toBe('user@example.com');
         await flush();
         await flush();
 
@@ -127,18 +124,9 @@ describe('library ↔ page-agent end-to-end', () => {
             (m): m is Extract<AgentMessage, { kind: 'snapshot' }> =>
                 m.kind === 'snapshot' && m.id === id
         );
-        // The bad value lives in dirtyData, not data (verify-then-commit).
-        expect(snap!.snapshot.dirtyData.email).toEqual({ t: 'primitive', v: 'nope' });
-        expect(snap!.snapshot.errors.email!.length).toBeGreaterThan(0);
-        expect(received.filter((m) => m.kind === 'change')).toHaveLength(0);
-
-        model.clearDirtyData();
-        await flush();
-        await flush();
-        const snapshots = received.filter(
-            (m): m is Extract<AgentMessage, { kind: 'snapshot' }> => m.kind === 'snapshot'
-        );
-        expect(snapshots[snapshots.length - 1]?.snapshot.dirtyData).toEqual({});
+        expect(snap!.snapshot.data.email).toEqual({ t: 'primitive', v: 'user@example.com' });
+        expect(Object.keys(snap!.snapshot)).toEqual(['data']);
+        expect(received.filter((m) => m.kind === 'change')).toHaveLength(1);
 
         model.dispose();
     });

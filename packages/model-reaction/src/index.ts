@@ -2,20 +2,16 @@ import {
     FieldSchema,
     InferModelData,
     Model,
-    ModelOptions,
     ModelReturn,
 } from './types';
 import { ModelManager } from './core/model-manager';
 
 export type {
     Model,
-    ModelOptions,
     ModelReturn,
-    Validator,
     Reaction,
     ReactionAction,
     FieldSchema,
-    ValidationError,
     ModelError,
     ModelErrorCode,
     ModelEventMap,
@@ -35,20 +31,16 @@ export { ModelEvents, SKIP_REACTION } from './types';
  *        // m.data is { name: string; age: number }
  */
 export function createModel<S extends Record<string, FieldSchema>>(
-    schema: S,
-    options?: ModelOptions
+    schema: S
 ): ModelReturn<InferModelData<S>>;
 export function createModel<T extends Record<string, any>>(
-    schema: Model<T>,
-    options?: ModelOptions
+    schema: Model<T>
 ): ModelReturn<T>;
 export function createModel(
-    schema: Record<string, FieldSchema>,
-    options: ModelOptions = {}
+    schema: Record<string, FieldSchema>
 ): ModelReturn<any> {
     const manager = new ModelManager<Record<string, any>>(
-        schema as Model<Record<string, any>>,
-        options
+        schema as Model<Record<string, any>>
     );
     return manager as unknown as ModelReturn<any>;
 }

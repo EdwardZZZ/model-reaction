@@ -19,7 +19,7 @@
  *     read the model on demand. Serialization for cross-realm transport is the
  *     DevTools agent's concern, not the library's.
  */
-import type { FieldSchema, Model, ValidationError } from '../types';
+import type { FieldSchema, Model } from '../types';
 import { eachReactionEdge } from '../reaction/reaction-graph';
 
 /** The `globalThis` key the DevTools front-end installs its hook under. */
@@ -29,10 +29,8 @@ export const DEVTOOLS_HOOK_KEY = '__MODEL_REACTION_DEVTOOLS_HOOK__';
 export interface DevtoolsFieldInfo {
     /** Declared field type (`'string' | 'number' | ...`). */
     type: FieldSchema['type'];
-    /** Whether the field declares a `default` (bypasses initial validation). */
+    /** Whether the field declares a `default`. */
     hasDefault: boolean;
-    /** Number of validators attached to the field. */
-    validatorCount: number;
     /** Fields this field's reaction reads as dependencies (deduped). */
     reactionDeps: string[];
     /** Declared side effects, without execution state; absent when empty. */
@@ -56,14 +54,10 @@ export interface DevtoolsDependencyGraph {
     edges: DevtoolsDependencyEdge[];
 }
 
-/** Point-in-time view of a model's three-layer state. */
+/** Point-in-time view of committed model data. */
 export interface DevtoolsSnapshot {
-    /** Committed source of truth; schema defaults may be unvalidated. */
+    /** Committed source of truth. */
     data: Record<string, unknown>;
-    /** Last user input that failed validation, indexed by field. */
-    dirtyData: Record<string, unknown>;
-    /** Current validation errors, indexed by field. */
-    errors: Record<string, ValidationError[]>;
 }
 
 /** A single committed field change, forwarded to attached DevTools. */
@@ -86,12 +80,10 @@ export interface DevtoolsModelInstance {
     getFields(): Record<string, DevtoolsFieldInfo>;
     /** Reaction dependency graph. */
     getDependencyGraph(): DevtoolsDependencyGraph;
-    /** Current three-layer state snapshot. */
+    /** Current data snapshot. */
     getSnapshot(): DevtoolsSnapshot;
     /** Subscribe to committed field changes; returns an unsubscribe fn. */
     subscribe(listener: (change: DevtoolsChange) => void): () => void;
-    /** Subscribe to validation, dirty-data, and error snapshot updates. */
-    subscribeSnapshot?(listener: () => void): () => void;
 }
 
 /**
@@ -174,7 +166,6 @@ export function buildFieldInfo(schema: Model): Record<string, DevtoolsFieldInfo>
         out[name] = {
             type: field.type,
             hasDefault: field.default !== undefined,
-            validatorCount: field.validator?.length ?? 0,
             reactionDeps: [...(deps.get(name) ?? [])],
         };
         if (field.reaction?.action?.length) {

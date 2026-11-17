@@ -20,12 +20,11 @@ function instance(id: number, overrides: Partial<InstanceState> = {}): InstanceS
     return {
         id,
         fields: {
-            first: { type: 'string', hasDefault: true, validatorCount: 0, reactionDeps: [] },
-            last: { type: 'string', hasDefault: true, validatorCount: 0, reactionDeps: [] },
+            first: { type: 'string', hasDefault: true, reactionDeps: [] },
+            last: { type: 'string', hasDefault: true, reactionDeps: [] },
             full: {
                 type: 'string',
                 hasDefault: true,
-                validatorCount: 0,
                 reactionDeps: ['first', 'last'],
             },
         },
@@ -42,8 +41,6 @@ function instance(id: number, overrides: Partial<InstanceState> = {}): InstanceS
                 last: { t: 'primitive', v: 'Lovelace' },
                 full: { t: 'primitive', v: 'Ada Lovelace' },
             },
-            dirtyData: {},
-            errors: {},
         },
         timeline: [],
         ...overrides,
@@ -87,7 +84,6 @@ describe('Panel', () => {
         const { container } = render(<Panel connect={connect} />);
         const snapshot = serializeSnapshot({
             data: { nan: NaN, positive: Infinity, negative: -Infinity, zero: -0 },
-            dirtyData: {}, errors: {},
         });
         act(() => {
             emit(JSON.parse(JSON.stringify({
@@ -141,7 +137,7 @@ describe('Panel', () => {
                 snapshot: { ...instance(1).snapshot, truncated: true },
             });
         });
-        expect(getByRole('status').textContent).toContain('errors may be omitted');
+        expect(getByRole('status').textContent).toContain('Values or fields may be omitted');
         act(() => {
             emit({ source: AGENT_SOURCE, kind: 'snapshot', id: 1, snapshot: instance(1).snapshot });
         });

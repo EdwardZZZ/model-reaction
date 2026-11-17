@@ -28,11 +28,9 @@ function edgesFromPrimitive(schema: Model): string[] {
 function edgesFromRuntime(schema: Model): string[] {
     const system = new ReactionSystem(
         schema,
-        { debounceReactions: 0 },
         {
             getValue: () => undefined,
-            setValue: async () => true,
-            setError: () => {},
+            setValue: () => {},
             reportError: () => {},
         },
         new PendingTasks()

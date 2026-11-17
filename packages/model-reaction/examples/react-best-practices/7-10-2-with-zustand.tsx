@@ -5,7 +5,7 @@
  *   zustand        owns *application* state (open / closed, current
  *                  user id, theme).
  *   model-reaction owns *entity* state (the user record being edited,
- *                  including its rules).
+ *                  including its computed dependencies).
  *
  * NOTE: this demo imports `zustand`. If it is not installed in your
  * project, run `npm install zustand` before using it.
@@ -17,7 +17,6 @@ void React;
 import { create } from 'zustand';
 
 import { createModel, type ModelReturn } from 'model-reaction';
-import { ValidationRules } from 'model-reaction/validation';
 import { ModelProvider } from 'model-reaction/react';
 
 interface User {
@@ -42,12 +41,10 @@ function UserModelOwner({ children }: { children: ReactNode }) {
             name: {
                 type: 'string',
                 default: '',
-                validator: [ValidationRules.required],
             },
             email: {
                 type: 'string',
                 default: '',
-                validator: [ValidationRules.email],
             },
         });
         setModel(owned);

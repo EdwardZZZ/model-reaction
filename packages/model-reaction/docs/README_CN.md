@@ -4,8 +4,8 @@
 
 | 阅读目标 | 文档 |
 | --- | --- |
-| 查询公开方法、校验、reaction、事件或破坏性迁移 | [API 参考](API_CN.md) |
-| 使用异步校验、跨字段规则、Schema 组合与测试建议 | [高级用法](ADVANCED_CN.md) |
+| 查询写入、reaction、事件或破坏性迁移 | [API 参考](API_CN.md) |
+| 使用业务检查、异步 action、Schema 组合与测试建议 | [高级用法](ADVANCED_CN.md) |
 | 绑定输入、选择 selector Hook、管理生命周期或提交 React 表单 | [React 绑定](REACT_CN.md) |
 | 选择或组合 model-reaction、zustand、Redux Toolkit | [对比与集成](COMPARISON_CN.md) |
 | 启用浏览器扩展或了解其私有协议 | [DevTools](DEVTOOLS_CN.md) |

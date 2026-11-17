@@ -2,9 +2,7 @@ import {
     Model,
     ModelError,
     ModelEvents,
-    ModelOptions,
     SKIP_REACTION,
-    ValidationError,
 } from '../types';
 import type { CommitOptions } from '../core/internal-types';
 import { eachReactionEdge } from './reaction-graph';
@@ -19,17 +17,11 @@ type ReactionErrorEvent =
 /** Internal contract between {@link ReactionSystem} and its owning model. */
 interface ReactionCallbacks {
     getValue: (field: string) => any;
-    setValue: (field: string, value: any, options: CommitOptions) => Promise<boolean>;
-    setError: (field: string, error: ValidationError) => void;
+    setValue: (field: string, value: any, options: CommitOptions) => void;
     reportError: (
         event: ReactionErrorEvent,
         error: ModelError
     ) => void;
-}
-
-interface ScheduledReaction {
-    timeoutId: ReturnType<typeof setTimeout>;
-    endTask: () => void;
 }
 
 function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
@@ -43,9 +35,7 @@ function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
 export class ReactionSystem {
     private reactionDeps: Map<string, ReactionJob[]> = new Map();
     private initializingFields = new Set<string>();
-    private reactionTimeouts = new Map<string, ScheduledReaction>();
     private schema: Model;
-    private options: ModelOptions;
     private callbacks: ReactionCallbacks;
     private pendingTasks: PendingTasks;
     private actionExecutor: ActionExecutor;
@@ -53,12 +43,10 @@ export class ReactionSystem {
 
     constructor(
         schema: Model,
-        options: ModelOptions,
         callbacks: ReactionCallbacks,
         pendingTasks: PendingTasks
     ) {
         this.schema = schema;
-        this.options = options;
         this.callbacks = callbacks;
         this.pendingTasks = pendingTasks;
         this.actionExecutor = new ActionExecutor(
@@ -93,7 +81,6 @@ export class ReactionSystem {
         initializeReactions = false
     ): void {
         if (this.disposed) return;
-        const debounceTime = this.options.debounceReactions ?? 0;
         const jobsToTrigger = new Map<ReactionJob, string>();
 
         changedFields.forEach((changedField) => {
@@ -122,52 +109,28 @@ export class ReactionSystem {
             }
 
             if (initializeReactions) this.initializingFields.add(field);
-            this.scheduleReaction(job, debounceTime, [...reactionStack, changedField]);
+            this.runReaction(job, [...reactionStack, changedField]);
         });
-    }
-
-    private scheduleReaction(
-        job: ReactionJob,
-        debounceTime: number,
-        reactionStack: string[] = []
-    ): void {
-        // Register the replacement before releasing the old task so settled()
-        // never observes a false idle state during debounce rescheduling.
-        const endTask = this.pendingTasks.begin();
-        const actionVersion = this.actionExecutor.invalidate(job.field);
-        if (debounceTime > 0) {
-            const scheduled = this.reactionTimeouts.get(job.field);
-            if (scheduled) {
-                clearTimeout(scheduled.timeoutId);
-                scheduled.endTask();
-            }
-            const pending: ScheduledReaction = {
-                endTask,
-                timeoutId: setTimeout(() => {
-                    this.reactionTimeouts.delete(job.field);
-                    this.runReaction(job, reactionStack, actionVersion, endTask);
-                }, debounceTime),
-            };
-            this.reactionTimeouts.set(job.field, pending);
-        } else {
-            this.runReaction(job, reactionStack, actionVersion, endTask);
-        }
     }
 
     private runReaction(
         job: ReactionJob,
-        reactionStack: string[],
-        actionVersion: number,
-        endTask: () => void
+        reactionStack: string[]
     ): void {
-        void this.processReaction(job, reactionStack, actionVersion).finally(endTask);
+        const endTask = this.pendingTasks.begin();
+        const actionVersion = this.actionExecutor.invalidate(job.field);
+        try {
+            this.processReaction(job, reactionStack, actionVersion);
+        } finally {
+            endTask();
+        }
     }
 
-    private async processReaction(
+    private processReaction(
         job: ReactionJob,
         reactionStack: string[],
         actionVersion: number
-    ): Promise<void> {
+    ): void {
         if (this.disposed) return;
         const { field, reaction } = job;
         try {
@@ -198,14 +161,14 @@ export class ReactionSystem {
                 );
             }
             if (this.disposed) return;
-            const committed = await this.callbacks.setValue(field, computedValue, {
+            this.callbacks.setValue(field, computedValue, {
                 origin: 'reaction',
                 reactionStack,
                 initializeReactions: this.initializingFields.has(field),
             });
             if (this.disposed) return;
-            if (committed) this.initializingFields.delete(field);
-            if (committed) this.actionExecutor.register(job, actionVersion);
+            this.initializingFields.delete(field);
+            this.actionExecutor.register(job, actionVersion);
         } catch (error) {
             this.handleReactionError(field, error);
         }
@@ -224,13 +187,6 @@ export class ReactionSystem {
             message: originalError.message,
             originalError,
         };
-        // Record the failure under the field the reaction computes, so it is
-        // visible before subscribers receive the reaction error event.
-        this.callbacks.setError(field, {
-            field,
-            rule: 'reaction_error',
-            message: modelError.message,
-        });
         this.callbacks.reportError(ModelEvents.REACTION_ERROR, modelError);
     }
 
@@ -238,11 +194,6 @@ export class ReactionSystem {
         if (this.disposed) return;
         this.disposed = true;
         this.actionExecutor.dispose();
-        this.reactionTimeouts.forEach(({ timeoutId, endTask }) => {
-            clearTimeout(timeoutId);
-            endTask();
-        });
-        this.reactionTimeouts.clear();
         this.reactionDeps.clear();
         this.initializingFields.clear();
         // The shared PendingTasks is owned and disposed by ModelManager.

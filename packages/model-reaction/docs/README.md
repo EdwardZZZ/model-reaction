@@ -4,8 +4,8 @@
 
 | Goal | Document |
 | --- | --- |
-| Look up public methods, validation, reactions, events, or breaking migrations | [API reference](API.md) |
-| Apply async validation, cross-field rules, schema composition, and testing guidance | [Advanced usage](ADVANCED.md) |
+| Look up writes, reactions, events, or breaking migrations | [API reference](API.md) |
+| Apply business checks, async actions, schema composition, and testing guidance | [Advanced usage](ADVANCED.md) |
 | Bind inputs, choose selector Hooks, manage ownership, or submit a React form | [React bindings](REACT.md) |
 | Choose or combine model-reaction, zustand, and Redux Toolkit | [Comparison and integration](COMPARISON.md) |
 | Enable the browser extension or understand its private protocol | [DevTools](DEVTOOLS.md) |

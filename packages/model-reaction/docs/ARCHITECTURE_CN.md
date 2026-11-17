@@ -1,140 +1,99 @@
-# 源码架构导览
+# 源码架构
 
-本文说明 `src/` 当前的模块边界与核心调用路径，方便定位实现。公开行为以
-[API_CN.md](API_CN.md)、[REACT_CN.md](REACT_CN.md) 和 README 为准。
+[English Version](ARCHITECTURE.md) | [文档导航](README_CN.md)
 
-[English Version](ARCHITECTURE.md) | 中文
+公开契约由 [API](API_CN.md)、[React](REACT_CN.md)、[DevTools](DEVTOOLS_CN.md)
+维护；本文负责实现职责与内部约束。
 
-## 模块地图
+## 模块图
 
 ```mermaid
 flowchart LR
-    Consumer[调用方] --> Entry[src/index.ts]
-    Entry --> Manager[core/ModelManager]
-    Manager --> Validation[validation/validate-field]
-    Manager --> Reaction[reaction/ReactionSystem]
-    Manager --> Tasks[core/PendingTasks]
-    Reaction --> Graph[reaction/reaction-graph]
-    Reaction --> Actions[reaction/ActionExecutor]
+    API["index / types"] --> Manager["core/model-manager"]
+    Manager --> Prepare["core/write-preparation"]
+    Manager --> Events["core/event-emitter"]
+    Manager --> Tasks["core/pending-tasks"]
+    Manager --> Reaction["reaction/reaction-system"]
+    Reaction --> Graph["reaction/reaction-graph"]
+    Reaction --> Actions["reaction/action-executor"]
     Actions --> Tasks
-    ReactEntry[model-reaction/react] --> ReactAdapter[react/*]
-    ReactAdapter --> PublicModel[ModelReturn / ModelEvents]
-    DevEntry[model-reaction/devtools] --> DevAdapter[devtools/*]
-    DevAdapter --> Entry
-    DevAdapter --> Graph
+    React["react"] --> API
+    Devtools["devtools"] --> API
+    Devtools --> Graph
 ```
 
-| 路径 | 职责 | 边界 |
-| --- | --- | --- |
-| `src/index.ts`、`src/types.ts` | 核心公开入口、公开类型和工厂函数 | 不导出 `ModelManager` 或内部流程类型 |
-| `src/core/` | 模型状态、字段写入流程、事件和待处理任务 | `ModelManager` 是 `data`、`dirtyData`、错误和验证新鲜度的唯一所有者 |
-| `src/validation/` | 单字段校验、规则构造、错误格式化 | `validate-field.ts` 供 core 调用；规则和格式化器由独立入口导出 |
-| `src/reaction/` | 依赖索引、反应调度、计算写回和 action 生命周期 | 通过 `ReactionSystem` 回调读写模型，不持有模型数据 |
-| `src/react/` | Provider、字段绑定、draft 和 selector Hooks | 只面向公开模型接口；通过独立 `model-reaction/react` 入口发布 |
-| `src/devtools/` | 可选 hook 和模型观测适配 | 通过公开模型接口读取状态；使用共享依赖解析器保持图语义一致 |
-| `src/utils/` | 默认值克隆、结构比较等通用纯工具 | 不依赖 core、React 或 DevTools |
-| `src/__tests__/` | 按核心行为、React 适配和集成场景组织测试 | 集成测试同时约束 README 示例契约 |
+| 模块 | 职责 |
+| --- | --- |
+| `types.ts` / `index.ts` | 公共类型、推断/显式工厂重载 |
+| `core/model-manager.ts` | 提交数据、快照、写入、订阅、生命周期 |
+| `core/write-preparation.ts` | 自有键预检与同步输入转换 |
+| `core/event-emitter.ts` | 监听器快照、取消订阅、异常隔离 |
+| `core/pending-tasks.ts` | 计算/action 计数与等待者 |
+| `reaction/reaction-system.ts` | 依赖索引、同步执行、递归保护、计算回写 |
+| `reaction/action-executor.ts` | 版本化 action 组、函数去重、逐项屏障 |
+| `reaction/reaction-graph.ts` | 共享依赖边解析 |
+| `react/field-state.ts` / `context.ts` | 字段绑定与 Provider/render-prop |
+| `react/selectors.ts` | 两种订阅策略共享快照缓存 |
+| `devtools/` | 通过公开状态/事件进行可选私有集成 |
+| `utils/` | 默认值克隆与结构比较 |
 
-`core/internal-types.ts` 与 `core/write-preparation.ts` 是内部实现文件，不能加入
-包的公开导出。React 和 DevTools 也各自保持独立的发布入口。
+不再包含校验模块、请求新鲜度映射、dirty-data 或字段错误存储。
+业务检查属于应用。
 
-## 写入调用链
+## 写入路径
 
 ```text
-setField ─┐
-          ├─> runBatch
-setFields ┘     ├─ prepareFieldWrites：先解析整批 schema，再各执行一次 transform
-                ├─ createValidationSnapshot：构造共享的浅冻结候选数据
-                ├─ validatePrepared：并行启动字段校验，等待全部字段结束
-                │    └─ validateAndCommit：校验最新请求，提交有效值或记录 dirtyData
-                ├─ 用真实变更字段触发一次 reaction pass
-                └─ 释放批次任务；settled() 因而覆盖整批工作
+setField -> setFields
+  -> 开始 compute 任务
+  -> prepareFieldWrites：先检查全部键，再读取/转换输入
+  -> 逐字段 commit
+       -> 结构比较
+       -> 替换值 / 失效快照
+       -> 淘汰直接写入宿主的旧 action 版本
+       -> 收集改变字段 / 发出 field:change
+  -> finally：触发改变字段的 reaction，结束 compute 任务
 ```
 
-- `validateAll()` 使用同一校验提交流程，但直接读取 `dirtyData` 或已提交值，不重复执行 transform。
-  在 `runBatch()` 释放 compute 任务后，通过 `finally` 等待 `settled()`，异常路径
-  同样收尾。正常完成时检查本轮结果与当前 dirty、errors，发送
-  `validation:complete` 并返回；不会为这个等待再登记任务。
-- `setField()` / `setFields()` 在批次结束后返回，下游工作可能仍在进行。完整校验
-  等待全部追踪工作，不重复校验，也不在创建候选快照前隐式等待。
-- reaction 写回走 `updateField()`，保留 `origin`、reaction stack 和初始化上下文。
-- 每个字段分别提交，所以 `setFields()` 不是全有或全无事务；一个字段失败不回滚其他有效字段。
-- `ModelManager` 保留请求 ID、状态更新、事件和提交逻辑。抽取 helper 时优先选择无状态的准备或计算逻辑，不把状态拆成多个所有者。
+计算结果走 `updateField`：应用宿主 transform，再以 `origin: 'reaction'`
+提交。直接提交推进 action 版本，reaction 提交保留调度捕获的版本。
+默认值克隆后直接播种，再初始化可达输入图。逐项事件可以同步重入，准备阶段不是事务。
 
 ## Action 调度
 
-这里只记录调度的内部约束。公开行为和迁移示例统一见
-[API_CN.md](API_CN.md#action-组)。
+`PendingTasks` 分别统计 `compute` 与 `action`。计算包括批次准备
+和计算链；一个组在候选、等待屏障和执行项期间只持有一个 action 任务。
+计算归零安排微任务 flush；两种计数均归零完成 `settled()`。
 
-| 所有者 | 状态与职责 |
-| --- | --- |
-| `ReactionSystem` | 每个宿主一个 `ReactionJob`、至多一个待执行防抖计算；依赖索引与运行时路径诊断 |
-| `ActionExecutor` | 宿主版本、单个组集合、Schema 字段顺序与合并后的微任务 flush |
-| `PendingTasks` | 分别统计 `compute` / `action`，通知计算空闲，完成 `settled()` |
-| `ModelManager` | 校验请求 ID、已提交状态与宿主字段错误 |
+1. 每次调用先开始计算任务，推进并捕获宿主版本，再同步执行计算。
+   重入写入时保留捕获版本，不能在之后读取最新版本替代。
+2. 同步计算/转换/提交成功且版本仍有效时注册 action 组；
+   `SKIP_REACTION` 和错误不注册。
+3. 数组内函数引用保留最后位置，共享函数从旧组未执行项中移除。
+4. 微任务按 schema 顺序选取就绪组，检查计算归零和当前版本后立即同步调用。
+5. 独立观察各项返回的 Promise，完成后再次检查计算屏障。
+   新版本抑制后续项，但无法中断已运行项。
+6. 失败报告宿主 reaction 错误并只释放所在组；
+   销毁释放全部任务并抑制之后的回调/事件。
 
-1. 调度宿主 reaction 时推进 action 版本；直接写入成功且宿主值变化时也推进，
-   reaction 写回不推进。内部 `origin: 'direct' | 'reaction'` 区分两种路径。
-   校验请求 ID 仍独立保留：它保护提交新鲜度，action 版本保护执行资格。
-2. 版本在调度时捕获，防抖闭包也捕获该版本，旧计算完成时不能读取最新版本。
-   防抖替换先取得新任务再释放旧任务；定时器触发先摘除等待记录再执行用户代码。
-3. 计算值通过校验并提交后，仅当捕获版本仍有效才登记组。登记时立即取得一个
-   action 任务，覆盖等待就绪、逐项执行与项间等待；不另设候选 Map 或集合交接。
-   每组用 `actions` 队列保存未启动函数。登记时按引用保留最后一项，并从旧队列
-   删除相同引用。
-4. 计算空闲后安排微任务 flush。每次固定 ready 快照，按 Schema 字段顺序尝试
-   启动。每项调用前同步检查销毁、版本与计算空闲，检查和调用之间不能 `await`。
-   前一项可能发起新计算，因此每项都必须重新检查。
-5. 各组独立等待自己的 Promise。新版本取消未启动项；已执行项仍被观察，可以
-   与新组重叠。失败只停止本组，但旧项晚到的失败仍可能按既有规则更新宿主错误。
-6. 任务释放幂等。销毁移除等待组并立即释放 settlement；已启动 Promise 的
-   拒绝仍被观察，销毁后不再向模型报告错误。
+reaction 不等待 action 完成；`settled()` 只能在 action 外使用，
+内部等待会等到自己。网络回写由应用的版本/abort 策略约束。
 
-compute 计数覆盖输入准备、校验、防抖等待、计算写回、reaction 登记与批次释放；
-action 计数覆盖整组生命周期。reaction 不等待 action，`settled()` 等待两类计数，
-`validateAll()` 在释放批次后复用这个全局等待。同模型的 action 或 validator 内
-不能 await 这两个方法。完整校验的完成事件在落定后发送，监听者更新属于后续工作。
+## 保留决策
 
-循环与缺失依赖诊断基于声明的计算图和运行时 reaction 路径。action 闭包中的读写
-无法推断，因此不能在构造期完整检查副作用回写循环。
+- 字段结构比较独立于 selector 相等规则；改成引用比较会改变下游计算和 action。
+- 两个 selector Hook 共享缓存，但保留不同通知策略。
+  并发回调只通知 React，不通过过期 selector 重写缓存。
+- 使用无原型存储和自有键检查，支持特殊字段名。
+- Schema 片段在构造前组合，避免重复字段名。
+- 文本格式、touched 和写入异常反馈由应用控件负责，React 适配器绑定提交值。
+- 批量准备在 getter/transform 前检查全部键；默认值不转换，类型/枚举元数据不隐式校验。
 
-## 保留的设计决策
+## 依赖规则与检查
 
-- **结构判等**：保留 `deepEqual`，内容相同的新对象不会仅因引用不同被判为变更。
-  改为 `Object.is` 会同时改变下游校验、reaction、action 取消，以及 Date、NaN
-  和正负零的行为。
-- **两个 selector Hook**：`useModelSelector` 在模型层过滤通知，selector / 比较器
-  变化时重订阅；`useModelComputed` 按 model 订阅并在快照层比较。两者共享
-  render-local 缓存以保护并发渲染，合并会改变订阅策略。公开选择见
-  [REACT_CN.md](REACT_CN.md#usemodelselector-vs-usemodelcomputed)。
-- **单字段单 reaction**：按宿主确定 job，保留单次触发去重；不同宿主复用同一个
-  reaction 对象时仍是独立 job。
-- **固定校验策略**：按顺序交错执行 condition / validation，首错停止。
-  批次先预检全部 key，再读取或转换输入；之后各字段独立验证和提交。
-- **安全字段字典**：字段只取 Schema 自有 key；存储与快照支持 `constructor`、
-  `__proto__` 等字段名，不读取继承值、不触发原型 setter。
-- **UI 边界**：编辑文本与写入异常由 draft 绑定负责，核心 dirty data 保存失败的
-  模型值。React 与 DevTools 保持可选入口，不把 UI 策略加入核心状态。
+核心通过聚焦回调使用 reaction/utils；reaction 不直接读取 ModelManager 内部存储。
+React 消费公共类型/事件；DevTools 使用公共模型和 schema，并共享边解析。
+内部类型不导出。
 
-## 依赖规则
-
-1. `core` 协调状态与生命周期；`validation`、`reaction` 和 `utils` 提供明确的内部能力。
-2. `reaction` 只能通过回调请求模型读写，不能直接修改 `ModelManager` 的状态。
-3. `react` 通过 `ModelReturn` 和事件订阅模型；不导入 `core/` 或 `reaction/` 实现。
-4. `devtools` 通过公开模型表面读取数据；共享 `eachReactionEdge` 仅用于保持依赖图解释一致。
-5. `types.ts` 描述公开契约；内部选项与中间态类型放在相应目录，不从包入口重导出。
-6. `eslint.config.mjs` 对主要的反向依赖做静态限制；DevTools 到共享 reaction graph 的依赖是明确允许的边界。
-
-## 按改动定位
-
-| 改动目标 | 首先阅读 |
-| --- | --- |
-| 字段写入、脏数据、事件、生命周期 | `core/model-manager.ts`、`core/write-preparation.ts` |
-| 字段校验顺序、超时和错误 | `validation/validate-field.ts` |
-| 依赖边或反应调度 | `reaction/reaction-graph.ts`、`reaction/reaction-system.ts` |
-| action 资格和执行 | `reaction/action-executor.ts`、`reaction/reaction-job.ts` |
-| React 字段状态与订阅 | `react/field-state.ts`、`react/draft-field.ts`、`react/selectors.ts` |
-| DevTools hook、字段图和快照 | `devtools/devtools-hook.ts`、`devtools/index.ts` |
-
-改动公开契约时同步检查 `src/index.ts`、两个 README 和集成测试；改动依赖图解释时，
-同时检查 Reaction 与 DevTools 对 `eachReactionEdge` 的使用。
+复杂背景写在文档中，源码只保留短引用。
+[AGENTS.md](../AGENTS.md) 维护必跑检查；集成测试覆盖公开配方，
+action 时序和并发 React 读取另有专门测试。

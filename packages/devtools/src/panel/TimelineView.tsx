@@ -6,7 +6,7 @@
  *
  * This is deliberately **read-only**: replaying a value back into the model
  * (true time-travel) is out of scope for now because it would re-trigger
- * reactions and could poison `dirtyData`.
+ * reactions and actions.
  */
 import { useState, type ReactElement } from 'react';
 import type { ChangeEntry, InstanceState } from '../protocol';

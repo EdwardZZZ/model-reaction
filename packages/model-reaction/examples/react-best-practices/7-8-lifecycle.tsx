@@ -9,7 +9,6 @@ import { useEffect, useState } from 'react';
 void React;
 
 import { createModel, type ModelReturn } from 'model-reaction';
-import { ValidationRules } from 'model-reaction/validation';
 import { ModelProvider } from 'model-reaction/react';
 
 interface User {
@@ -23,7 +22,6 @@ export function UserRoute() {
             name: {
                 type: 'string',
                 default: '',
-                validator: [ValidationRules.required],
             },
         });
         setModel(owned);

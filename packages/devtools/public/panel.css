@@ -10,7 +10,6 @@
   --mrd-null: #808080;
   --mrd-key: #9cdcfe;
   --mrd-warn: #d7ba7d;
-  --mrd-error: #f48771;
   --mrd-node: #264f78;
   --mrd-node-active: #0e639c;
 }
@@ -108,14 +107,6 @@ body {
   border-bottom: 1px solid var(--mrd-border);
 }
 
-.mrd-section-warn .mrd-section-title {
-  color: var(--mrd-warn);
-}
-
-.mrd-section-error .mrd-section-title {
-  color: var(--mrd-error);
-}
-
 .mrd-section-subtitle {
   color: var(--mrd-muted);
   font-weight: 400;
@@ -194,19 +185,6 @@ body {
 .mrd-graph-empty {
   padding: 24px;
   text-align: center;
-}
-
-.mrd-error-list {
-  margin: 0;
-  padding-left: 16px;
-}
-
-.mrd-error-msg {
-  color: var(--mrd-error);
-}
-
-.mrd-error-rule {
-  color: var(--mrd-muted);
 }
 
 /* Dependency graph */

@@ -11,7 +11,6 @@ module.exports = {
   // step. Anchored patterns keep the `/devtools` subpath distinct from the root.
   moduleNameMapper: {
     '^model-reaction/devtools$': '<rootDir>/../model-reaction/src/devtools/index',
-    '^model-reaction/validation$': '<rootDir>/../model-reaction/src/validation/index',
     '^model-reaction$': '<rootDir>/../model-reaction/src/index',
   },
   transform: {

@@ -27,10 +27,8 @@
 安装扩展并打开其面板后，通过 `model-reaction/devtools` 入口创建的模型会出现在
 浏览器 DevTools 的 **Model Reaction** 标签页中，面板包含三个视图：
 
-1. **数据树（Data Tree）** —— 模型的三个层次，均可折叠：
-   - `data` —— 已提交的数据源（schema 默认值会未经校验直接写入）
-   - `dirtyData` —— 每个字段最近一次校验失败的输入
-   - `errors` —— 每个字段当前的校验错误
+1. **数据树（Data Tree）** —— 可折叠的提交数据 `data`，也可包含不完整编辑值。
+   业务错误与 UI 草稿由应用负责。
 2. **依赖关系（Dependencies）** —— reaction 依赖关系图。实线箭头**从依赖字段指向
    由 reaction 计算出的字段**（读作「`from` 供给 `to`」）。action 声明在宿主字段
    模块内部展示，用虚线连接并标注 reaction 与 action 下标。虚线表示归属与计算
@@ -116,12 +114,12 @@ React 面板）及注册面板的 DevTools 页面打包进 `packages/devtools/di
   数据树保留其显示，不会被变成 null 或零；普通有限数继续使用 primitive 表示。
 - **时间线**由环形缓冲区限制大小（默认每个实例 100 条），因此长时间运行、变更频繁的
   页面也不会无限占用内存。
-- 被拒输入、校验完成、dirty 清理和 reaction 错误都会自动刷新数据树。
-  同步通知共用一次排队的快照刷新，只有已提交的字段变更进入时间线。
-- 每份快照的 `data`、`dirtyData` 和 `errors` 共享 2,000 个节点和保守的
+- 已提交字段变更自动刷新数据树。同步变更共用一次排队快照，
+  每个提交变更进入时间线。
+- 每份快照的 `data` 共享 2,000 个节点和保守的
   256 KiB UTF-8 JSON 字节预算；时间线中的每个值拥有独立预算。
   默认深度上限为 6，每个容器或 record 最多 100 项，字符串前缀最多 10,000 个字符。
-- 预算耗尽后停止遍历并显示截断标记；值、字段或错误被省略或裁剪时，
+- 预算耗尽后停止遍历并显示截断标记；值或字段被省略或裁剪时，
   面板显示快照截断提示。兄弟分支中的共享对象仍可读取，真正的循环引用会被标记。
 
 ## DevTools Hook 契约
@@ -129,7 +127,7 @@ React 面板）及注册面板的 DevTools 页面打包进 `packages/devtools/di
 `model-reaction/devtools` 入口通过一个全局对象与扩展通信。它是一条**私有的、仅用于开发期
 的通道** —— **不**属于公开的 `ModelReturn` API，也不会从包根重新导出。参见 AGENTS.md §5：
 库刻意不提供 `model.describe()` 这类内省方法，而本 hook 并不改变这一约定。包装层只通过模型
-的公共 API（`data` / `getDirtyData()` / `validationErrors` / `on`）以及它收到的 schema 来
+的公共 API（`data` / `on`）以及它收到的 schema 来
 读取模型 —— 无需访问 `ModelManager` 的任何内部。
 
 契约定义（见 [src/devtools/devtools-hook.ts](../src/devtools/devtools-hook.ts)）：
@@ -142,9 +140,9 @@ interface ModelReactionDevtoolsHook {
 ```
 
 每个已注册实例暴露拉取式读取接口（`getFields`、`getDependencyGraph`、`getSnapshot`），
-外加用于已提交变更的 `subscribe`，以及可选的 `subscribeSnapshot`，
-用于校验、dirty 与错误状态更新。旧实例没有 `subscribeSnapshot` 时，
-agent 仍会在已提交变更后刷新。注销或释放时移除两种订阅。
+外加用于已提交变更的 `subscribe`。快照仅包含 `{ data }`，
+字段元数据不再有 validator 数量。注销或释放时移除变更订阅；
+此次私有协议变更需同步更新扩展和库。
 扩展的页面 agent 实现该 hook，DevTools 入口负责消费它。
 
 依赖图由 schema 经一个共享原语 [`eachReactionEdge`](../src/reaction/reaction-graph.ts) 推导，它是
@@ -169,8 +167,7 @@ DevTools 图在覆盖的 Schema 中一致。图只表达声明的计算依赖，
 ## 已知限制
 
 - **写回式时间旅行（write-back time-travel）**。时间线为**只读**。把旧值回放进模型会
-  重新触发 reaction，并可能污染 `dirtyData`（库刻意不提供 `resetDirty` —— 见
-  AGENTS.md §5），因此扩展不提供恢复操作。
+  重新触发计算与 action，因此扩展不提供恢复操作。
 - **可配置的上限**。时间线环形缓冲区大小，以及值序列化的深度 / 宽度 /
   字符串 / 节点 / 字节上限均使用固定默认值。预算按快照或时间线中的单个值计算，
   不限制跨全部模型聚合的 `init` 消息或 schema 元数据。

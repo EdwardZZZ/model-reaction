@@ -2,199 +2,100 @@
 
 [English Version](README.md) | 中文
 
-一个类型安全的 TypeScript 数据模型库：验证、依赖反应、脏数据跟踪、类型化事件 —— 并提供可选的 React 绑定。
+TypeScript 字段模型：同步写入、计算依赖、action 调度，以及可选的 React 绑定。
 
----
-
-## 为什么选择 model-reaction
-
-- **数据验证** —— 同步 / 异步规则、自定义消息、条件验证、跨字段验证。
-- **依赖反应** —— 字段在依赖变化时自动重算，可选防抖。
-- **脏数据跟踪** —— 验证失败的值单独保存，便于清理。
-- **类型化事件** —— 订阅字段变化、验证流程和反应错误。
-- **类型安全** —— Schema 字面量推导字段类型；没有默认值的字段包含 `undefined`。
-- **可选 React 适配** —— 细粒度、selector 级订阅；核心入口零 React 依赖。
-
-### 面向 AI 友好设计
-
-`model-reaction` 刻意保持较小的 API 面：schema 字面量定义模型，
-`setField` / `setFields` 是主要写入路径，验证失败的值进入 `dirtyData`，
-React 生命周期显式处理（`await setField(...)`，cleanup 中调用 `dispose()`）。
-Coding agent 可以先阅读 [AGENTS.md](AGENTS.md) 获取精简规则。
-源码模块图和主要调用链见[架构导览](docs/ARCHITECTURE_CN.md)。
+本分支包含尚未发布的破坏性变更：校验由应用层负责。参见
+[迁移说明](docs/API_CN.md#移除校验的迁移说明未发布)。
 
 ## 安装
 
-需要 Node.js 18 或更高版本。
+要求 Node.js 18 或更高版本；React 绑定要求 React 18 或更高版本。
 
 ```bash
-npm install model-reaction          # 仅核心
-npm install model-reaction react    # + React 绑定（peer 依赖，react >= 18）
+npm install model-reaction
+npm install react # 使用 React 入口时
 ```
-
-```ts
-import { createModel } from 'model-reaction';
-import { ValidationRules } from 'model-reaction/validation';
-import { useDraftField } from 'model-reaction/react'; // 可选
-```
-
-> 核心入口包含校验执行逻辑，不包含内置规则或 React。规则构建和错误格式化工具
-> 从 `model-reaction/validation` 按需导入；只有 `model-reaction/react` 引入 React。
 
 ## 快速上手
 
-```typescript
+```ts
 import { createModel } from 'model-reaction';
-import { ValidationRules } from 'model-reaction/validation';
 
-interface User {
-  name: string;
-  age: number;
-}
-
-const user = createModel<User>({
-  name: {
-    type: 'string',
-    validator: [ValidationRules.required],
-    default: '',
-  },
-  age: {
+const cart = createModel({
+  price: { type: 'number', default: 10 },
+  qty: { type: 'number', default: 1, transform: Number },
+  total: {
     type: 'number',
-    validator: [ValidationRules.required, ValidationRules.min(18)],
-    default: 18,
-  },
-});
-
-await user.setField('name', 'John');
-await user.setField('age', 30);
-
-await user.settled();
-const ok = await user.validateAll();
-console.log(ok, user.data); // true { name: 'John', age: 30 }
-```
-
-`createModel` 的第一个参数是单个扁平 Schema 对象：每个顶层属性对应一个模型字段。
-大型 Schema 可以先按职责拆成片段，再通过对象展开合并后传入；对象、数组等字段值
-本身仍可包含嵌套数据，但模型只在顶层跟踪字段变化。
-
-始终 `await setField(...)`，确保验证完成后再读取 `data`；
-当 model 的 owner 卸载时，始终在 cleanup 路径里调用 `dispose()`。
-
-提交前先 `await settled()`，再 `await validateAll()`。完整校验会等待受追踪的
-计算与 action，并在返回前检查剩余 dirty 值与错误，见 [校验契约](docs/API_CN.md#验证)。
-
-模型只支持浅层数据，按字段跟踪变化。`data` 和 `getDirtyData()` 返回稳定的浅冻结快照；
-`getField()` 返回字段值。对于对象、数组或 Date 等可变内建对象字段，请通过
-`setField()` 或 `setFields()` 整体替换；原地修改不会被观察，也不会触发校验或
-reactions。
-
-每字段只接受一个 `reaction`。字段内校验按规则顺序执行，首错即停。
-未知写入 key 先发送 `field:not-found` 再 reject，整批不开始处理。
-`setField` 和 `setFields` 的验证器读取经过 transform 的候选快照，包含字段自身的新值。
-字段结构判等保持不变，详见 [破坏性迁移说明](docs/API_CN.md#api-精简迁移unreleased)。
-
-## 核心概念
-
-### 反应（Reactions）
-
-字段可以声明依赖列表与 `computed` 函数；任一依赖变化时，字段会自动重算。
-`computed` 必须同步执行，只根据 `fields` 中声明的依赖做纯计算并返回目标字段的
-新值；不要返回 Promise，也不要在其中发请求、写日志或修改外部状态。异步操作和
-其他副作用应放在 `action` 中。
-需要有条件地跳过本次 reaction 时返回 `SKIP_REACTION`；此时不会验证或写入目标
-字段，也不会执行 `action` 或触发下游 reaction。
-
-```typescript
-import { createModel, SKIP_REACTION } from 'model-reaction';
-
-const m = createModel({
-  first: { type: 'string', default: '' },
-  last:  { type: 'string', default: '' },
-  full:  {
-    type: 'string',
-    default: '',
     reaction: {
-      fields: ['first', 'last'],
-      computed: (v) =>
-        v.first || v.last ? `${v.first} ${v.last}`.trim() : SKIP_REACTION,
+      fields: ['price', 'qty'],
+      computed: ({ price, qty }) => price * qty,
+      action: [() => { console.log('总价:', cart.data.total); }],
     },
   },
 });
+
+cart.setFields({ price: 20, qty: 3 });
+console.log(cart.data.total); // 60，同步完成计算
+await cart.settled(); // 同时等待 action 返回的异步工作
+cart.dispose();
 ```
 
-TypeScript 会按字段的 `type` 检查返回值，因此 `full` 只能返回字符串或
-`SKIP_REACTION`；具体规则与例外见 [docs/API_CN.md](docs/API_CN.md#反应)。
+Schema 的每个顶层属性定义一个字段。`setField` 和 `setFields` 同步转换并提交，
+返回 `void`；写入异常直接抛出。`type` 和枚举 `values` 只描述类型，
+不检查运行时输入。默认值克隆后直接播种。
 
-`action` 是可选的无参数函数数组，通过闭包读取 model。计算链落定后，每个宿主
-字段只有最新调度且成功提交的 reaction 能启动一组 action。数组项按顺序执行，
-每次调用前都等待计算落定，返回的 Promise 纳入 `settled()`。初始化及相等计算值
-仍可触发一组；直接修改宿主字段会取消其未启动项，但不会自行触发新组。
-action 与 validator 内不能 await 同一模型的 `settled()` 或 `validateAll()`。
-从单函数 action 升级前，请阅读 [执行契约与迁移](docs/API_CN.md#action-组)。
+`data` 是稳定、浅冻结的快照。对象、数组和 `Date` 等可变值需通过 setter
+整体替换，嵌套修改不会被观察。保留字段结构比较。批量输入先全部准备，
+再逐字段提交并发出事件，最后触发依赖计算。事件可能观察到中间状态；
+批量写入不是事务。
 
-### 脏数据
+## Reaction 与 action
 
-验证失败的值会被记录为"脏数据"，与已提交状态隔离保存。
+每个字段最多声明一个 reaction。`fields` 声明顶层输入；`computed` 同步、
+纯粹地计算宿主值，结果再经过宿主 transform。返回 `SKIP_REACTION`
+可保留宿主值，并跳过本次 action 与下游传播。
 
-```typescript
-user.getDirtyData();   // 验证失败的值
-user.clearDirtyData(); // 清空
+`action` 是无参函数数组，通过闭包读取 model。计算落定后在微任务中启动，
+每个数组项调用前再次检查计算屏障。新的宿主版本取消尚未调用的项，
+已运行的 Promise 继续被跟踪。组间独立执行，重复函数引用归最后一次注册。
+
+计算在 setter 返回前结束，用 `await settled()` 等待 action 工作。
+不要在 action 内等待同一个 model 的 `settled()`。
+完整规则见 [API](docs/API_CN.md#action-组)。
+
+## 业务校验与事件
+
+要求模型只接收合格值时，先检查候选再写入。编辑器也可以保存不完整值，
+提交前检查计算落定后的快照。错误、请求超时与过期响应保护由应用维护。
+参见 [高级用法](docs/ADVANCED_CN.md)。
+
+```ts
+const off = cart.on('field:change', ({ field, value }) => console.log(field, value));
+cart.on('reaction:error', (error) => console.error(error.message));
+off();
 ```
-
-### 事件
-
-```typescript
-user.on('validation:error', (e) => console.error(e.field, e.message));
-
-// `on` 返回取消订阅函数（与 `subscribe` 一致）：
-const off = user.on('field:change', (e) => console.log(e.field, '=', e.value));
-off(); // 停止监听
-```
-
-完整事件列表见 [docs/API_CN.md](docs/API_CN.md#事件)。
-
-`field:validation-complete` 会报告每个字段的校验结果，包括批量操作和 reactions，
-即使字段值没有变化；`dirty-data:cleared` 会报告 `clearDirtyData()` 清理的字段。
 
 ## React 绑定
 
 ```tsx
 import type { ModelReturn } from 'model-reaction';
-import { useDraftField } from 'model-reaction/react';
+import { useModelFieldState } from 'model-reaction/react';
 
-function NameInput({ user }: { user: ModelReturn<{ name: string }> }) {
-  const { draft, setDraft, meta, writeError, onBlur, showError } = useDraftField(user, 'name');
-  return (
-    <label>
-      <input
-        value={draft}
-        onChange={(e) => setDraft(e.target.value)}
-        onBlur={onBlur}
-        aria-invalid={showError}
-      />
-      {meta.validating && <span>校验中...</span>}
-      {showError && <span role="alert">{writeError?.message ?? meta.error}</span>}
-    </label>
-  );
+function NameInput({ model }: { model: ModelReturn<{ name: string }> }) {
+  const [name, setName] = useModelFieldState(model, 'name');
+  return <input value={name} onChange={(event) => setName(event.target.value)} />;
 }
-
 ```
 
-React 的技术契约与完整示例统一维护在 [docs/REACT_CN.md](docs/REACT_CN.md)，
-包含 Hook 选择、模型所有权、selector 订阅、SSR 与提交流程。
-
-### 文本表单字段 —— `useDraftField`
-
-draft 行为、非文本控件、transform 和错误展示，详见
-[受控输入](docs/REACT_CN.md#严格--异步校验下的受控输入)。
-
-未发布版本包含 API 不兼容变更，升级时请参考
-[迁移说明](docs/API_CN.md#api-精简迁移unreleased)。
+控件通过同步 setter 直接绑定提交值。
+解析、文本格式、IME 缓冲和业务反馈由应用控件负责。
+生命周期、selector、SSR 和配方见 [React 绑定](docs/REACT_CN.md)。
 
 ## 文档
 
-通过[文档导航](docs/README_CN.md)查找 API 参考、高级用法、React 绑定、集成、
-DevTools、架构、示例与贡献约定。
+[文档导航](docs/README_CN.md) · [API](docs/API_CN.md) ·
+[示例](examples/README_CN.md) · [DevTools](docs/DEVTOOLS_CN.md) ·
+[源码架构](docs/ARCHITECTURE_CN.md) · [Coding agent 约定](AGENTS.md)
 
 ## 许可证
 

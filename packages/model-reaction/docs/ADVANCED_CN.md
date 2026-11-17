@@ -1,275 +1,108 @@
 # 高级用法
 
-超出 README 快速上手范围的常用模式。
+[English Version](ADVANCED.md) | [文档导航](README_CN.md)
 
-[English Version](ADVANCED.md) | 中文
+## 业务校验
 
-[← 返回 README](../README_CN.md)
+模型保存转换后的字段值并运行声明的计算。必填、跨字段规则、服务端准入、
+错误显示由应用函数或独立校验库负责。
 
----
+```ts
+interface Budget { total: number; daily: number }
 
-## 目录
-
-- [异步验证](#异步验证)
-- [自定义验证规则与消息](#自定义验证规则与消息)
-- [类型化错误事件](#类型化错误事件)
-- [条件验证与跨字段验证](#条件验证与跨字段验证)
-- [字段转换与异步验证](#字段转换与异步验证)
-- [等待异步操作](#等待异步操作)
-- [Schema 类型推导](#schema-类型推导)
-- [模型组织](#模型组织)
-- [性能与错误处理](#性能与错误处理)
-- [业务模型测试](#业务模型测试)
-
----
-
-## 异步验证
-
-```typescript
-import { createModel } from 'model-reaction';
-import { Rule, ValidationRules } from 'model-reaction/validation';
-
-interface AsyncUser {
-  name: string;
-  username: string;
+function checkBudget(data: Readonly<Budget>): string | null {
+  if (!Number.isFinite(data.total) || data.total < 100) return '总预算至少 100';
+  if (!Number.isFinite(data.daily) || data.daily < 10 || data.daily > data.total) {
+    return '日预算须在 10 与总预算之间';
+  }
+  return null;
 }
 
-const asyncUniqueRule = new Rule(
-  'asyncUnique',
-  '用户名已存在',
-  async (value: string): Promise<boolean> => {
-    return new Promise<boolean>((resolve) => {
-      setTimeout(() => resolve(value !== 'admin'), 100);
-    });
-  }
-);
-
-const asyncUserModel = createModel<AsyncUser>({
-  name: {
-    type: 'string',
-    validator: [ValidationRules.required.withMessage('用户名不能为空')],
-    default: '',
-  },
-  username: {
-    type: 'string',
-    validator: [
-      ValidationRules.required.withMessage('账号不能为空'),
-      asyncUniqueRule,
-    ],
-    default: '',
-  },
-}, { asyncValidationTimeout: 3000 });
-
-const ok = await asyncUserModel.setField('username', 'admin');
-console.log(ok); // false
-console.log(asyncUserModel.validationErrors);
-console.log(asyncUserModel.getDirtyData());
+function updateBudget(model: ModelReturn<Budget>, input: Partial<Budget>): string | null {
+  const candidate = { ...model.data, ...input };
+  const error = checkBudget(candidate);
+  if (error) return error;
+  model.setFields(input);
+  return null;
+}
 ```
 
-## 自定义验证规则与消息
+若 transform 改变业务含义，先规范化候选再检查；schema 与业务入口可共享纯解析器。
+输入预检不会自动检查之后的 computed 输出。可确保计算本身产生合法值、
+落定后检查，或需要完整计算图准入时用独立候选模型评估。
+不要把 transform 扩展成替代 validator 的框架。
 
-```typescript
-import { createModel } from 'model-reaction';
-import { Rule } from 'model-reaction/validation';
+编辑器也可以先提交不完整值，在 blur/提交时检查，并把错误保存在模型外。
+条件校验就是普通业务分支。参见 [business-validation.ts](../examples/business-validation.ts)。
 
-const customRule = new Rule(
-  'custom',
-  '不符合自定义规则',
-  (value: any) => value === 'custom'
-);
+## 异步 action 与过期响应
 
+`computed` 保持同步，请求放在 action 或业务服务中。
+需要 `settled()` 跟踪时返回/等待请求。
+
+```ts
+let revision = 0;
 const model = createModel({
-  field: {
-    type: 'string',
-    validator: [customRule.withMessage('字段值必须为 "custom"')],
-    default: '',
-  },
+  query: { type: 'string', default: '' },
+  results: { type: 'array', default: [] as string[] },
+  normalized: { type: 'string', reaction: {
+    fields: ['query'],
+    computed: ({ query }) => query.trim(),
+    action: [async () => {
+      const version = revision;
+      const query = model.data.normalized;
+      const results = await search(query);
+      if (version !== revision) return;
+      model.setField('results', results);
+    }],
+  } },
 });
+const off = model.subscribe((data) => data.query, () => { revision++; });
+// owner 清理：revision++; off(); model.dispose();
 ```
+
+输入改变时推进版本，保证响应恢复前已失效。
+只比较当前文本无法处理 A → B → A；销毁时也需失效。
+调度器取消未启动项，不能中断运行中的请求。按需使用服务超时或 AbortController。
+[完整异步示例](../examples/async-action.ts) 包含清理。
+
+级联计算同步完成，action 总在之后开始；规范化结果相等仍可启动 action 组。
+需要限制请求频率时，在应用输入或服务边界处理防抖。
 
 ## 类型化错误事件
 
-```typescript
-import { createModel, ModelEvents } from 'model-reaction';
-import { ValidationRules } from 'model-reaction/validation';
-
-const model = createModel({
-  name: {
-    type: 'string',
-    validator: [ValidationRules.required.withMessage('姓名不能为空')],
-    default: '',
-  },
-});
-
-const unsubscribeValidation = model.on(
-  ModelEvents.VALIDATION_ERROR,
-  (error) => console.error(`验证错误: ${error.field} - ${error.message}`)
-);
-const unsubscribeMissing = model.on(
-  ModelEvents.FIELD_NOT_FOUND,
-  (error) => console.error(`字段不存在: ${error.field}`)
-);
-
-unsubscribeValidation();
-unsubscribeMissing();
-```
-
-## 条件验证与跨字段验证
-
-可以定义仅在满足特定条件时才执行的规则，也可以通过 `data` 参数读取其他字段的值进行交叉验证。
-
-```typescript
-import { createModel } from 'model-reaction';
-import { ValidationRules, Rule } from 'model-reaction/validation';
-
-const model = createModel({
-  hasDiscount: { type: 'boolean', default: false },
-  discountCode: {
-    type: 'string',
-    validator: [
-      // 条件验证：仅在 hasDiscount 为 true 时执行。`.when(predicate)`
-      // 是附加 `condition` 的简洁写法。
-      ValidationRules.required
-        .withMessage('启用折扣时，折扣码为必填项')
-        .when((data) => data.hasDiscount === true),
-      // 跨字段验证：通过 `data` 读取其他字段
-      new Rule(
-        'validCode',
-        '无效的折扣码',
-        (value, data) => {
-          if (data?.hasDiscount && value !== 'PROMO2024') return false;
-          return true;
-        }
-      ),
-    ],
-    default: '',
-  },
-});
-```
-
-## 字段转换与异步验证
-
-```typescript
-import { createModel } from 'model-reaction';
-import { Rule } from 'model-reaction/validation';
-
-const asyncModel = createModel({
-  field: {
-    type: 'string',
-    transform: (value: string) => value.toUpperCase(),
-    validator: [
-      new Rule(
-        'asyncValidator',
-        '异步验证失败',
-        async (value: string) => value.length > 3
-      ).withMessage('字段长度必须大于 3 个字符'),
-    ],
-    default: '',
-  },
-});
-```
-
-## 等待异步操作
-
-`await setField` 等待该字段的校验与提交，即使未使用防抖，下游 reaction 与 action
-组仍可能在执行。请在 action 外使用 `settled()`：
-
-```typescript
-interface Schema {
-  source: string;
-  target: string;
-}
-
-const model = createModel<Schema>({
-  source: { type: 'string', default: '' },
-  target: {
-    type: 'string',
-    default: '',
-    reaction: {
-      fields: ['source'],
-      computed: (vals) => vals.source.toUpperCase(),
-    },
-  },
-}, { debounceReactions: 100 });
-
-await model.setField('source', 'hello');
-
-console.log(model.getField('target')); // ''（防抖未到点）
-
-await model.settled();
-
-console.log(model.getField('target')); // 'HELLO'
-```
-
-## Schema 类型推导
-
-`createModel` 支持两种调用方式：
-
 ```ts
-// 1. 显式传入类型参数（复杂模型推荐）：
-const user = createModel<User>(userSchema);
-
-// 2. 从 schema 字面量推导：
-const m = createModel({
-  name: { type: 'string', default: '' },
-  age:  { type: 'number', default: 0 },
-  ok:   { type: 'boolean', default: false },
+const off = model.on(ModelEvents.REACTION_ERROR, (error) => {
+  console.error(error.field, error.message);
 });
-// m.data 类型为 { name: string; age: number; ok: boolean }
-
-// 没有默认值的字段会额外包含 undefined。
-const optional = createModel({ note: { type: 'string' } });
-// optional.data.note 类型为 string | undefined
-
-// `values` 为 enum 字段推导出具体联合类型；运行时校验仍由 validator 提供。
-const status = createModel({
-  state: {
-    type: 'enum',
-    values: ['draft', 'published'] as const,
-    default: 'draft',
-  },
-});
-// status.data.state 类型为 'draft' | 'published'
+try {
+  model.setFields(input);
+} catch (error) {
+  // 直接写入的 getter/transform/未知字段错误同步抛出。
+}
 ```
 
-Schema 推导反映运行时值：默认值会绕过校验，因此与 `type` 不匹配的默认值也会
-包含在推导类型里。显式调用 `createModel<T>` 表示调用方保证 schema 能初始化该类型。
-对象或数组没有可推导的默认值时，建议显式提供数据类型。
+reaction 错误是诊断事件，不是模型错误存储或业务校验结果。
+action 失败后 `settled()` 仍会在受跟踪工作结束时完成，
+需观察业务状态/错误事件判断能否提交。[API](API_CN.md#事件) 维护事件定义。
 
-## 模型组织
+## 模型组织与推断
 
-共享生命周期和依赖图的字段放在同一个模型中。大型 Schema 按职责拆成模块，再
-展开为单个扁平 Schema。片段之间的字段名必须唯一：对象展开会静默覆盖前面的定义。
-各自拥有独立生命周期的表单可以使用不同模型；跨模型协调由应用负责。
+生命周期和依赖图一致的字段放在一个模型。聚焦 schema 片段在构造前组成平面对象，
+字段名不能重复。独立编辑器使用独立模型，跨模型协调由应用负责；
+独立计算结果由不同字段承载。
 
-把复用校验提取为具名规则，把编排放进业务函数。`computed` 保持同步、纯计算，
-所有输入都在 `reaction.fields` 中声明；独立计算结果拆成不同字段。
-异步工作和副作用放进 action 组，执行规则见 [action 契约](API_CN.md#action-组)。
+显式领域契约使用 `createModel<T>(schema)`，小型局部模型可使用 schema 推断。
+`type` 与枚举 `values` 不校验运行时 payload。缺少默认值推断为包含 `undefined`，
+有用的对象/数组默认值保留形状。API 输入先映射到已知字段，
+参见 [广告创编配方](../examples/AD_CREATION_CN.md) 的 schema/DTO 边界。
 
-共享领域契约使用显式接口，小型局部模型可以使用 Schema 推导。
-`FieldSchema.type` 是元数据，不是运行时校验；非类型化输入仍需 validator。
-写入前把 API payload 映射为已知字段。[广告创编示例](../examples/AD_CREATION_CN.md)
-展示了 Schema 组合与 DTO 转换。
+## 性能与测试
 
-## 性能与错误处理
+相关输入用 `setFields`，读取使用窄订阅，计算保持纯函数并声明依赖。
+依赖引擎不是事务或拓扑单次计算调度器；
+菱形依赖在最终值之前可能计算中间值，action 会等待计算链落定。
 
-- 廉价规则放在前面。字段内顺序执行、首错停止；不同字段可以并行校验。
-- 在服务边界缓存可复用的远端校验，并按服务耗时配置 `asyncValidationTimeout`。
-- 远端校验不应逐键触发时，在调用 `setField` 前做输入防抖。
-  `debounceReactions` 只延迟派生计算。
-- 使用字段或 selector 订阅缩小更新范围。Hook 选择、draft 缓冲与所有权统一见
-  [React 绑定](REACT_CN.md)。
-- 写入返回 `false` 表示校验失败，Promise reject 属于另一类异常。
-  读取 `validationErrors[field]`，或从 `model-reaction/validation` 导入
-  `formatValidationErrors` 汇总错误。用类型化错误事件记录日志，cleanup 中解绑。
-  文本绑定在 `showError` 时展示 `writeError?.message ?? meta.error`。
-
-## 业务模型测试
-
-测试业务边界：规则上下限、transform、无效输入保留在 dirty data、计算值被拒、
-异步旧结果以及 reaction 链。提交流程先等待当前工作，再调用 `validateAll()`，
-待其返回后读取 payload；调用内部已等待校验触发的后续工作。应用负责服务端提交时，补充
-服务端拒绝与重试场景。
-
-React 集成检查覆盖校验在途时继续编辑、字段级更新与 owner 清理。
-仓库贡献所需检查统一维护在 [AGENTS.md](../AGENTS.md)。
+测试业务边界、规范化、提交快照、过期请求、action 错误、owner 销毁和文本/IME 行为。
+异步场景分别等待模型落定与应用检查。
+仓库检查见 [AGENTS.md](../AGENTS.md)。

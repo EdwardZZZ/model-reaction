@@ -7,145 +7,83 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+These breaking changes require a major release. The package version remains
+unchanged until release.
+
 ### Added
-- **`SKIP_REACTION` sentinel:** return it from `reaction.computed` to skip
-  validation, commit, field events, downstream reactions, and `action` for the
-  current reaction.
-- **`useDraftField` React hook** (`model-reaction/react`): the recommended
-  controlled text-input binding, including fields under strict or async
-  validators where a rejected or in-flight keystroke must not blank the input.
-  It layers a local draft, blur-gated error display (`touched` / `onBlur` /
-  `showError`), and a `format` option on top of `useModelFieldState`. See
-  `docs/REACT.md` / `docs/REACT_CN.md`.
-- **DevTools browser extension** for inspecting models at runtime: a live data
-  tree (`data` / `dirtyData` / `errors`), the reaction dependency graph, and a
-  change timeline. Registration is opt-in via a new `model-reaction/devtools`
-  entry — swap `import { createModel } from 'model-reaction'` for
-  `'model-reaction/devtools'` and each model registers with the global DevTools
-  hook when one is installed (a constant-time hook check with no integration
-  allocation when it is absent). The package root imports none of this, so apps
-  that never opt in ship zero DevTools code. The hook is a private dev-time
-  channel — not part of the public `ModelReturn` API. See `docs/DEVTOOLS.md` /
-  `docs/DEVTOOLS_CN.md`
-  and the `packages/devtools/` workspace package.
+
+- `SKIP_REACTION` skips a computation's host transform/commit, actions, and
+  downstream propagation.
+- Optional `model-reaction/react` field/selector bindings with synchronous
+  setters and explicit model ownership.
+- Optional `model-reaction/devtools` entry and browser extension with committed
+  data, declared field/action graph, and a read-only change timeline.
+- Application preflight, submission, and async-action examples with
+  stale-response/disposal protection.
 
 ### Changed
-- **Breaking (behavior):** `validateAll()` now waits for all tracked model work
-  after its full pass and returns `false` if dirty values or errors remain.
-  `validation:complete` fires after settlement with the final result. Submission
-  uses `await model.settled(); const valid = await model.validateAll();`; remove
-  the second wait and repeated model error checks. Actions and validators must
-  not await either global waiting method on the same model. Public signatures
-  and the shorter `setField` / `setFields` wait remain unchanged. See
-  [validation](docs/API.md#validation) and its migration notes.
-- **Breaking:** `reaction.action` is now an array of no-argument functions
-  reading the model through a closure. Only the host's latest eligible group
-  starts after calculation settles; each item checks calculation again.
-  Direct host changes cancel unstarted items, while started Promises remain
-  tracked. See the [action migration](docs/API.md#action-groups).
-- **Breaking (behavior):** pending action items now merge by function reference
-  within each model, retaining the last registered occurrence. Group scheduling
-  and already started calls are unchanged; distinct wrappers remain independent.
-- **Breaking:** each field now accepts one `reaction`; arrays (including empty
-  arrays) fail at construction before initialization. Unwrap single entries;
-  refactor multiple calculations by business result instead of merging them
-  mechanically.
-- **Breaking:** removed `strictMode` and `failFast`. Unknown keys always emit
-  `field:not-found` and reject the whole batch before preparation. Field rules
-  now evaluate condition/validation in order and stop at the first error.
-- **Breaking:** `setField` shares the transformed candidate snapshot semantics
-  of `setFields`, including its own new value in validator `data`. Move
-  old-value preconditions to the business write entry point. `validateAll`
-  reuses dirty values without applying transforms again.
-- **React migration:** `DraftField` adds required `writeError: Error | null`;
-  `showError` now includes local write exceptions. Display
-  `writeError?.message ?? meta.error`, and update manually constructed bindings.
-- Action candidates and active groups now share one collection; each host has
-  one pending debounced computation. Per-item calculation barriers, version
-  cancellation, and tracking of already started Promises are preserved.
-- Structural field equality, both selector Hook contracts, async validation
-  timeout, and reaction debounce remain unchanged. These unreleased breaking
-  changes require a major release, not a patch release.
-- **Breaking:** moved `ValidationRules`, `Rule`, `formatValidationErrors`, and
-  the `ValidationErrorFormatter` type from the root to
-  `model-reaction/validation`. The core still executes validators. Browser
-  users load the separate `dist/validation.js` UMD helpers when needed.
-- **Breaking:** removed `model.subscribeField`; use
-  `model.subscribe(data => data[field], callback)` or filter `field:change`
-  events.
-  See the migration sections in `docs/API.md` and `docs/API_CN.md`.
-- **Breaking:** `reaction.computed` is now a synchronous pure-computation
-  contract. Returning a Promise reports `reaction:error` and does not commit a
-  value; move asynchronous work and other side effects to `reaction.action`.
-- **Breaking (types):** `reaction.computed` results are type-checked against
-  the field `type` (`string`, `number`, `boolean`, `Date`, `object`, readonly
-  array; `enum` unchecked), plus `SKIP_REACTION`. `Reaction<T>` declares a
-  standalone reaction's result type, and a bare `Reaction` stays unchecked.
-  Nullable results are rejected; use a bare `Reaction` for them. Annotate
-  standalone functions returning `SKIP_REACTION` as
-  `(): typeof SKIP_REACTION`. `FieldSchema` is now a union discriminated by
-  `type`, so `interface X extends FieldSchema` no longer compiles; use an
-  intersection or a single variant such as `FieldSchema<'string'>`. Runtime
-  behavior is unchanged.
-- The minimum supported Node.js version is now 18, aligned with the workspace
-  toolchain and CI matrix.
-- **Reactions now run an initial pass at construction.** Previously a derived
-  field kept its own `default` until the first change to a dependency, so a
-  model built purely from defaults showed stale derived values (e.g. a
-  `fullName` reaction stayed empty even though `firstName`/`lastName` had
-  defaults). Now, after seeding defaults, the constructor fires one reaction
-  pass for the seeded fields, so derived fields start with a correct computed
-  value. The pass is tracked by `settled()`. Defaults still **bypass
-  validation** (unchanged); only the reaction gap is closed. If you relied on a
-  derived field staying at its literal `default` until first interaction, it
-  now reflects the computed value from the start.
 
-### Fixed
-- Own field keys such as `toString`, `constructor`, and `__proto__` now work
-  through model storage, defaults, dirty/error state, reactions, and React
-  field selection without reading inherited properties or invoking prototype
-  setters.
-- Draft formatters from abandoned renders no longer affect pending writes;
-  setter and cleanup rejections are handled locally without losing input text.
-- DevTools selection falls back when the chosen instance disappears.
-  `NaN`, infinities, and negative zero retain their identity through JSON
-  transport and render as numbers.
-- Published ESM entry points now use `.mjs`, so Node 18+ loads
-  `model-reaction`, `model-reaction/react`, and `model-reaction/devtools`
-  through the `import` condition without parsing them as CommonJS.
+- **Breaking:** `setField` and `setFields` synchronously transform/commit and
+  return `void`. Unknown keys/getter/transform errors throw synchronously;
+  computed values no longer pass through asynchronous validation.
+- **Breaking:** each field accepts one `reaction`. `computed` must be pure
+  and synchronous, with return types checked against the host type tag.
+  Reaction arrays and Promise-like computed results are unsupported.
+- **Breaking:** `reaction.action` is a no-argument function array. Versioned
+  groups start after calculation settles, check the barrier per item, and
+  track returned Promises independently. Pending shared function references
+  retain their last registration.
+- Construction initializes reactions reachable from seeded non-reaction inputs.
+  Initial actions are deferred; defaults remain cloned and untransformed.
+- Batch writes preflight all keys and transform all candidates before
+  individual commits/events and dependency propagation.
+- `settled()` waits for batches, calculation cascades, and
+  action groups. It performs no validation and resolves even after reported
+  reaction/action failures.
+- **React migration:** `useModelFieldState` returns `[value, setter]`;
+  `Field` render props contain `{ value, setValue }`. Input formatting and
+  edit feedback belong to application controls.
+- **Private DevTools protocol migration:** snapshots contain only `{ data }`;
+  field metadata has no validator count, and only committed changes are
+  subscribed. Update the extension together with the library.
+- Retained structural field equality and two selector Hook policies.
+  Node.js 18+ is required.
 
-### Internal
-- Boolean validator results skip timeout tasks while retaining asynchronous
-  reporting; Promise results keep timeout and stale-request protection.
-- Cycle guards in `deepEqual` and `cloneDefault` are allocated only when
-  traversing object structures.
-- Error objects and field error arrays are frozen when stored. Error snapshots
-  reuse unchanged field arrays and preserve earlier snapshots.
-- Removed the redundant batch reaction flag and thin validation/transform
-  wrappers; single-field and batch reactions share one trigger method.
-- Extracted `eachReactionEdge` (`src/reaction/reaction-graph.ts`) as the single
-  definition of how a schema's `reaction.fields` are read as dependency edges.
-  Both the runtime reaction index (`ReactionSystem.collectReactions`) and the
-  DevTools dependency graph consume it; a lock-in test asserts agreement for
-  the covered schemas.
+### Removed
 
-### Docs
-- Consolidated document navigation; merged best-practice guidance into advanced
-  usage and comparison, and completed design decisions into architecture.
-  The ad-creation scenario now lives in
-  [examples/AD_CREATION_CN.md](examples/AD_CREATION_CN.md).
-- Clarified the separate subscription policies of `useModelSelector` and
-  `useModelComputed`. Both share snapshot caching; `shallow` retains equivalent
-  container results across updates and avoids unrelated re-renders.
-- Updated the DevTools row in `docs/COMPARISON.md` / `docs/COMPARISON_CN.md`
-  from "not yet" to the new browser extension.
+- Schema validators, validation execution, rules/formatters, `Validator`,
+  `ValidationError`, `ValidationErrorFormatter`, and the
+  `model-reaction/validation` entry/build.
+- `asyncValidationTimeout`, `validateAll`, `validationErrors`, `getDirtyData`,
+  `clearDirtyData`, validation/dirty-data events, and React `FieldMeta`/`meta`.
+- `debounceReactions`, `ModelOptions`, and the `createModel` options argument.
+  Calculation cascades now always finish synchronously before a setter returns;
+  application code owns input/request rate limiting.
+- `useDraftField`, `DraftField`, `UseDraftFieldOptions`, and the adapter's
+  draft/touched/write-exception state and formatter synchronization.
+  Use `useModelFieldState` for direct bindings and implement text/IME policy
+  in application controls.
+- Old `strictMode`, `failFast`, and `subscribeField` APIs remain removed.
 
-### Internal (repo)
-- The repository is now a pnpm monorepo. This library moved to
-  `packages/model-reaction/` alongside `packages/devtools` (the extension) and
-  `packages/demo` (a Vite + React demo). The published package name, version,
-  entry points, and `files` are unchanged — the npm tarball contents are
-  identical to before the move.
+Business checks, errors, rejected text, request timeouts, and remote acceptance
+belong to application code. Previously rejected field values now commit after
+transformation; type/enum metadata does not perform runtime checks.
+Migration: [English](docs/API.md#removing-validation-migration-unreleased) /
+[中文](docs/API_CN.md#移除校验的迁移说明未发布).
+
+### Fixed and internal
+
+- Own keys such as `constructor`, `toString`, and `__proto__` work across model,
+  reaction, React, and DevTools storage.
+- Selector caches retain their concurrent-render protections.
+- DevTools selection falls back when an instance disappears. Exceptional
+  numbers retain explicit markers through JSON transport.
+- ESM builds use `.mjs`; CommonJS exports remain supported.
+- Removed validation freshness, timeout, dirty/error state, and subscriptions.
+  ModelManager owns only committed data and lifecycle; shared edge parsing
+  keeps runtime and DevTools dependency graphs aligned.
+- Repository is a pnpm monorepo; English/Chinese documentation and examples
+  are synchronized with the current public contract.
 
 ## [1.2.0] - 2026-09-04
 

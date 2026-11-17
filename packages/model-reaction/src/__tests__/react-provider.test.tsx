@@ -2,7 +2,6 @@
 import * as React from 'react';
 import { act, render } from '@testing-library/react';
 import { createModel } from '../index';
-import { ValidationRules } from '../validation';
 import {
     Field,
     ModelProvider,
@@ -251,7 +250,6 @@ describe('Field', () => {
             email: {
                 type: 'string',
                 default: '',
-                validator: [ValidationRules.email],
             },
         });
     }
@@ -262,10 +260,9 @@ describe('Field', () => {
         const { getByTestId } = render(
             <ModelProvider model={model}>
                 <Field<FormData, 'email'> name="email">
-                    {({ value, setValue, meta }) => (
+                    {({ value, setValue }) => (
                         <div>
                             <span data-testid="value">{value}</span>
-                            <span data-testid="error">{meta.error ?? ''}</span>
                             <button
                                 data-testid="set"
                                 onClick={() => setValue('me@example.com')}

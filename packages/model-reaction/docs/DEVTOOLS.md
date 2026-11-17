@@ -29,10 +29,8 @@ Once the extension is installed and its panel is open, models created through
 the opt-in `model-reaction/devtools` entry show up under a **Model Reaction**
 tab in the browser DevTools, with three views:
 
-1. **Data Tree** — the three layers of the model, each collapsible:
-   - `data` — the committed source of truth (schema defaults are seeded without validation)
-   - `dirtyData` — the last input that failed validation, per field
-   - `errors` — current validation errors, per field
+1. **Data Tree** — collapsible committed `data`, including incomplete editor
+   values. Business errors and UI drafts belong to the application.
 2. **Dependencies** — the reaction dependency graph. Solid arrows point
    **from a dependency to the field its reaction computes** (read it as
    "`from` feeds `to`"). Declared actions appear inside their host field module,
@@ -131,15 +129,14 @@ into `packages/devtools/dist/`, alongside the copied static assets
   or zero. Ordinary finite numbers keep their primitive representation.
 - The **Timeline** is capped by a ring buffer (default 100 entries per
   instance) so a long-lived, chatty page cannot grow memory without bound.
-- Rejected input, validation completion, dirty clearing, and reaction errors
-  refresh the data tree automatically. Synchronous notifications share one
-  queued snapshot; only committed field changes enter the timeline.
-- Each snapshot shares a budget across `data`, `dirtyData`, and `errors`:
+- Committed field changes refresh the tree automatically. Synchronous changes
+  share one queued snapshot and each change enters the timeline.
+- Each snapshot uses one budget across `data` values:
   2,000 nodes and a conservative 256 KiB UTF-8 JSON cap. Each timeline value
   has its own budget. Defaults also cap depth at 6, entries per container or
   record at 100, and string prefixes at 10,000 characters.
 - Traversal stops when a budget is exhausted, with truncation markers and a
-  snapshot banner when values, fields, or errors were omitted or clipped.
+  snapshot banner when values or fields were omitted or clipped.
   Shared objects in sibling branches remain readable; true cycles are marked.
 
 ## The DevTools hook contract
@@ -149,8 +146,7 @@ global object. It is a **private, dev-time channel** — it is *not* part of the
 public `ModelReturn` API and is not re-exported from the package root. See
 AGENTS.md §5: the library deliberately exposes no `model.describe()`
 introspection method, and this hook does not change that. The wrapper reads a
-model only through its public API (`data` / `getDirtyData()` /
-`validationErrors` / `on`) plus the schema it was handed — it needs no
+model only through its public API (`data` / `on`) plus the schema it was handed — it needs no
 privileged access to `ModelManager` internals.
 
 The contract (from [src/devtools/devtools-hook.ts](../src/devtools/devtools-hook.ts)):
@@ -163,10 +159,10 @@ interface ModelReactionDevtoolsHook {
 ```
 
 Each registered instance exposes pull-based reads (`getFields`,
-`getDependencyGraph`, `getSnapshot`) plus `subscribe` for committed changes and
-optional `subscribeSnapshot` for validation, dirty-data, and error updates.
-The agent still refreshes on committed changes for older instances without
-`subscribeSnapshot`. Both subscriptions are removed on unregister/disposal.
+`getDependencyGraph`, `getSnapshot`) plus `subscribe` for committed changes.
+Snapshots contain only `{ data }`; field metadata has no validator count.
+The change subscription is removed on unregister/disposal. The extension
+and library are updated together for this private protocol change.
 The extension's page agent implements the hook; the DevTools entry consumes it.
 
 The dependency graph is derived from the schema through a shared primitive,
@@ -196,9 +192,8 @@ returns without building an instance descriptor or adding subscriptions.
 ## Known limitations
 
 - **Write-back time-travel.** The Timeline is **read-only**. Replaying an old
-  value back into the model would re-trigger reactions and could poison
-  `dirtyData` (the library intentionally has no `resetDirty` — see AGENTS.md
-  §5), so the extension does not offer a restore action.
+  value back into the model would re-trigger calculations and actions, so the
+  extension does not offer a restore action.
 - **Configurable limits.** The timeline ring-buffer size and the value
   serialization depth / breadth / string / node / byte caps currently use fixed
   defaults. Budgets apply per snapshot or timeline value, not to aggregate

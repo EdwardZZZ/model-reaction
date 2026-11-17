@@ -7,7 +7,6 @@ import * as React from 'react';
 void React;
 
 import { createModel } from 'model-reaction';
-import { ValidationRules } from 'model-reaction/validation';
 import { useModel } from 'model-reaction/react';
 
 interface User {
@@ -16,8 +15,8 @@ interface User {
 }
 
 const userModel = createModel<User>({
-    name:  { type: 'string', default: '', validator: [ValidationRules.required] },
-    email: { type: 'string', default: '', validator: [ValidationRules.email] },
+    name:  { type: 'string', default: '' },
+    email: { type: 'string', default: '' },
 });
 
 const api = {
@@ -28,13 +27,17 @@ const api = {
 
 export function SubmitButton() {
     const model = useModel<User>();
+    const [error, setError] = React.useState('');
     async function onSubmit() {
         await model.settled();
-        const ok = await model.validateAll();
-        if (!ok) return;
-        await api.save(model.data);
+        const snapshot = model.data;
+        const message = !snapshot.name.trim() ? 'Name is required'
+            : !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(snapshot.email) ? 'Invalid email' : '';
+        setError(message);
+        if (message) return;
+        await api.save(snapshot);
     }
-    return <button onClick={onSubmit}>Submit</button>;
+    return <div><button onClick={onSubmit}>Submit</button>{error && <span role="alert">{error}</span>}</div>;
 }
 
 export { userModel };

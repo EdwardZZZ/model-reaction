@@ -1,6 +1,5 @@
 import { ModelManager } from '../core/model-manager';
 import { createModel, Model } from '../index';
-import { ValidationRules } from '../validation';
 
 describe('ModelManager - Type checks', () => {
     test('valid Model schema compiles without error', () => {
@@ -13,7 +12,6 @@ describe('ModelManager - Type checks', () => {
             id: { type: 'number' },
             name: {
                 type: 'string',
-                validator: [ValidationRules.required],
             },
             email: { type: 'string' },
         };
@@ -41,4 +39,3 @@ describe('createModel - schema type inference', () => {
         m.dispose();
     });
 });
-

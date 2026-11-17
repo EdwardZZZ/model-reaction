@@ -10,20 +10,6 @@
  */
 import { createStore } from 'zustand/vanilla';
 import { createModel } from '../src/index';
-import { ValidationRules } from '../src/validation';
-
-// 静音 model-reaction 校验/反应失败的 console.error 噪音
-const _origError = console.error;
-console.error = (...args: any[]) => {
-    const first = args[0];
-    if (
-        typeof first === 'string' &&
-        (first.startsWith('[validation]') || first.startsWith('[reaction]'))
-    ) {
-        return;
-    }
-    _origError.apply(console, args);
-};
 
 // ----------------------------- helpers -----------------------------
 
@@ -100,15 +86,15 @@ async function bench_setNoValidate() {
         for (let i = 0; i < N; i++) store.getState().set(i);
     });
 
-    const m = await bench('model-reaction setField x1000 (await)', RUNS, async () => {
+    const m = await bench('model-reaction setField x1000', RUNS, () => {
         const mm = createModel<{ n: number }>({
             n: { type: 'number', default: -1 },
         });
-        for (let i = 0; i < N; i++) await mm.setField('n', i);
+        for (let i = 0; i < N; i++) mm.setField('n', i);
         mm.dispose();
     });
 
-    record('1000 次写入（无校验，串行 await）', z, m);
+    record('1000 次同步写入', z, m);
 }
 
 // ----------------------------- 3. 1000 次写入（含必填校验） -----------------------------
@@ -134,18 +120,19 @@ async function bench_setWithValidate() {
     });
 
     const m = await bench(
-        'model-reaction setField + validator x1000',
+        'model-reaction setField + 手写校验 x1000',
         RUNS,
-        async () => {
-            const mm = createModel<{ v: string }>({
+        () => {
+            const mm = createModel<{ v: string; err: string }>({
                 v: {
                     type: 'string',
                     default: 'init',
-                    validator: [ValidationRules.required],
                 },
+                err: { type: 'string', default: '' },
             });
             for (let i = 0; i < N; i++) {
-                await mm.setField('v', i % 10 === 0 ? '' : 'v' + i);
+                const value = i % 10 === 0 ? '' : 'v' + i;
+                mm.setFields({ v: value, err: value.length === 0 ? 'required' : '' });
             }
             mm.dispose();
         }
@@ -186,7 +173,7 @@ async function bench_singleSubscribe() {
             const unsub = mm.subscribe((data) => data.a, () => {
                 count++;
             });
-            for (let i = 0; i < N; i++) await mm.setField('a', i);
+            for (let i = 0; i < N; i++) mm.setField('a', i);
             unsub();
             mm.dispose();
             if (count < N - 1) throw new Error('model count=' + count);
@@ -236,7 +223,7 @@ async function bench_isolation() {
             for (let i = 0; i < N; i++) {
                 unsubs.push(mm.subscribe((data) => data.a, () => {}));
             }
-            for (let i = 0; i < N; i++) await mm.setField('b', i);
+            for (let i = 0; i < N; i++) mm.setField('b', i);
             unsubs.forEach((u) => u());
             mm.dispose();
         }
@@ -289,7 +276,7 @@ async function bench_derived() {
                 },
             },
         });
-        for (let i = 0; i < N; i++) await mm.setField('qty', i);
+        for (let i = 0; i < N; i++) mm.setField('qty', i);
         mm.dispose();
     });
 

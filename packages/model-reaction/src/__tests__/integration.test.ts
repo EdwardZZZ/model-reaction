@@ -1,1542 +1,186 @@
-/**
- * integration.test.ts — 文档场景级集成测试
- *
- * 与本目录其他 `*.test.ts` 不同，本文件不对应任何单一 src 模块；它通过
- * 公共 API（`createModel` / `Rule` / `ValidationRules` / `ModelEvents` /
- * `formatValidationErrors`）端到端验证 README、ADVANCED、REACT 中的核心场景，
- * 确保文档中的用法与运行时行为保持一致。
- *
- * 覆盖范围：
- *   1.  README / ADVANCED 核心场景（同步 / 异步校验、自定义规则、类型化事件、
- *       transform、settled、setFields、首错校验、错误格式化）
- *   2.  Reaction 系统的 action 组、多字段 reaction、循环依赖
- *   3.  事件系统、dirty 数据生命周期、dispose 资源回收
- *   4.  端到端注册表单流程
- *   5.  各类边界场景：异步超时、校验器抛错、reaction 计算抛错、
- *       依赖字段缺失、相同值短路、空 schema、并发 setField 竞态、
- *       debounce 合并、validateAll 升级 dirtyData 等共 20+ edge case
- *
- * 加这一层是为了在重构内部模块时，让"文档承诺"成为不可妥协的回归基线。
- * 各模块的细粒度行为单测仍由 `model-manager.test.ts` /
- * `reaction-system.test.ts` / `rules.test.ts` 等承担。
- */
-import * as fs from 'fs';
-import * as path from 'path';
-import { createModel, ModelEvents } from '../index';
-import { formatValidationErrors, ValidationRules, Rule } from '../validation';
-import type { ModelReturn } from '../types';
+/** Public API scenarios shared by README, API, Advanced, and React recipes. */
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { createModel, ModelEvents, SKIP_REACTION } from '../index';
 
-const repoRoot = path.resolve(__dirname, '../..');
-const readProjectFile = (...segments: string[]) =>
-    fs.readFileSync(path.join(repoRoot, ...segments), 'utf8');
-
-describe('Integration Tests — Full Documentation Scenarios', () => {
-    beforeEach(() => {
-        jest.spyOn(console, 'error').mockImplementation(() => {});
-        jest.spyOn(console, 'log').mockImplementation(() => {});
+describe('Public documentation scenarios', () => {
+    test('synchronous batch writes derive a complete cart before returning', () => {
+        const model = createModel({
+            price: { type: 'number', default: 10 },
+            qty: { type: 'number', default: 1, transform: Number },
+            total: { type: 'number', reaction: {
+                fields: ['price', 'qty'], computed: ({ price, qty }) => price * qty,
+            } },
+        });
+        expect(model.data.total).toBe(10);
+        expect(model.setFields({ price: 20, qty: 3 })).toBeUndefined();
+        expect(model.data).toEqual({ price: 20, qty: 3, total: 60 });
+        model.dispose();
     });
 
-    afterEach(() => {
-        jest.restoreAllMocks();
+    test('a subscription can select a summary independently from unrelated fields', () => {
+        const model = createModel({
+            price: { type: 'number', default: 10 },
+            qty: { type: 'number', default: 1 },
+            note: { type: 'string', default: '' },
+        });
+        const changed = jest.fn();
+        const off = model.subscribe((data) => data.qty * data.price, changed);
+        model.setField('note', 'hello');
+        model.setField('qty', 2);
+        expect(changed).toHaveBeenCalledTimes(1);
+        expect(changed).toHaveBeenCalledWith(20, 10);
+        off();
+        model.setField('qty', 3);
+        expect(changed).toHaveBeenCalledTimes(1);
+        model.dispose();
     });
 
-    // =========================================================================
-    // 1. README — Synchronous Validation Example (Basic Usage)
-    // =========================================================================
-    describe('README: Synchronous Validation Example', () => {
-        interface User {
-            name: string;
-            age: number;
-            info: string;
+    test('business preflight keeps rejected candidates outside the model', () => {
+        const model = createModel({ budget: { type: 'number', default: 100 } });
+        const updateBudget = (budget: number): string | null => {
+            if (!Number.isFinite(budget) || budget < 100) return 'Budget must be at least 100';
+            model.setField('budget', budget);
+            return null;
+        };
+        expect(updateBudget(20)).toBe('Budget must be at least 100');
+        expect(model.data.budget).toBe(100);
+        expect(updateBudget(200)).toBeNull();
+        expect(model.data.budget).toBe(200);
+        model.dispose();
+    });
+
+    test('submission validates the settled business snapshot', async () => {
+        const model = createModel({
+            email: { type: 'string', default: '' },
+            normalized: { type: 'string', reaction: {
+                fields: ['email'], computed: ({ email }) => email.trim().toLowerCase(),
+            } },
+        });
+        model.setField('email', ' USER@example.com ');
+        await model.settled();
+        const snapshot = model.data;
+        const error = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(snapshot.normalized ?? '')
+            ? null : 'Invalid email';
+        expect(error).toBeNull();
+        expect(snapshot.normalized).toBe('user@example.com');
+        model.dispose();
+    });
+
+    test('actions read the completed chain and their returned work is tracked', async () => {
+        const seen: number[] = [];
+        const model = createModel({
+            source: { type: 'number', default: 2 },
+            doubled: { type: 'number', reaction: {
+                fields: ['source'], computed: ({ source }) => source * 2,
+                action: [
+                    async () => { await Promise.resolve(); seen.push(model.data.total!); },
+                    () => { seen.push(model.data.total!); },
+                ],
+            } },
+            total: { type: 'number', reaction: {
+                fields: ['doubled'], computed: ({ doubled }) => doubled + 1,
+            } },
+        });
+        expect(model.data.total).toBe(5);
+        expect(seen).toEqual([]);
+        await model.settled();
+        expect(seen).toEqual([5, 5]);
+        model.setField('source', 3);
+        expect(model.data.total).toBe(7);
+        await model.settled();
+        expect(seen).toEqual([5, 5, 7, 7]);
+        model.dispose();
+    });
+
+    test('action writeback recomputes dependencies before the next item', async () => {
+        const seen: number[] = [];
+        const model = createModel({
+            source: { type: 'number' },
+            input: { type: 'number', default: 0 },
+            derived: { type: 'number', reaction: {
+                fields: ['input'], computed: ({ input }) => input * 3,
+            } },
+            host: { type: 'number', reaction: {
+                fields: ['source'], computed: ({ source }) => source,
+                action: [
+                    () => { model.setField('input', 4); },
+                    () => { seen.push(model.data.derived!); },
+                ],
+            } },
+        });
+        await model.settled();
+        model.setField('source', 1);
+        await model.settled();
+        expect(seen).toEqual([12]);
+        model.dispose();
+    });
+
+    test('skip retains the last value and prevents action execution', async () => {
+        const action = jest.fn();
+        const model = createModel({
+            source: { type: 'number' },
+            target: { type: 'number', default: 10, reaction: {
+                fields: ['source'],
+                computed: ({ source }) => source < 0 ? SKIP_REACTION : source * 2,
+                action: [action],
+            } },
+        });
+        model.setField('source', -1);
+        await model.settled();
+        expect(model.data.target).toBe(10);
+        expect(action).not.toHaveBeenCalled();
+        model.setField('source', 2);
+        await model.settled();
+        expect(model.data.target).toBe(4);
+        expect(action).toHaveBeenCalledTimes(1);
+        model.dispose();
+    });
+
+    test('unknown batch keys are detected before transforms or commits', () => {
+        const transform = jest.fn((value) => value);
+        const model = createModel({ name: { type: 'string', default: '', transform } });
+        const missing = jest.fn();
+        model.on(ModelEvents.FIELD_NOT_FOUND, missing);
+        expect(() => model.setFields({ name: 'Ada', unknown: 1 } as any)).toThrow('unknown');
+        expect(transform).not.toHaveBeenCalled();
+        expect(model.data.name).toBe('');
+        expect(missing).toHaveBeenCalledWith(expect.objectContaining({ field: 'unknown' }));
+        model.dispose();
+    });
+
+    test('computed transform failures emit reaction errors and leave the host unchanged', async () => {
+        const action = jest.fn();
+        const model = createModel({
+            source: { type: 'number' },
+            target: { type: 'number', default: 0,
+                transform: () => { throw new Error('Cannot convert'); },
+                reaction: { fields: ['source'], computed: ({ source }) => source, action: [action] },
+            },
+        });
+        const errors = jest.fn();
+        model.on(ModelEvents.REACTION_ERROR, errors);
+        model.setField('source', 5);
+        await model.settled();
+        expect(model.data.source).toBe(5);
+        expect(model.data.target).toBe(0);
+        expect(errors).toHaveBeenCalledWith(expect.objectContaining({ message: 'Cannot convert' }));
+        expect(action).not.toHaveBeenCalled();
+        model.dispose();
+    });
+
+    test('public event constants contain only field and reaction diagnostics', () => {
+        expect(Object.values(ModelEvents).sort()).toEqual([
+            'dependency:error', 'field:change', 'field:not-found', 'reaction:error',
+        ]);
+    });
+
+    test('published package includes guidance, documentation, and runnable recipes', () => {
+        const root = resolve(__dirname, '../..');
+        const pkg = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8'));
+        expect(pkg.files).toEqual(expect.arrayContaining(['AGENTS.md', 'docs', 'examples']));
+        for (const file of ['README.md', 'README_CN.md']) {
+            expect(readFileSync(resolve(root, file), 'utf8')).toContain('AGENTS.md');
         }
-
-        let userModel: ModelReturn<User>;
-
-        beforeEach(() => {
-            userModel = createModel<User>({
-                name: {
-                    type: 'string',
-                    validator: [ValidationRules.required],
-                    default: '',
-                },
-                age: {
-                    type: 'number',
-                    validator: [
-                        ValidationRules.required,
-                        ValidationRules.number,
-                        ValidationRules.min(18)
-                    ],
-                    default: 18
-                },
-                info: {
-                    type: 'string',
-                    reaction: {
-                        fields: ['name', 'age'],
-                        computed: (values) => `My name is ${values.name} and I am ${values.age} years old.`,
-                        action: [() => console.log('Info updated:', userModel.data.info)]
-                    },
-                    default: ''
-                }
-            }, {
-                debounceReactions: 0,
-                asyncValidationTimeout: 5000
-            });
-        });
-
-        afterEach(() => {
-            userModel.dispose();
-        });
-
-        test('should initialize with default values', async () => {
-            // Defaults seed `data`, then an initial reaction pass runs, so the
-            // derived `info` is populated from the defaults (not left at its own
-            // empty default). Await settled() for the initial pass to complete.
-            await userModel.settled();
-            expect(userModel.getField('name')).toBe('');
-            expect(userModel.getField('age')).toBe(18);
-            expect(userModel.getField('info')).toBe(
-                'My name is  and I am 18 years old.'
-            );
-        });
-
-        test('should set fields and trigger reaction to compute info', async () => {
-            await userModel.setField('name', 'John');
-            await userModel.setField('age', 30);
-            await new Promise(r => setTimeout(r, 10));
-
-            expect(userModel.getField('name')).toBe('John');
-            expect(userModel.getField('age')).toBe(30);
-            expect(userModel.getField('info')).toBe('My name is John and I am 30 years old.');
-        });
-
-        test('should emit validation:error on invalid field', async () => {
-            const errorCb = jest.fn();
-            userModel.on('validation:error', errorCb);
-
-            await userModel.setField('name', '');
-            expect(errorCb).toHaveBeenCalled();
-            expect(errorCb.mock.calls[0][0].rule).toBe('required');
-        });
-
-        test('should emit field:not-found when setting a non-existent field', async () => {
-            const notFoundCb = jest.fn();
-            userModel.on('field:not-found', notFoundCb);
-
-            await expect(userModel.setField(
-                'nonexistentField' as unknown as keyof User,
-                'value' as never
-            )).rejects.toThrow('nonexistentField');
-
-            expect(notFoundCb).toHaveBeenCalled();
-            expect(notFoundCb.mock.calls[0][0].code).toBe('field_not_found');
-        });
-
-        test('should validate all fields and return summary', async () => {
-            await userModel.setField('name', 'John');
-            await userModel.setField('age', 30);
-
-            const isValid = await userModel.validateAll();
-            expect(isValid).toBe(true);
-            expect(formatValidationErrors(userModel.validationErrors)).toBe('Validation passed');
-        });
-
-        test('should track dirty data for invalid values', async () => {
-            await userModel.setField('age', 10);
-            expect(userModel.getDirtyData()).toHaveProperty('age', 10);
-
-            userModel.clearDirtyData();
-            expect(userModel.getDirtyData()).toEqual({});
-        });
-
-        test('should expose data snapshot via data getter', async () => {
-            await userModel.setField('name', 'Alice');
-            const snapshot = userModel.data;
-            expect(snapshot.name).toBe('Alice');
-            expect(snapshot.age).toBe(18);
-        });
-
-        test('should unsubscribe events via the returned function', async () => {
-            const changeCb = jest.fn();
-            const unsubscribe = userModel.on('field:change', changeCb);
-            unsubscribe();
-
-            await userModel.setField('name', 'Bob');
-            expect(changeCb).not.toHaveBeenCalled();
-        });
-    });
-
-    // =========================================================================
-    // 2. README — Asynchronous Validation Example
-    // =========================================================================
-    describe('README: Asynchronous Validation Example', () => {
-        interface AsyncUser {
-            name: string;
-            username: string;
-        }
-
-        let asyncUserModel: ModelReturn<AsyncUser>;
-
-        beforeEach(() => {
-            const asyncUniqueRule = new Rule(
-                'asyncUnique',
-                'Username already exists',
-                async (value: string): Promise<boolean> => {
-                    return new Promise<boolean>((resolve) => {
-                        setTimeout(() => {
-                            resolve(value !== 'admin');
-                        }, 50);
-                    });
-                }
-            );
-
-            asyncUserModel = createModel<AsyncUser>({
-                name: {
-                    type: 'string',
-                    validator: [ValidationRules.required.withMessage('Username cannot be empty')],
-                    default: '',
-                },
-                username: {
-                    type: 'string',
-                    validator: [
-                        ValidationRules.required.withMessage('Account cannot be empty'),
-                        asyncUniqueRule
-                    ],
-                    default: ''
-                }
-            }, {
-                asyncValidationTimeout: 3000
-            });
-        });
-
-        afterEach(() => {
-            asyncUserModel.dispose();
-        });
-
-        test('should pass async validation for new username', async () => {
-            const result = await asyncUserModel.setField('username', 'newuser');
-            expect(result).toBe(true);
-            expect(asyncUserModel.getField('username')).toBe('newuser');
-        });
-
-        test('should fail async validation for existing username "admin"', async () => {
-            const result = await asyncUserModel.setField('username', 'admin');
-            expect(result).toBe(false);
-            expect(asyncUserModel.validationErrors.username).toBeDefined();
-            expect(asyncUserModel.validationErrors.username![0]!.message).toBe('Username already exists');
-        });
-
-        test('should store invalid username in dirty data', async () => {
-            await asyncUserModel.setField('username', 'admin');
-            expect(asyncUserModel.getDirtyData()).toHaveProperty('username', 'admin');
-        });
-
-        test('should use withMessage to customise error text', async () => {
-            await asyncUserModel.setField('name', '');
-            expect(asyncUserModel.validationErrors.name![0]!.message).toBe('Username cannot be empty');
-        });
-    });
-
-    // =========================================================================
-    // 3. README — Custom Validation Rules and Messages
-    // =========================================================================
-    describe('README: Custom Validation Rules and Messages', () => {
-        test('should validate with custom rule and withMessage', async () => {
-            const customRule = new Rule(
-                'custom',
-                'Does not meet custom rules',
-                (value: any) => value === 'custom'
-            );
-
-            const model = createModel({
-                field: {
-                    type: 'string',
-                    validator: [customRule.withMessage('Field value must be "custom"')],
-                    default: ''
-                }
-            });
-
-            const resultBad = await model.setField('field', 'wrong');
-            expect(resultBad).toBe(false);
-            expect(model.validationErrors.field![0]!.message).toBe('Field value must be "custom"');
-
-            const resultOk = await model.setField('field', 'custom');
-            expect(resultOk).toBe(true);
-            expect(model.getField('field')).toBe('custom');
-
-            model.dispose();
-        });
-    });
-
-    // =========================================================================
-    // 4. README — Typed model events
-    // =========================================================================
-    describe('README: Typed Model Events', () => {
-        test('should route errors through model events', async () => {
-            const validationCb = jest.fn();
-            const fieldNotFoundCb = jest.fn();
-
-            const model = createModel({
-                name: {
-                    type: 'string',
-                    validator: [ValidationRules.required.withMessage('Name cannot be empty')],
-                    default: ''
-                }
-            });
-            model.on(ModelEvents.VALIDATION_ERROR, validationCb);
-            model.on(ModelEvents.FIELD_NOT_FOUND, fieldNotFoundCb);
-
-            await model.setField('name', '');
-            expect(validationCb).toHaveBeenCalled();
-            expect(validationCb.mock.calls[0][0].field).toBe('name');
-
-            // @ts-expect-error — testing non-existent field
-            await expect(model.setField('missing', 'x')).rejects.toThrow('missing');
-            expect(fieldNotFoundCb).toHaveBeenCalled();
-
-            model.dispose();
-        });
-
-        test('should unsubscribe error listeners', async () => {
-            const cb = jest.fn();
-
-            const model = createModel({
-                name: { type: 'string', validator: [ValidationRules.required], default: '' }
-            });
-            const unsubscribe = model.on(ModelEvents.VALIDATION_ERROR, cb);
-            unsubscribe();
-
-            await model.setField('name', '');
-            expect(cb).not.toHaveBeenCalled();
-
-            model.dispose();
-        });
-    });
-
-    // =========================================================================
-    // 5. README — Transformation and Asynchronous Validation
-    // =========================================================================
-    describe('README: Transformation and Asynchronous Validation', () => {
-        test('should transform value and then validate asynchronously', async () => {
-            const asyncModel = createModel({
-                field: {
-                    type: 'string',
-                    transform: (value: string) => value.toUpperCase(),
-                    validator: [
-                        new Rule(
-                            'asyncValidator',
-                            'Asynchronous validation failed',
-                            async (value: string) => value.length > 3
-                        ).withMessage('Field length must be greater than 3 characters')
-                    ],
-                    default: ''
-                }
-            });
-
-            const resultOk = await asyncModel.setField('field', 'hello');
-            expect(resultOk).toBe(true);
-            expect(asyncModel.getField('field')).toBe('HELLO');
-
-            const resultBad = await asyncModel.setField('field', 'hi');
-            expect(resultBad).toBe(false);
-            expect(asyncModel.validationErrors.field![0]!.message).toBe('Field length must be greater than 3 characters');
-
-            asyncModel.dispose();
-        });
-    });
-
-    // =========================================================================
-    // 6. README — Waiting for Async Operations (settled)
-    // =========================================================================
-    describe('README: Waiting for Async Operations (settled)', () => {
-        test('should use settled() to wait for debounced reactions', async () => {
-            interface Schema {
-                source: string;
-                target: string;
-            }
-            const model = createModel<Schema>({
-                source: { type: 'string', default: '' },
-                target: {
-                    type: 'string',
-                    default: '',
-                    reaction: {
-                        fields: ['source'],
-                        computed: (vals) => vals.source.toUpperCase()
-                    }
-                }
-            }, { debounceReactions: 100 });
-
-            await model.setField('source', 'hello');
-            expect(model.getField('target')).toBe('');
-
-            await model.settled();
-            expect(model.getField('target')).toBe('HELLO');
-
-            model.dispose();
-        });
-    });
-
-    // =========================================================================
-    // 7. README — Batch Operations (setFields)
-    // =========================================================================
-    describe('README: Batch Operations (setFields)', () => {
-        interface Form {
-            name: string;
-            age: number;
-            email: string;
-        }
-
-        test('should batch set multiple fields and return combined validation result', async () => {
-            const model = createModel<Form>({
-                name: {
-                    type: 'string',
-                    validator: [ValidationRules.required],
-                    default: ''
-                },
-                age: {
-                    type: 'number',
-                    validator: [ValidationRules.required, ValidationRules.number, ValidationRules.min(18)],
-                    default: 18
-                },
-                email: {
-                    type: 'string',
-                    validator: [ValidationRules.required, ValidationRules.email],
-                    default: ''
-                }
-            });
-
-            const result = await model.setFields({
-                name: 'Alice',
-                age: 25,
-                email: 'alice@example.com'
-            });
-
-            expect(result).toBe(true);
-            expect(model.getField('name')).toBe('Alice');
-            expect(model.getField('age')).toBe(25);
-            expect(model.getField('email')).toBe('alice@example.com');
-
-            model.dispose();
-        });
-
-        test('should return false when any batch field fails validation', async () => {
-            const model = createModel<Form>({
-                name: {
-                    type: 'string',
-                    validator: [ValidationRules.required],
-                    default: ''
-                },
-                age: {
-                    type: 'number',
-                    validator: [ValidationRules.required, ValidationRules.number, ValidationRules.min(18)],
-                    default: 18
-                },
-                email: {
-                    type: 'string',
-                    validator: [ValidationRules.required, ValidationRules.email],
-                    default: ''
-                }
-            });
-
-            const result = await model.setFields({
-                name: 'Bob',
-                age: 10,
-                email: 'invalid-email'
-            });
-
-            expect(result).toBe(false);
-            expect(model.getField('name')).toBe('Bob');
-            expect(model.getDirtyData()).toHaveProperty('age', 10);
-            expect(model.getDirtyData()).toHaveProperty('email', 'invalid-email');
-
-            model.dispose();
-        });
-    });
-
-    // =========================================================================
-    // 8. README — formatValidationErrors
-    // =========================================================================
-    describe('README: Custom validation error formatter', () => {
-        test('should format validation errors independently', async () => {
-            const model = createModel({
-                field: {
-                    type: 'string',
-                    validator: [ValidationRules.required],
-                    default: ''
-                }
-            });
-
-            await model.setField('field', '');
-            expect(formatValidationErrors(
-                model.validationErrors,
-                (error) => `[${error.field}] ${error.message}`
-            )).toBe('[field] This field is required');
-
-            model.dispose();
-        });
-    });
-
-    // =========================================================================
-    // 9. README — first-error validation
-    // =========================================================================
-    describe('README: first-error validation strategy', () => {
-        test('should stop after first error', async () => {
-            const model = createModel({
-                field: {
-                    type: 'string',
-                    validator: [
-                        ValidationRules.required.withMessage('Required'),
-                        new Rule('len', 'Too short', () => false),
-                        new Rule('fmt', 'Bad format', () => false)
-                    ],
-                    default: ''
-                }
-            });
-
-            await model.setField('field', '');
-            expect(model.validationErrors.field).toHaveLength(1);
-            expect(model.validationErrors.field![0]!.message).toBe('Required');
-
-            model.dispose();
-        });
-
-        test('should expose only the first error for a field', async () => {
-            const model = createModel({
-                field: {
-                    type: 'string',
-                    validator: [
-                        ValidationRules.required.withMessage('Required'),
-                        new Rule('len', 'Too short', () => false),
-                        new Rule('fmt', 'Bad format', () => false)
-                    ],
-                    default: ''
-                }
-            });
-
-            await model.setField('field', '');
-            expect(model.validationErrors.field).toHaveLength(1);
-
-            model.dispose();
-        });
-    });
-
-    // =========================================================================
-    // 10. Reaction System — action callback
-    // =========================================================================
-    describe('Reaction System: action callback', () => {
-        test('should call action without arguments and read committed model values', async () => {
-            const actionSpy = jest.fn(() => {
-                observed.push(model.data.fullName);
-            });
-            const observed: string[] = [];
-
-            interface Schema {
-                firstName: string;
-                lastName: string;
-                fullName: string;
-            }
-
-            const model = createModel<Schema>({
-                firstName: { type: 'string', default: '' },
-                lastName: { type: 'string', default: '' },
-                fullName: {
-                    type: 'string',
-                    default: '',
-                    reaction: {
-                        fields: ['firstName', 'lastName'],
-                        computed: (vals) => `${vals.firstName} ${vals.lastName}`.trim(),
-                        action: [actionSpy]
-                    }
-                }
-            });
-
-            await model.setField('firstName', 'Jane');
-            await model.setField('lastName', 'Doe');
-            await new Promise(r => setTimeout(r, 10));
-
-            expect(actionSpy).toHaveBeenCalled();
-            expect(actionSpy).toHaveBeenCalledWith();
-            expect(observed[observed.length - 1]).toBe('Jane Doe');
-
-            model.dispose();
-        });
-    });
-
-    // =========================================================================
-    // 11. Reaction System — multiple reactions on different fields
-    // =========================================================================
-    describe('Reaction System: multiple reactions', () => {
-        test('should support multiple fields with independent reactions', async () => {
-            interface Schema {
-                price: number;
-                quantity: number;
-                total: number;
-                label: string;
-            }
-
-            const model = createModel<Schema>({
-                price: { type: 'number', default: 0 },
-                quantity: { type: 'number', default: 0 },
-                total: {
-                    type: 'number',
-                    default: 0,
-                    reaction: {
-                        fields: ['price', 'quantity'],
-                        computed: (vals) => vals.price * vals.quantity
-                    }
-                },
-                label: {
-                    type: 'string',
-                    default: '',
-                    reaction: {
-                        fields: ['price'],
-                        computed: (vals) => vals.price > 100 ? 'expensive' : 'affordable'
-                    }
-                }
-            });
-
-            await model.setField('price', 150);
-            await model.setField('quantity', 3);
-            await new Promise(r => setTimeout(r, 10));
-
-            expect(model.getField('total')).toBe(450);
-            expect(model.getField('label')).toBe('expensive');
-
-            model.dispose();
-        });
-    });
-
-    // =========================================================================
-    // 12. Reaction System — circular dependency detection
-    // =========================================================================
-    describe('Reaction System: circular dependency detection', () => {
-        test('should detect circular dependency and emit reaction:error', async () => {
-            const reactionErrorCb = jest.fn();
-
-            interface Schema {
-                a: number;
-                b: number;
-            }
-
-            const model = createModel<Schema>({
-                a: {
-                    type: 'number',
-                    default: 0,
-                    reaction: { fields: ['b'], computed: (v) => v.b + 1 }
-                },
-                b: {
-                    type: 'number',
-                    default: 0,
-                    reaction: { fields: ['a'], computed: (v) => v.a + 1 }
-                }
-            });
-
-            model.on('reaction:error', reactionErrorCb);
-            await model.setField('a', 1);
-            await new Promise(r => setTimeout(r, 10));
-
-            expect(reactionErrorCb).toHaveBeenCalled();
-            const errorArg = reactionErrorCb.mock.calls.find(
-                (call: any[]) => call[0].code === 'circular_dependency'
-            );
-            expect(errorArg).toBeDefined();
-
-            model.dispose();
-        });
-    });
-
-    // =========================================================================
-    // 13. Event System — field:change, validation:complete
-    // =========================================================================
-    describe('Event System: field:change and validation:complete', () => {
-        test('should emit field:change on valid field update', async () => {
-            const changeCb = jest.fn();
-
-            const model = createModel({
-                name: { type: 'string', default: '' }
-            });
-
-            model.on('field:change', changeCb);
-            await model.setField('name', 'Alice');
-
-            expect(changeCb).toHaveBeenCalledWith({ field: 'name', value: 'Alice' });
-
-            model.dispose();
-        });
-
-        test('should emit validation:complete after validateAll', async () => {
-            const completeCb = jest.fn();
-
-            const model = createModel({
-                name: {
-                    type: 'string',
-                    validator: [ValidationRules.required],
-                    default: 'Valid'
-                }
-            });
-
-            model.on('validation:complete', completeCb);
-            const result = await model.validateAll();
-
-            expect(result).toBe(true);
-            expect(completeCb).toHaveBeenCalledWith({ isValid: true });
-
-            model.dispose();
-        });
-    });
-
-    // =========================================================================
-    // 14. Dirty Data Management — full lifecycle
-    // =========================================================================
-    describe('Dirty Data Management: full lifecycle', () => {
-        test('should track dirty data → validateAll → promote to data on success', async () => {
-            let shouldPass = false;
-
-            const model = createModel({
-                field: {
-                    type: 'string',
-                    validator: [{
-                        type: 'toggle',
-                        message: 'fail',
-                        validate: () => shouldPass
-                    }],
-                    default: 'initial'
-                }
-            });
-
-            await model.setField('field', 'attempt');
-            expect(model.getDirtyData()).toHaveProperty('field', 'attempt');
-            expect(model.getField('field')).toBe('initial');
-
-            shouldPass = true;
-            const isValid = await model.validateAll();
-            expect(isValid).toBe(true);
-            expect(model.getField('field')).toBe('attempt');
-            expect(model.getDirtyData()).toEqual({});
-
-            model.dispose();
-        });
-    });
-
-    // =========================================================================
-    // 15. dispose() — resource cleanup
-    // =========================================================================
-    describe('dispose: resource cleanup', () => {
-        test('should clear data, dirtyData, validationErrors and stop reactions', async () => {
-            const model = createModel({
-                field: { type: 'string', default: 'value' }
-            });
-
-            await model.setField('field', 'updated');
-            model.dispose();
-
-            expect(model.data).toEqual({});
-            expect(model.validationErrors).toEqual({});
-            expect(model.getDirtyData()).toEqual({});
-        });
-    });
-
-    // =========================================================================
-    // 16. End-to-end: complete form submission flow
-    //     (docs/ADVANCED.md#testing-application-models)
-    // =========================================================================
-    describe('End-to-End: Complete form submission flow', () => {
-        interface RegistrationForm {
-            username: string;
-            email: string;
-            age: number;
-            bio: string;
-        }
-
-        test('should validate, compute reactions, and report final state', async () => {
-            const asyncEmailRule = new Rule(
-                'asyncEmail',
-                'Email is taken',
-                async (v: string) => {
-                    await new Promise(r => setTimeout(r, 30));
-                    return v !== 'taken@test.com';
-                }
-            );
-
-            const model = createModel<RegistrationForm>({
-                username: {
-                    type: 'string',
-                    validator: [ValidationRules.required.withMessage('Username required')],
-                    default: ''
-                },
-                email: {
-                    type: 'string',
-                    validator: [
-                        ValidationRules.required.withMessage('Email required'),
-                        ValidationRules.email.withMessage('Invalid email'),
-                        asyncEmailRule
-                    ],
-                    default: ''
-                },
-                age: {
-                    type: 'number',
-                    validator: [
-                        ValidationRules.required,
-                        ValidationRules.number,
-                        ValidationRules.min(13).withMessage('Must be at least 13')
-                    ],
-                    default: 0
-                },
-                bio: {
-                    type: 'string',
-                    default: '',
-                    reaction: {
-                        fields: ['username', 'age'],
-                        computed: (vals) =>
-                            vals.username ? `${vals.username}, age ${vals.age}` : ''
-                    }
-                }
-            });
-
-            const allEvents: string[] = [];
-            model.on('field:change', () => allEvents.push('field:change'));
-            model.on('validation:error', () => allEvents.push('validation:error'));
-            model.on('validation:complete', () => allEvents.push('validation:complete'));
-
-            await model.setFields({
-                username: 'alice',
-                email: 'alice@example.com',
-                age: 25
-            });
-            await new Promise(r => setTimeout(r, 50));
-
-            expect(model.getField('username')).toBe('alice');
-            expect(model.getField('email')).toBe('alice@example.com');
-            expect(model.getField('age')).toBe(25);
-            expect(model.getField('bio')).toBe('alice, age 25');
-
-            const isValid = await model.validateAll();
-            expect(isValid).toBe(true);
-            expect(formatValidationErrors(model.validationErrors)).toBe('Validation passed');
-            expect(allEvents).toContain('field:change');
-            expect(allEvents).toContain('validation:complete');
-
-            await model.setField('age', 5);
-            expect(model.getDirtyData()).toHaveProperty('age', 5);
-            expect(formatValidationErrors(model.validationErrors)).toContain('Must be at least 13');
-
-            await model.setField('email', 'taken@test.com');
-            expect(model.getDirtyData()).toHaveProperty('email', 'taken@test.com');
-            expect(model.validationErrors.email![0]!.message).toBe('Email is taken');
-
-            model.dispose();
-        });
-    });
-
-    // =========================================================================
-    // 17. ModelEvents constants
-    // =========================================================================
-    describe('ModelEvents', () => {
-        test('should contain all documented event names', () => {
-            expect(ModelEvents.VALIDATION_ERROR).toBe('validation:error');
-            expect(ModelEvents.REACTION_ERROR).toBe('reaction:error');
-            expect(ModelEvents.DEPENDENCY_ERROR).toBe('dependency:error');
-            expect(ModelEvents.FIELD_NOT_FOUND).toBe('field:not-found');
-        });
-    });
-
-    // =========================================================================
-    // 18. Built-in ValidationRules completeness
-    // =========================================================================
-    describe('Built-in ValidationRules', () => {
-        test('ValidationRules.required', async () => {
-            const model = createModel({ f: { type: 'string', validator: [ValidationRules.required], default: '' } });
-            expect(await model.setField('f', '')).toBe(false);
-            expect(await model.setField('f', 'ok')).toBe(true);
-            model.dispose();
-        });
-
-        test('ValidationRules.number', async () => {
-            const model = createModel({ f: { type: 'number', validator: [ValidationRules.number] } });
-            expect(await model.setField('f', 'text' as any)).toBe(false);
-            expect(await model.setField('f', 42)).toBe(true);
-            model.dispose();
-        });
-
-        test('ValidationRules.min', async () => {
-            const model = createModel({ f: { type: 'number', validator: [ValidationRules.min(10)], default: 0 } });
-            expect(await model.setField('f', 5)).toBe(false);
-            expect(await model.setField('f', 10)).toBe(true);
-            model.dispose();
-        });
-
-        test('ValidationRules.email', async () => {
-            const model = createModel({ f: { type: 'string', validator: [ValidationRules.email], default: '' } });
-            expect(await model.setField('f', 'bad')).toBe(false);
-            expect(await model.setField('f', 'a@b.com')).toBe(true);
-            model.dispose();
-        });
-    });
-
-    // =========================================================================
-    // 20. One reaction with multiple actions
-    // =========================================================================
-    describe('FieldSchema.reaction', () => {
-        test('should support multiple actions on one computation', async () => {
-            const actionSpy = jest.fn();
-
-            interface Schema {
-                input: string;
-                output: string;
-            }
-
-            const model = createModel<Schema>({
-                input: { type: 'string', default: '' },
-                output: {
-                    type: 'string',
-                    default: '',
-                    reaction: {
-                        fields: ['input'],
-                        computed: (vals) => vals.input.toUpperCase(),
-                        action: [actionSpy, actionSpy]
-                    }
-                }
-            });
-
-            await model.setField('input', 'test');
-            await new Promise(r => setTimeout(r, 10));
-
-            expect(model.getField('output')).toBe('TEST');
-            expect(actionSpy).toHaveBeenCalled();
-
-            model.dispose();
-        });
-    });
-
-    // =========================================================================
-    // 21. 异步校验超时
-    // =========================================================================
-    describe('Edge: Async validation timeout', () => {
-        test('should reject and record error when async validator exceeds timeout', async () => {
-            const slowRule = new Rule(
-                'slow',
-                'Too slow',
-                () => new Promise<boolean>(resolve => setTimeout(() => resolve(true), 500))
-            );
-
-            const model = createModel({
-                field: {
-                    type: 'string',
-                    validator: [slowRule],
-                    default: ''
-                }
-            }, { asyncValidationTimeout: 50 });
-
-            const result = await model.setField('field', 'value');
-            expect(result).toBe(false);
-            expect(model.validationErrors.field!.length).toBeGreaterThan(0);
-            expect(model.validationErrors.field![0]!.message).toContain('Validation failed');
-
-            model.dispose();
-        });
-    });
-
-    // =========================================================================
-    // 22. 校验器抛出异常（同步）
-    // =========================================================================
-    describe('Edge: Validator throws synchronous exception', () => {
-        test('should catch thrown error and record as validation failure', async () => {
-            const throwingRule = new Rule(
-                'throws',
-                'Should not see this',
-                () => { throw new Error('Unexpected crash'); }
-            );
-
-            const model = createModel({
-                field: {
-                    type: 'string',
-                    validator: [throwingRule],
-                    default: ''
-                }
-            });
-
-            const result = await model.setField('field', 'any');
-            expect(result).toBe(false);
-            expect(model.validationErrors.field![0]!.message).toContain('Unexpected crash');
-
-            model.dispose();
-        });
-    });
-
-    // =========================================================================
-    // 23. 校验器抛出异常（异步 reject）
-    // =========================================================================
-    describe('Edge: Validator rejects with async error', () => {
-        test('should catch rejected promise and record as validation failure', async () => {
-            const rejectRule = new Rule(
-                'rejects',
-                'Not used',
-                async () => { throw new Error('Async boom'); }
-            );
-
-            const model = createModel({
-                field: {
-                    type: 'string',
-                    validator: [rejectRule],
-                    default: ''
-                }
-            });
-
-            const result = await model.setField('field', 'any');
-            expect(result).toBe(false);
-            expect(model.validationErrors.field![0]!.message).toContain('Async boom');
-
-            model.dispose();
-        });
-    });
-
-    // =========================================================================
-    // 24. Reaction computed 抛出异常
-    // =========================================================================
-    describe('Edge: Reaction computed throws', () => {
-        test('should emit reaction:error when computed function throws', async () => {
-            const reactionErrorCb = jest.fn();
-
-            const model = createModel({
-                input: { type: 'string', default: '' },
-                output: {
-                    type: 'string',
-                    default: '',
-                    reaction: {
-                        fields: ['input'],
-                        computed: () => { throw new Error('compute exploded'); }
-                    }
-                }
-            });
-
-            model.on('reaction:error', reactionErrorCb);
-            await model.setField('input', 'trigger');
-            await new Promise(r => setTimeout(r, 10));
-
-            expect(reactionErrorCb).toHaveBeenCalled();
-            expect(reactionErrorCb.mock.calls[0][0].code).toBe('reaction_error');
-
-            model.dispose();
-        });
-    });
-
-    // =========================================================================
-    // 25. Reaction 依赖字段不存在 (DEPENDENCY_ERROR)
-    // =========================================================================
-    describe('Edge: Reaction dependency field not defined', () => {
-        test('should trigger DEPENDENCY_ERROR when reaction depends on missing field', async () => {
-            const depErrorCb = jest.fn();
-
-            const model = createModel({
-                input: { type: 'string', default: '' },
-                output: {
-                    type: 'string',
-                    default: '',
-                    reaction: {
-                        fields: ['input', 'ghost'],
-                        computed: (vals) => String(vals.ghost)
-                    }
-                }
-            });
-            model.on(ModelEvents.DEPENDENCY_ERROR, depErrorCb);
-
-            await model.setField('input', 'x');
-            await new Promise(r => setTimeout(r, 10));
-            expect(depErrorCb).toHaveBeenCalledWith(
-                expect.objectContaining({ code: 'dependency_error' })
-            );
-
-            model.dispose();
-        });
-    });
-
-    // =========================================================================
-    // 26. 相同值不触发 field:change 和 reaction
-    // =========================================================================
-    describe('Edge: Setting same value skips change and reactions', () => {
-        test('should not emit field:change or re-trigger reaction when value is unchanged', async () => {
-            const changeCb = jest.fn();
-            const actionSpy = jest.fn();
-
-            interface Schema {
-                input: string;
-                output: string;
-            }
-
-            const model = createModel<Schema>({
-                input: { type: 'string', default: '' },
-                output: {
-                    type: 'string',
-                    default: '',
-                    reaction: {
-                        fields: ['input'],
-                        computed: (vals) => vals.input.toUpperCase(),
-                        action: [actionSpy]
-                    }
-                }
-            });
-
-            model.on('field:change', changeCb);
-
-            await model.setField('input', 'hello');
-            await new Promise(r => setTimeout(r, 10));
-
-            const changeCount = changeCb.mock.calls.length;
-            const actionCount = actionSpy.mock.calls.length;
-
-            await model.setField('input', 'hello');
-            await new Promise(r => setTimeout(r, 10));
-
-            expect(changeCb.mock.calls.length).toBe(changeCount);
-            expect(actionSpy.mock.calls.length).toBe(actionCount);
-
-            model.dispose();
-        });
-    });
-
-    // =========================================================================
-    // 27. 无 validator 字段始终校验通过
-    // =========================================================================
-    describe('Edge: Field without validator always passes', () => {
-        test('should always return true for fields with no validator', async () => {
-            const model = createModel({
-                open: { type: 'string', default: '' }
-            });
-
-            expect(await model.setField('open', 'anything')).toBe(true);
-            expect(await model.setField('open', '')).toBe(true);
-            expect(model.validationErrors.open || []).toHaveLength(0);
-
-            model.dispose();
-        });
-    });
-
-    // =========================================================================
-    // 28. 无 default 值的字段初始化
-    // =========================================================================
-    describe('Edge: Field without default value', () => {
-        test('should have undefined initial value when no default is specified', () => {
-            const model = createModel({
-                field: { type: 'number', validator: [ValidationRules.number] }
-            });
-
-            expect(model.getField('field')).toBeUndefined();
-
-            model.dispose();
-        });
-    });
-
-    // =========================================================================
-    // 29. validateAll 在全部字段校验失败时
-    // =========================================================================
-    describe('Edge: validateAll when all fields are invalid', () => {
-        test('should return false and emit validation:complete with isValid false', async () => {
-            const completeCb = jest.fn();
-
-            const model = createModel({
-                a: { type: 'string', validator: [ValidationRules.required], default: '' },
-                b: { type: 'string', validator: [ValidationRules.required], default: '' }
-            });
-
-            model.on('validation:complete', completeCb);
-            const result = await model.validateAll();
-
-            expect(result).toBe(false);
-            expect(completeCb).toHaveBeenCalledWith({ isValid: false });
-            expect(model.validationErrors.a!.length).toBeGreaterThan(0);
-            expect(model.validationErrors.b!.length).toBeGreaterThan(0);
-
-            model.dispose();
-        });
-    });
-
-    // =========================================================================
-    // 30. formatValidationErrors 多字段多错误聚合
-    // =========================================================================
-    describe('Edge: formatValidationErrors with multiple field errors', () => {
-        test('should concatenate all errors with semicolons', async () => {
-            const model = createModel({
-                a: { type: 'string', validator: [ValidationRules.required.withMessage('A required')], default: '' },
-                b: { type: 'string', validator: [ValidationRules.required.withMessage('B required')], default: '' }
-            });
-
-            await model.setField('a', '');
-            await model.setField('b', '');
-
-            const summary = formatValidationErrors(model.validationErrors);
-            expect(summary).toContain('A required');
-            expect(summary).toContain('B required');
-            expect(summary).toContain('; ');
-
-            model.dispose();
-        });
-    });
-
-    // =========================================================================
-    // 31. 每个取消订阅函数只清除对应监听器
-    // =========================================================================
-    describe('Edge: independent event unsubscribe functions', () => {
-        test('should remove only the selected field:change listener', async () => {
-            const cb1 = jest.fn();
-            const cb2 = jest.fn();
-
-            const model = createModel({
-                name: { type: 'string', default: '' }
-            });
-
-            const unsubscribe1 = model.on('field:change', cb1);
-            model.on('field:change', cb2);
-            unsubscribe1();
-
-            await model.setField('name', 'test');
-
-            expect(cb1).not.toHaveBeenCalled();
-            expect(cb2).toHaveBeenCalled();
-
-            model.dispose();
-        });
-    });
-
-    // =========================================================================
-    // 32. setFields 包含不存在的字段
-    // =========================================================================
-    describe('Edge: setFields with non-existent field key', () => {
-        test('should reject before committing and emit field:not-found for unknown key', async () => {
-            const notFoundCb = jest.fn();
-
-            interface Schema {
-                name: string;
-            }
-
-            const model = createModel<Schema>({
-                name: { type: 'string', default: '' }
-            });
-
-            model.on('field:not-found', notFoundCb);
-
-            // @ts-expect-error — testing runtime behaviour
-            await expect(model.setFields({ name: 'ok', ghost: 'nope' })).rejects.toThrow('ghost');
-
-            expect(model.data.name).toBe('');
-            expect(notFoundCb).toHaveBeenCalled();
-
-            model.dispose();
-        });
-    });
-
-    // =========================================================================
-    // 33. transform 在校验之前执行
-    // =========================================================================
-    describe('Edge: transform is applied before validation', () => {
-        test('should validate the transformed value, not the original', async () => {
-            const model = createModel({
-                field: {
-                    type: 'string',
-                    transform: (v: string) => v.trim(),
-                    validator: [ValidationRules.required],
-                    default: ''
-                }
-            });
-
-            const resultSpaces = await model.setField('field', '   ');
-            expect(resultSpaces).toBe(false);
-
-            const resultPadded = await model.setField('field', '  hello  ');
-            expect(resultPadded).toBe(true);
-            expect(model.getField('field')).toBe('hello');
-
-            model.dispose();
-        });
-    });
-
-    // =========================================================================
-    // 34. dispose 后操作的安全性
-    // =========================================================================
-    describe('Edge: Operations after dispose', () => {
-        test('should handle operations gracefully after dispose', async () => {
-            const model = createModel({
-                field: { type: 'string', default: 'initial' }
-            });
-
-            model.dispose();
-
-            expect(model.data).toEqual({});
-            expect(model.getField('field')).toBeUndefined();
-            expect(model.getDirtyData()).toEqual({});
-            expect(formatValidationErrors(model.validationErrors)).toBe('Validation passed');
-        });
-    });
-
-    // =========================================================================
-    // 35. 快速连续 setField（竞态条件）
-    // =========================================================================
-    describe('Edge: Rapid consecutive setField (race condition)', () => {
-        test('should use the last setField result for async validation', async () => {
-            const resolvers: Array<(v: boolean) => void> = [];
-            const asyncRule = new Rule(
-                'async',
-                'Failed',
-                () => new Promise<boolean>(resolve => { resolvers.push(resolve); })
-            );
-
-            const model = createModel({
-                field: {
-                    type: 'string',
-                    validator: [asyncRule],
-                    default: ''
-                }
-            });
-
-            const p1 = model.setField('field', 'first');
-            const p2 = model.setField('field', 'second');
-
-            resolvers[1]!(true);
-            resolvers[0]!(true);
-
-            const r1 = await p1;
-            const r2 = await p2;
-
-            expect(r1).toBe(false);
-            expect(r2).toBe(true);
-            expect(model.getField('field')).toBe('second');
-
-            model.dispose();
-        });
-    });
-
-    // =========================================================================
-    // 36. reaction debounce 合并多次触发
-    // =========================================================================
-    describe('Edge: Debounced reactions coalesce multiple triggers', () => {
-        test('should only fire reaction once for rapid sequential changes', async () => {
-            const actionSpy = jest.fn();
-
-            interface Schema {
-                input: string;
-                output: string;
-            }
-
-            const model = createModel<Schema>({
-                input: { type: 'string', default: '' },
-                output: {
-                    type: 'string',
-                    default: '',
-                    reaction: {
-                        fields: ['input'],
-                        computed: (vals) => vals.input.toUpperCase(),
-                        action: [actionSpy]
-                    }
-                }
-            }, { debounceReactions: 100 });
-
-            await model.setField('input', 'a');
-            await model.setField('input', 'b');
-            await model.setField('input', 'c');
-
-            expect(actionSpy).not.toHaveBeenCalled();
-
-            await model.settled();
-
-            expect(actionSpy).toHaveBeenCalledTimes(1);
-            expect(model.getField('output')).toBe('C');
-
-            model.dispose();
-        });
-    });
-
-    // =========================================================================
-    // 37. validateAll 将 dirtyData 晋升到 data 并触发 reaction
-    // =========================================================================
-    describe('Edge: validateAll promotes dirtyData and triggers reactions', () => {
-        test('submits promoted dirty fields and settled derived data with two calls', async () => {
-            interface Schema {
-                input: string;
-                mirror: string;
-            }
-
-            let allowNew = false;
-            const save = jest.fn();
-            const model = createModel<Schema>({
-                input: {
-                    type: 'string',
-                    validator: [
-                        ValidationRules.required,
-                        new Rule('allowed', 'not yet', (value) => value !== 'new' || allowNew),
-                    ],
-                    default: 'old'
-                },
-                mirror: {
-                    type: 'string',
-                    default: '',
-                    reaction: {
-                        fields: ['input'],
-                        computed: (vals) => `mirror:${vals.input}`
-                    }
-                }
-            }, { debounceReactions: 16 });
-
-            await model.setField('input', 'new');
-            expect(model.getDirtyData()).toHaveProperty('input', 'new');
-            expect(model.getField('input')).toBe('old');
-
-            allowNew = true;
-            await model.settled();
-            const valid = await model.validateAll();
-            if (valid) save(model.data);
-            expect(valid).toBe(true);
-            expect(save).toHaveBeenCalledWith({ input: 'new', mirror: 'mirror:new' });
-            expect(model.getDirtyData()).toEqual({});
-
-            model.dispose();
-        });
-    });
-
-    // =========================================================================
-    // 38. 自定义格式化多个字段错误
-    // =========================================================================
-    describe('Edge: custom formatter with multiple field errors', () => {
-        test('should format each error independently and join with semicolons', async () => {
-            const model = createModel({
-                a: { type: 'string', validator: [ValidationRules.required], default: '' },
-                b: { type: 'number', validator: [ValidationRules.min(10)], default: 0 }
-            });
-
-            await model.setField('a', '');
-            await model.setField('b', 5);
-
-            const summary = formatValidationErrors(
-                model.validationErrors,
-                (error) => `Error ${error.field}:${error.rule}`
-            );
-            expect(summary).toContain('Error a:required');
-            expect(summary).toContain('Error b:min');
-
-            model.dispose();
-        });
-    });
-
-    // =========================================================================
-    // 39. 顺序异步校验
-    // =========================================================================
-    describe('Edge: sequential async validators', () => {
-        test('should stop after first async error', async () => {
-            const secondValidatorCalled = jest.fn();
-
-            const model = createModel({
-                field: {
-                    type: 'string',
-                    validator: [
-                        new Rule('asyncFail', 'First fails', async () => false),
-                        new Rule('asyncPass', 'Second', async (_v) => {
-                            secondValidatorCalled();
-                            return true;
-                        })
-                    ],
-                    default: ''
-                }
-            });
-
-            await model.setField('field', 'test');
-            expect(model.validationErrors.field).toHaveLength(1);
-            expect(model.validationErrors.field![0]!.message).toBe('First fails');
-            expect(secondValidatorCalled).not.toHaveBeenCalled();
-
-            model.dispose();
-        });
-    });
-
-    // =========================================================================
-    // 40. 不同错误类型通过对应模型事件发送
-    // =========================================================================
-    describe('Edge: model error event separation', () => {
-        test('should route validation and field errors separately', async () => {
-            const validationCb = jest.fn();
-            const fieldCb = jest.fn();
-            const model = createModel({
-                name: {
-                    type: 'string',
-                    validator: [ValidationRules.required],
-                    default: ''
-                }
-            });
-            model.on(ModelEvents.VALIDATION_ERROR, validationCb);
-            model.on(ModelEvents.FIELD_NOT_FOUND, fieldCb);
-
-            await model.setField('name', '');
-            expect(validationCb).toHaveBeenCalled();
-            expect(fieldCb).not.toHaveBeenCalled();
-
-            // @ts-expect-error — testing non-existent field
-            await expect(model.setField('nope', 'x')).rejects.toThrow('nope');
-            expect(fieldCb).toHaveBeenCalled();
-
-            model.dispose();
-        });
-    });
-
-    // =========================================================================
-    // 41. 空 Schema 模型
-    // =========================================================================
-    describe('Edge: Empty schema model', () => {
-        test('should create model with no fields and validateAll returns true', async () => {
-            const model = createModel({});
-
-            expect(model.data).toEqual({});
-            const result = await model.validateAll();
-            expect(result).toBe(true);
-            expect(formatValidationErrors(model.validationErrors)).toBe('Validation passed');
-
-            model.dispose();
-        });
-    });
-
-    // =========================================================================
-    // 42. clearDirtyData 不影响 data 和 validationErrors
-    // =========================================================================
-    describe('Edge: clearDirtyData isolation', () => {
-        test('should only clear dirtyData without affecting data or errors', async () => {
-            const model = createModel({
-                field: {
-                    type: 'string',
-                    validator: [ValidationRules.required],
-                    default: 'valid'
-                }
-            });
-
-            await model.setField('field', '');
-            expect(model.getDirtyData()).toHaveProperty('field', '');
-            expect(model.getField('field')).toBe('valid');
-            expect(model.validationErrors.field!.length).toBeGreaterThan(0);
-
-            model.clearDirtyData();
-
-            expect(model.getDirtyData()).toEqual({});
-            expect(model.getField('field')).toBe('valid');
-            expect(model.validationErrors.field!.length).toBeGreaterThan(0);
-
-            model.dispose();
-        });
-    });
-
-    // =========================================================================
-    // 43. Published documentation entry points
-    // =========================================================================
-    describe('Published documentation', () => {
-        test('npm package includes the AI guidance, documentation, and examples', () => {
-            const packageJson = JSON.parse(readProjectFile('package.json')) as {
-                files?: string[];
-            };
-
-            expect(packageJson.files).toEqual(expect.arrayContaining([
-                'AGENTS.md',
-                'docs',
-                'examples'
-            ]));
-        });
-
-        test('both READMEs link to the published agent guidance', () => {
-            for (const filename of ['README.md', 'README_CN.md']) {
-                expect(readProjectFile(filename)).toContain('[AGENTS.md](AGENTS.md)');
-            }
-        });
     });
 });

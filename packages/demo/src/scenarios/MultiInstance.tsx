@@ -1,5 +1,4 @@
 import { createModel } from 'model-reaction/devtools';
-import { ValidationRules } from 'model-reaction/validation';
 import { ModelProvider, useModel, useModelField } from 'model-reaction/react';
 import type { ModelReturn } from 'model-reaction';
 import { TextField } from '../TextField';
@@ -19,13 +18,11 @@ function makeLineItem(label: string, unit: number, qty: number): ModelReturn<Pri
             type: 'number',
             default: unit,
             transform: (v) => Number(v),
-            validator: [ValidationRules.min(0).withMessage('Must be ≥ 0')],
         },
         quantity: {
             type: 'number',
             default: qty,
             transform: (v) => Number(v),
-            validator: [ValidationRules.min(1).withMessage('Must be ≥ 1')],
         },
         totalCents: {
             type: 'number',
@@ -70,8 +67,8 @@ function LineItemCardView({ title }: { title: string }) {
         <div className="card">
             <h3>{title}</h3>
             <div className="row">
-                <TextField<PriceForm> field="unitPriceCents" label="Unit price (¢)" />
-                <TextField<PriceForm> field="quantity" label="Quantity" />
+                <TextField<PriceForm> field="unitPriceCents" label="Unit price (¢)" type="number" />
+                <TextField<PriceForm> field="quantity" label="Quantity" type="number" />
             </div>
             <div className="derived">
                 <span className="derived-label">totalCents</span>{' '}

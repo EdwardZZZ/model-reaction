@@ -8,7 +8,6 @@ import {
     type ModelReactionDevtoolsHook,
 } from '../devtools/devtools-hook';
 import { Model } from '../index';
-import { ValidationRules } from '../validation';
 
 /** Restore the global hook slot after each test, whatever it was. */
 function clearHook(): void {
@@ -81,7 +80,7 @@ describe('devtools-hook', () => {
         const instance: Omit<DevtoolsModelInstance, 'id'> = {
             getFields: () => ({}),
             getDependencyGraph: () => ({ nodes: [], edges: [] }),
-            getSnapshot: () => ({ data: {}, dirtyData: {}, errors: {} }),
+            getSnapshot: () => ({ data: {} }),
             subscribe: () => () => {},
         };
 
@@ -139,12 +138,11 @@ describe('devtools-hook', () => {
     // -------------------------------------------------------------------------
 
     describe('buildFieldInfo', () => {
-        test('summarises type, default, validator count, and reaction deps', () => {
+        test('summarises type, default, and reaction deps', () => {
             const schema: Model = {
                 first: { type: 'string', default: '' },
                 last: {
                     type: 'string',
-                    validator: [ValidationRules.required],
                 },
                 full: {
                     type: 'string',
@@ -158,11 +156,9 @@ describe('devtools-hook', () => {
             expect(info.first).toEqual({
                 type: 'string',
                 hasDefault: true,
-                validatorCount: 0,
                 reactionDeps: [],
             });
             expect(info.last!.hasDefault).toBe(false);
-            expect(info.last!.validatorCount).toBe(1);
             expect(info.full!.reactionDeps).toEqual(['first', 'last']);
         });
 

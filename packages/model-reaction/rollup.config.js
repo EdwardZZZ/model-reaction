@@ -33,22 +33,6 @@ export default [
     ],
     plugins: sharedPlugins(true),
   },
-  // Optional rule builders and error formatting; no core runtime dependency.
-  {
-    input: 'src/validation/index.ts',
-    output: [
-      { file: 'dist/validation.mjs', format: 'esm', sourcemap: true },
-      { file: 'dist/validation.cjs.js', format: 'cjs', sourcemap: true },
-      {
-        file: 'dist/validation.js',
-        format: 'umd',
-        name: 'ModelReactionValidation',
-        sourcemap: true,
-        plugins: [terser()],
-      },
-    ],
-    plugins: sharedPlugins(),
-  },
   // React adapter (peer dependency on react)
   {
     input: 'src/react/index.ts',

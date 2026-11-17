@@ -1,165 +1,117 @@
 # Source Architecture
 
-This guide maps the current `src/` modules and their main call paths. Public
-behavior is specified by [API.md](API.md), [REACT.md](REACT.md), and the READMEs.
+[中文版本](ARCHITECTURE_CN.md) | [Documentation](README.md)
 
-[中文版本](ARCHITECTURE_CN.md) | English
+The public contracts live in [API](API.md), [React](REACT.md), and
+[DevTools](DEVTOOLS.md). This guide owns implementation responsibilities.
 
 ## Module map
 
 ```mermaid
 flowchart LR
-    Consumer[Consumer] --> Entry[src/index.ts]
-    Entry --> Manager[core/ModelManager]
-    Manager --> Validation[validation/validate-field]
-    Manager --> Reaction[reaction/ReactionSystem]
-    Manager --> Tasks[core/PendingTasks]
-    Reaction --> Graph[reaction/reaction-graph]
-    Reaction --> Actions[reaction/ActionExecutor]
+    API["index / types"] --> Manager["core/model-manager"]
+    Manager --> Prepare["core/write-preparation"]
+    Manager --> Events["core/event-emitter"]
+    Manager --> Tasks["core/pending-tasks"]
+    Manager --> Reaction["reaction/reaction-system"]
+    Reaction --> Graph["reaction/reaction-graph"]
+    Reaction --> Actions["reaction/action-executor"]
     Actions --> Tasks
-    ReactEntry[model-reaction/react] --> ReactAdapter[react/*]
-    ReactAdapter --> PublicModel[ModelReturn / ModelEvents]
-    DevEntry[model-reaction/devtools] --> DevAdapter[devtools/*]
-    DevAdapter --> Entry
-    DevAdapter --> Graph
+    React["react"] --> API
+    Devtools["devtools"] --> API
+    Devtools --> Graph
 ```
 
-| Path | Responsibility | Boundary |
-| --- | --- | --- |
-| `src/index.ts`, `src/types.ts` | Core entry point, public types, and factory | Does not export `ModelManager` or internal pipeline types |
-| `src/core/` | Model state, field-write flow, events, and pending tasks | `ModelManager` is the sole owner of data, dirty data, errors, and validation freshness |
-| `src/validation/` | Field validation, rule builders, and error formatting | Core calls `validate-field.ts`; rules and formatting have a separate entry |
-| `src/reaction/` | Dependency indexing, scheduling, computed writeback, and action lifecycle | Uses `ReactionSystem` callbacks to access the model; owns no model data |
-| `src/react/` | Provider, field bindings, draft state, and selector hooks | Uses the public model surface and ships through `model-reaction/react` |
-| `src/devtools/` | Optional hook and model-inspection adapter | Reads through the public model API and shares dependency parsing |
-| `src/utils/` | General helpers such as default cloning and structural comparison | Does not depend on core, React, or DevTools |
-| `src/__tests__/` | Core behavior, React adapter, and integration tests | Integration tests also protect README examples |
+| Module | Responsibility |
+| --- | --- |
+| `types.ts` / `index.ts` | Public types, inferred/explicit factory overloads |
+| `core/model-manager.ts` | Committed data, snapshots, writes, subscriptions, lifecycle |
+| `core/write-preparation.ts` | Own-key preflight and synchronous input transformation |
+| `core/event-emitter.ts` | Listener snapshots, unsubscribe, exception isolation |
+| `core/pending-tasks.ts` | Computation/action counts and settlement waiters |
+| `reaction/reaction-system.ts` | Dependency index, synchronous execution, recursion guards, computed writeback |
+| `reaction/action-executor.ts` | Versioned groups, function deduplication, per-item barriers |
+| `reaction/reaction-graph.ts` | Shared declaration-to-edge parser |
+| `react/field-state.ts` / `context.ts` | Field bindings and Provider/render-prop |
+| `react/selectors.ts` | Shared snapshot caching with two subscription policies |
+| `devtools/` | Private opt-in integration using public state/events |
+| `utils/` | Default cloning and structural equality |
 
-`core/internal-types.ts` and `core/write-preparation.ts` are private implementation
-modules and must not be added to package exports. React and DevTools also remain
-separate package entry points.
+There is no validation module, request freshness map, dirty-data store, or
+field-error store. Business checks belong to the application.
 
 ## Write path
 
 ```text
-setField ─┐
-         ├─> runBatch
-setFields┘    ├─ prepareFieldWrites: resolve the whole batch, then transform once
-              ├─ createValidationSnapshot: build one shallow-frozen candidate
-              ├─ validatePrepared: start field validations and await all of them
-              │    └─ validateAndCommit: validate the latest request, commit or record dirty data
-              ├─ trigger one reaction pass for fields that really changed
-              └─ release the batch task, so settled() covers the whole operation
+setField -> setFields
+  -> begin compute task
+  -> prepareFieldWrites: preflight every key, then read/transform inputs
+  -> commit each prepared field
+       -> structural equality check
+       -> replace stored value / invalidate snapshot
+       -> invalidate direct host action version
+       -> collect changed fields / emit field:change
+  -> finally: trigger reactions for changed fields, end compute task
 ```
 
-- `validateAll()` shares the validation/commit path but reads dirty or committed values without transforming them again.
-  After `runBatch()` releases its compute task, it awaits `settled()` in a
-  `finally` block, including rejection paths. On normal completion it checks
-  the pass result plus current dirty values and errors, emits
-  `validation:complete`, and returns. It adds no tracked task for this wait.
-- `setField()` / `setFields()` return after the batch; downstream work may
-  remain. Full validation waits for all tracked work, without repeating the
-  pass or implicitly waiting before creating its candidate snapshot.
-- Reaction writeback uses `updateField()` and preserves its origin, reaction stack, and initialization context.
-- Fields commit independently, so `setFields()` is not an all-or-nothing transaction.
-- `ModelManager` keeps request IDs, state updates, events, and commit logic. Extract stateless preparation or calculation helpers; avoid splitting state ownership.
+Computed results use `updateField`: apply the host transform, then `commit`
+with `origin: 'reaction'`. Direct commits advance the action version;
+reaction commits retain the captured scheduling version. Defaults are cloned
+without transforming and then the seeded input graph is initialized.
+Preparation is not a transaction: synchronous listeners can reenter during
+individual commits.
 
-## Action Scheduling
+## Action scheduling
 
-This section records internal scheduling invariants. Public behavior and
-migration examples remain in [API.md](API.md#action-groups).
+`PendingTasks` counts `compute` and `action`. Compute includes write
+preparation/batches and synchronous calculation cascades. One group holds
+one action task throughout candidate, barrier waiting, and item execution.
+Compute reaching zero schedules a flush microtask; both counts reaching zero
+resolve `settled()`.
 
-| Owner | State and responsibility |
-| --- | --- |
-| `ReactionSystem` | One `ReactionJob` and at most one pending debounced computation per host; dependency index and runtime path diagnostics |
-| `ActionExecutor` | Host versions, one group set, schema field order, and a coalesced microtask flush |
-| `PendingTasks` | Separate `compute` / `action` counts, compute-idle notification, and `settled()` completion |
-| `ModelManager` | Validation request IDs, committed state, and host-field errors |
+1. Each invocation starts a compute task, increments and captures the host
+   version, then runs the computation synchronously. The captured version is
+   retained across reentrant writes; it never reads the latest version later
+   as a substitute.
+2. Successful synchronous computation/transform/commit registers a group if
+   the captured host version is still current. `SKIP_REACTION` or errors
+   register none.
+3. Registration deduplicates references at the last array position and removes
+   shared functions from older groups' unstarted items.
+4. A microtask flush selects ready groups in schema order. It checks both
+   compute idle and current host version immediately before synchronous call.
+5. Each returned Promise is observed independently; after completion, remaining
+   items recheck the calculation barrier. New host versions suppress later
+   items but cannot interrupt an item already running.
+6. Failure reports a host reaction error and releases only that group. Disposal
+   releases all tasks and suppresses later callbacks/events.
 
-1. Scheduling a host reaction advances its action version. A successful direct
-   write that changes the host also advances it; reaction writeback does not.
-   Internal `origin: 'direct' | 'reaction'` distinguishes these paths.
-   Validation request IDs remain separate because they protect commits, not
-   action eligibility.
-2. Capture the version when scheduling, including in the debounce closure.
-   Never read the latest version when an older computation finishes. On
-   debounce replacement, acquire the new task before releasing the old one;
-   on timer fire, remove the waiting record before running user code.
-3. After a computed value validates and commits, register a group only if its
-   captured version is current. The group acquires one action task immediately
-   and keeps it across readiness, item execution, and inter-item waits. No
-   separate pending-candidate map or collection handoff is needed.
-   Each group stores its unstarted functions in an `actions` queue. Registration
-   keeps the last occurrence of each reference and removes it from older queues.
-4. Compute idle schedules a microtask flush. Each flush takes a ready snapshot
-   in schema field order. Immediately before every item, check disposal,
-   version, and compute idle synchronously, then call it without an intervening
-   `await`. A previous item may have started fresh calculations, so the check
-   is required for every item.
-5. Groups await their own returned Promises independently. A newer version
-   cancels unstarted items; an already running item remains observed and may
-   overlap a newer group. Failure stops only its group, but an old item's late
-   failure can still update the host's errors under existing error handling.
-6. Task release is idempotent. Disposal removes waiting groups and releases
-   pending settlement immediately; started Promise rejections remain observed,
-   with post-disposal model error reporting suppressed.
+The reaction system does not wait for action completion. `settled()` belongs
+outside actions; waiting within an action deadlocks on its own task.
+Application-side revision/abort policy governs network writeback.
 
-The compute count covers input preparation, validation, debounce waits,
-computed writeback, reaction registration, and batch release. The
-action count covers whole groups. Reactions never await actions;
-`settled()` waits for both counts, and `validateAll()` reuses that global wait
-after releasing its batch. Neither method may be awaited by an action or
-validator on the same model. The full-validation completion event runs after
-settlement; listener updates are subsequent work.
+## Retained decisions
 
-Cycle and missing-dependency diagnostics follow the declared calculation
-graph and runtime reaction paths. Closure reads and writes inside actions
-cannot be inferred; there is no complete construction-time check for
-side-effect writeback cycles.
+- Structural field comparison is independent of selector equality. Changing
+  it to reference equality would change downstream computations and actions.
+- Two selector Hooks share caching while retaining distinct notification
+  policies. Concurrent callbacks only notify React; they do not overwrite
+  caches through stale selectors.
+- Own field keys are supported using null-prototype storage and own-key checks.
+- Schema fragments compose before model creation. Avoid duplicate field names.
+- Text formatting, touched state, and write-exception feedback belong in
+  application controls; the React adapter binds committed values.
+- Batch preparation checks all keys before getters/transforms. Defaults remain
+  untransformed; there is no implicit runtime check of type/enum metadata.
 
-## Retained Design Decisions
+## Dependency rules and checks
 
-- **Structural equality:** keep `deepEqual`; equal-content replacement objects
-  do not become changes solely because their references differ. Switching to
-  `Object.is` would alter downstream validation, reactions, and action
-  cancellation as well as `Date`, `NaN`, and signed-zero behavior.
-- **Two selector Hooks:** `useModelSelector` filters model notifications and
-  resubscribes when its selector/comparator changes; `useModelComputed`
-  subscribes by model and compares snapshots. Shared render-local caching
-  protects concurrent renders; merging the Hooks would change a subscription
-  policy. The public choice is documented in [REACT.md](REACT.md#usemodelselector-vs-usemodelcomputed).
-- **One reaction per field:** identify jobs by host, retain trigger-pass
-  deduplication, and keep separate jobs when hosts reuse a reaction object.
-- **One validation policy:** rules execute condition/validation in order and
-  stop at the first error. Batch keys are prechecked before input values are
-  read or transformed; fields then validate and commit independently.
-- **Safe field dictionaries:** only own schema keys count as fields. Storage
-  and snapshots must support names such as `constructor` and `__proto__`
-  without inherited reads or prototype setters.
-- **UI boundaries:** local editing text and write exceptions belong in draft
-  bindings; core dirty data contains failed model values. React and DevTools
-  remain optional entry points, with no UI policy added to core state.
+Core consumes reaction/utils through focused callbacks. Reaction code does not
+reach into ModelManager storage; React consumes public types/events. DevTools
+uses the public model and schema plus shared edge parsing. Internal types stay
+out of package exports.
 
-## Dependency rules
-
-1. `core` coordinates state and lifecycle; `validation`, `reaction`, and `utils` provide focused capabilities.
-2. `reaction` requests model reads and writes through callbacks; it does not mutate `ModelManager` state directly.
-3. `react` consumes `ModelReturn` and model events; it does not import `core/` or `reaction/` implementations.
-4. `devtools` reads through the public model surface. Shared `eachReactionEdge` keeps dependency graph interpretation consistent.
-5. `types.ts` describes public contracts. Internal options and intermediate types stay in their owning modules and are not re-exported from the package entry.
-6. `eslint.config.mjs` enforces the main reverse-dependency boundaries; DevTools' dependency on the shared reaction graph is intentional.
-
-## Where to start
-
-| Change | Read first |
-| --- | --- |
-| Writes, dirty data, events, lifecycle | `core/model-manager.ts`, `core/write-preparation.ts` |
-| Validation order, timeout, and errors | `validation/validate-field.ts` |
-| Dependency edges or reaction scheduling | `reaction/reaction-graph.ts`, `reaction/reaction-system.ts` |
-| Action eligibility and execution | `reaction/action-executor.ts`, `reaction/reaction-job.ts` |
-| React field state and subscriptions | `react/field-state.ts`, `react/draft-field.ts`, `react/selectors.ts` |
-| DevTools hook, graph, and snapshots | `devtools/devtools-hook.ts`, `devtools/index.ts` |
-
-For public contract changes, check `src/index.ts`, both READMEs, and integration
-tests. For dependency graph changes, check both Reaction and DevTools consumers of
-`eachReactionEdge`.
+Keep complex contract explanations here and short references in source.
+[AGENTS.md](../AGENTS.md) owns the required checks; integration scenarios cover
+public recipes, with dedicated suites for action timing and concurrent React
+reads.

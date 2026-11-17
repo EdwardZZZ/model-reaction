@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Demo app showcasing model-reaction and its DevTools extension: multi-instance, async validation, and reaction chains.",
+  "description": "Demo app showcasing model-reaction and its DevTools extension: multi-instance, async actions, and reaction chains.",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",

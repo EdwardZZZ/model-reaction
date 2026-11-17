@@ -1,38 +1,17 @@
 /** Public type contract for the core package entry. */
 export const ModelEvents = {
-    VALIDATION_ERROR: 'validation:error',
     REACTION_ERROR: 'reaction:error',
     DEPENDENCY_ERROR: 'dependency:error',
     FIELD_NOT_FOUND: 'field:not-found',
     FIELD_CHANGE: 'field:change',
-    VALIDATION_COMPLETE: 'validation:complete',
-    FIELD_VALIDATION_COMPLETE: 'field:validation-complete',
-    DIRTY_DATA_CLEARED: 'dirty-data:cleared',
 } as const;
 
 /**
  * Return from `reaction.computed` to skip the current reaction without
- * validating or committing its target field, running its `action`, or
+ * committing its target field, running its `action`, or
  * triggering downstream reactions.
  */
 export const SKIP_REACTION = Symbol.for('model-reaction.SKIP_REACTION');
-
-/** Pure validation rule; never await this model's global waiting methods. */
-export interface Validator {
-    type: string;
-    message: string;
-    validate: (value: any, data?: Record<string, any>) => boolean | Promise<boolean>;
-    /** Skip this validator when the predicate returns false. */
-    condition?: (data: Record<string, any>) => boolean;
-}
-
-export interface ValidationError {
-    field: string;
-    message: string;
-    rule?: string;
-    /** Application-defined localization or classification key. */
-    code?: string;
-}
 
 export type ModelErrorCode =
     | 'reaction_error'
@@ -48,7 +27,6 @@ export interface ModelError {
 }
 
 export interface ModelEventMap<T = Record<string, any>> {
-    [ModelEvents.VALIDATION_ERROR]: ValidationError;
     [ModelEvents.REACTION_ERROR]: ModelError;
     [ModelEvents.DEPENDENCY_ERROR]: ModelError;
     [ModelEvents.FIELD_NOT_FOUND]: ModelError;
@@ -56,17 +34,9 @@ export interface ModelEventMap<T = Record<string, any>> {
         field: keyof T & string;
         value: T[keyof T];
     };
-    /** Final validation result after tracked work settles; see docs/API.md. */
-    [ModelEvents.VALIDATION_COMPLETE]: { isValid: boolean };
-    [ModelEvents.FIELD_VALIDATION_COMPLETE]: {
-        field: keyof T & string;
-        isValid: boolean;
-        dirty: boolean;
-    };
-    [ModelEvents.DIRTY_DATA_CLEARED]: { fields: Array<keyof T & string> };
 }
 
-/** Return tracked work; never await this model's settled/validateAll. See docs/API.md. */
+/** Return tracked work; never await this model's settled() inside an action. */
 export type ReactionAction = () => void | PromiseLike<void>;
 
 /**
@@ -107,14 +77,13 @@ type FieldType = keyof ComputedValueMap;
 interface TypedFieldSchema<K extends FieldType> {
     /** Type metadata used for inference and tooling; not runtime validation. */
     type: K;
-    validator?: Validator[];
-    /** Initial value, seeded without validation. */
+    /** Initial value, cloned and seeded directly. */
     default?: unknown;
-    /** Literal set used to infer enum values; validators enforce membership. */
+    /** Literal set used to infer enum values; not a runtime membership check. */
     values?: readonly unknown[];
     /** One computation per field; side effects remain an action array. */
     reaction?: Reaction<ComputedValueMap[K]>;
-    /** Transform input before validation. */
+    /** Synchronously transform direct writes and computed results before commit. */
     transform?: (value: any) => any;
 }
 
@@ -174,31 +143,19 @@ export type InferModelData<S extends Record<string, FieldSchema>> = {
         (S[K] extends { default: infer Default } ? Default : undefined);
 };
 
-export interface ModelOptions {
-    /** Async validation timeout in milliseconds. */
-    asyncValidationTimeout?: number;
-    /** Debounce window for reactions in milliseconds. */
-    debounceReactions?: number;
-}
-
 export interface ModelReturn<T = Record<string, any>> {
     /** Stable shallow read-only snapshot of the field map. */
     data: Readonly<T>;
-    /** Read-only snapshot of current validation errors. */
-    validationErrors: Readonly<Record<string, readonly ValidationError[]>>;
-    setField: <K extends keyof T>(field: K, value: T[K]) => Promise<boolean>;
+    /** Synchronously transform, commit, and trigger computations. Throws on write errors. */
+    setField: <K extends keyof T>(field: K, value: T[K]) => void;
     getField: <K extends keyof T>(field: K) => T[K];
-    setFields: (fields: Partial<T>) => Promise<boolean>;
-    /** Validate once, await tracked work, then check dirty values and errors; see docs/API.md. */
-    validateAll: () => Promise<boolean>;
+    /** Prepare all inputs, commit them, then trigger one computation pass. */
+    setFields: (fields: Partial<T>) => void;
     on: <E extends keyof ModelEventMap<T>>(
         event: E,
         callback: (payload: ModelEventMap<T>[E]) => void
     ) => () => void;
-    /** Return a stable shallow read-only snapshot of rejected input values. */
-    getDirtyData: () => Readonly<Partial<T>>;
-    clearDirtyData: () => void;
-    /** Wait for pending validations, computations, and action groups to complete. */
+    /** Wait for tracked computations and action groups to complete. */
     settled: () => Promise<void>;
     dispose: () => void;
     /**

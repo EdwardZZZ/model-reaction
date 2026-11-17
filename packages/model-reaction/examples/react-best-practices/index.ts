@@ -3,7 +3,6 @@ export * from './7-2-stable-selector';
 export * from './7-2bis-model-computed';
 export * from './7-3-model-provider';
 export * from './7-4-field-render-prop';
-export * from './7-5-touched';
 export {
     SubmitButton as SubmitFlowButton,
     userModel as submitFlowUserModel,

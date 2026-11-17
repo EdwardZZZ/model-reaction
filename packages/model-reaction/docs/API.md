@@ -1,533 +1,244 @@
 # API Reference
 
-Reference for the public `model-reaction` API surface.
+[中文版本](API_CN.md) | [Documentation](README.md)
 
-[中文版本](API_CN.md) | English
+## Entries and types
 
-[← Back to README](../README.md)
-
----
-
-## Table of Contents
-
-- [createModel](#createmodel)
-- [Model Methods](#model-methods)
-- [Reactions](#reactions)
-- [Events](#events)
-- [ModelOptions](#modeloptions)
-- [Validation Rules](#validation-rules)
-- [Error Formatting](#error-formatting)
-- [Type Definitions](#type-definitions)
-- [API simplification migration](#api-simplification-migration-unreleased)
-
----
-
-## createModel
-
-The factory function that creates a model instance.
-
-```typescript
-createModel<T>(schema: Model<T>, options?: ModelOptions): ModelReturn<T>;
-createModel<S extends Record<string, FieldSchema>>(
-  schema: S,
-  options?: ModelOptions
-): ModelReturn<InferModelData<S>>;
-```
-
-The first argument is one flat schema object, with each top-level property
-representing one model field. Large schemas may be split into focused fragments
-and merged with object spread before being passed in. Object and array field
-values may still contain nested data, but the model tracks changes only at the
-top level.
-
-> **Defaults bypass validation.** Each field's `default` is written directly
-> into `data` at construction — validators do **not** run against it. A model
-> can therefore start in an invalid state while `validationErrors` is empty.
-> Before trusting initial `data`, wait for initialization with
-> `await settled()`, then call `await validateAll()`.
->
-> **Initial reactions propagate through unchanged values.** Non-derived
-> defaults start the initial reaction pass. A successfully validated derived
-> value continues that pass even when it equals its own default, without
-> emitting a field change for that unchanged value. Initialization survives
-> rescheduling; use `await settled()` to wait for the complete chain.
->
-> **`FieldSchema.type` is metadata, not a runtime validator.** It drives
-> TypeScript inference and tooling. Add an appropriate `ValidationRules` entry
-> or custom `Rule` when values must be checked at runtime.
->
-> **Reaction output is validated.** A field's `reaction.computed` result is
-> committed through the same validate-then-commit path as `setField`. If the
-> derived field declares a `validator` and the computed value fails it, `data`
-> keeps its previous value and the computed value is stored in `dirtyData`.
-> Passing validation is necessary for `action` eligibility. Only the host
-> field's latest scheduled reaction can start its group after calculation
-> settles; a failed value fires neither the derived field's change nor its
-> `action`.
-
-## Model Methods
-
-### Read
-
-| Method | Description |
+| Entry | Runtime exports |
 | --- | --- |
-| `getField(field)` | Read the current value of one field. |
-| `get data` | Read a stable, shallow-frozen copy of the field map. Fields without defaults may be `undefined`. |
-| `get validationErrors` | Read frozen validation errors grouped by field. |
+| `model-reaction` | `createModel`, `ModelEvents`, `SKIP_REACTION` |
+| `model-reaction/react` | Hooks, `ModelProvider`, `Field`, `shallow` |
+| `model-reaction/devtools` | Opt-in `createModel` |
 
-Error snapshots preserve earlier results. Each field's frozen error array keeps
-its reference until that field's errors are cleared or replaced; updates to
-another field do not recreate it.
+Root type exports: `Model`, `FieldSchema`, `Reaction`, `ReactionAction`,
+`ModelReturn`, `ModelError`, `ModelErrorCode`, `ModelEventMap`,
+`InferFieldType`, `InferModelData`. Internal coordination types are not exported.
+The core entry does not import React or DevTools integration.
 
-This library supports shallow model data and tracks field-level replacements.
-Object, array, and mutable built-in
-field values such as `Date` are opaque to the model: mutating them in place is
-not observed and does not trigger validation, reactions, or subscriptions.
-Replace the whole field value with `setField()` or `setFields()` when it changes.
-The outer `data` and dirty-data records are shallow-frozen; field values
-themselves are not frozen.
-
-Replacement values are compared structurally for plain objects, arrays,
-`Date`, and `RegExp`. Other objects, including `Map`, `Set`, and class
-instances, are compared by reference: a new instance is treated as a change.
-
-### Write
-
-| Method | Description |
-| --- | --- |
-| `setField(field, value): Promise<boolean>` | Set a single field; returns its validation result. |
-| `setFields(fields): Promise<boolean>` | Batch set multiple fields in one validation + reaction pass; returns the AND of every field's result. Cross-field validators see the **merged batch** — each field validates against `data` with all fields in the same call already applied, so co-dependent fields (e.g. `password` / `confirmPassword`) can be set together in one call. **Not atomic** — valid fields commit to `data` even if a sibling field fails validation. |
-
-`setField()` delegates to the single-entry `setFields()` flow. Conditions and
-validators share one shallow-frozen candidate snapshot: committed data merged
-with every transformed input in this call, including the field being validated.
-These candidates have not necessarily passed validation. `validateAll()` merges
-committed and dirty data without transforming values again. Validators must
-remain pure and must not mutate the snapshot or its nested field values.
-They must not await the same model's `settled()` or `validateAll()`: these
-global waits include the validator's own task.
-
-All input keys must be own fields of the schema. An unknown key emits
-`field:not-found` and rejects the whole call before any transform, validation,
-or commit starts; the first unknown key in input order is reported. A transform
-exception also rejects rather than becoming a validation error or dirty input.
-For known fields, ordinary validation failures resolve `false` and still allow
-valid siblings to commit. The batch drains started validations and registers
-reactions before releasing its calculation task, including rejection paths.
-
-### Reactions
-
-A field can have at most one reaction. It runs when one of the fields in its
-`fields` list changes. Arrays, including empty arrays, throw a `TypeError` naming
-the field during construction, before defaults or asynchronous work start:
+## Creating a model
 
 ```ts
-total: {
-    type: 'number',
-    reaction: {
-        fields: ['price', 'quantity'],
-        computed: ({ price, quantity }) => price * quantity,
-    },
-}
+import { createModel, type Model } from 'model-reaction';
+
+interface Person { name: string; age: number }
+const schema: Model<Person> = {
+  name: { type: 'string', default: '' },
+  age: { type: 'number', default: 18 },
+};
+const person = createModel<Person>(schema);
+const inferred = createModel({ name: { type: 'string', default: '' } });
 ```
 
-`computed` must run synchronously and remain pure: it reads only the
-dependencies declared in `fields` and returns the target field's next value.
-Returning a Promise is reported through `reaction:error`, and no result is
-committed. Other side effects, such as requests, logging, or external-state
-mutations, cannot be detected at runtime and must be avoided by the caller. Put
-asynchronous work and other side effects in `action`, an array of no-argument
-functions. Each returned PromiseLike is tracked by `settled()`, and a
-rejection is reported through `reaction:error`.
+The schema is a flat map of own field names. Values can contain nested data.
+Keys such as `constructor` and `__proto__` work as own properties; use
+`['__proto__']` or `Object.fromEntries` when constructing that key.
+Each field accepts:
 
-Return the package-level `SKIP_REACTION` export to conditionally stop the
-current reaction:
+| Property | Contract |
+| --- | --- |
+| `type` | Required: `string`, `number`, `boolean`, `object`, `array`, `date`, or `enum` |
+| `default` | Optional initial value, cloned and seeded directly |
+| `values` | Optional enum literals for inference; no runtime membership check |
+| `transform` | Optional synchronous `(value: any) => any`, applied to writes and computed results |
+| `reaction` | Optional single `{ fields, computed, action? }` |
+
+`type` is metadata, not runtime validation. Transforms must return the intended
+value synchronously; Promise-returning transforms are unsupported. Defaults
+do not run transforms. Missing or `undefined` defaults leave the value absent.
+Construction seeds all defaults, then triggers reactions reachable from
+non-reaction fields with defaults. A reaction with no triggered input, including
+`fields: []`, does not execute automatically. Initial actions are deferred so
+closures can safely refer to the created model.
+
+Schema inference includes `undefined` without a default, retains object/array
+shapes from useful defaults, and enum unions from readonly `values`.
+It also includes the actual default type. An explicit `createModel<T>` relies
+on the caller to initialize `T` correctly.
+
+`createModel` accepts only the schema; there is no construction options argument.
+All field computations execute synchronously.
+
+## Reads and subscriptions
+
+| API | Result |
+| --- | --- |
+| `model.data` | Stable `Readonly<T>` shallow-frozen snapshot |
+| `model.getField(key)` | Stored value; missing reads return `undefined` at runtime |
+| `model.subscribe(selector, callback, isEqual?)` | Unsubscribe function |
+| `model.on(event, callback)` | Unsubscribe function |
+
+`data` retains its identity until a field changes. Old snapshots retain their
+field map, but nested values remain shared and mutable. Replace whole nested
+values through setters; in-place mutations are not observed.
+
+Subscriptions compute an initial selection without calling the callback, then
+compare on each field-change event with `Object.is` or supplied equality.
+Callbacks receive `(value, previous)`. Listener exceptions are logged and
+isolated; they do not roll back writes. Unsubscribe during cleanup.
+
+## Writes
+
+```ts
+model.setField('name', 'Ada');       // void
+model.setFields({ name: 'Ada', age: 36 }); // void
+```
+
+Both setters are synchronous. `setField` shares the batch write path.
+
+1. Verify every key before reading any value or running transforms. Unknown
+   keys emit `field:not-found` and throw.
+2. Read and transform all candidates before committing any field. A getter
+   or transform exception throws and leaves this batch uncommitted.
+3. Commit prepared values in object key order. Each structurally changed value
+   invalidates the host's old action version and emits `field:change`.
+4. Trigger dependent computations for the changed input set; release the batch
+   task in `finally`.
+
+Synchronous calculation cascades finish before the setter returns.
+Actions always start later and are not awaited by setters.
+
+This is preparation followed by individual commits, not an all-or-nothing
+transaction. Events run after each commit and can observe intermediate state
+or reenter a setter; remaining outer candidates still commit in order.
+Disposal from a listener stops remaining writes.
+
+Field equality retains the existing behavior: primitives use strict equality,
+arrays/plain objects compare recursively, `Date` compares timestamps, `RegExp`
+compares source/flags, and other instances such as `Map` and `Set` compare by reference. Equal replacements
+do not replace the stored value or trigger events/reactions; `NaN` counts as
+changed and `+0`/`-0` as equal. Selector equality is independently configurable.
+
+## Reactions
 
 ```ts
 import { SKIP_REACTION } from 'model-reaction';
 
-computed: ({ enabled, source }) =>
-  enabled ? String(source).trim() : SKIP_REACTION
+const reaction = {
+  fields: ['price', 'qty'],
+  computed: ({ price, qty }: Record<string, any>) =>
+    qty > 0 ? price * qty : SKIP_REACTION,
+};
 ```
 
-`SKIP_REACTION` is a normal no-op: the target field is not validated or
-written, `dirtyData` is unchanged, and no `field:change`, downstream reaction,
-or current reaction `action` is triggered. Scheduling this reaction also cancels earlier
-action eligibility for the same host field, even when it skips.
+`computed` must be synchronous and pure. Declare every model input in `fields`.
+Dependencies are top-level names, not nested paths. TypeScript checks the
+return type against the host's `type` tag; enum membership is not checked, and
+a bare `Reaction` uses `any`.
 
-#### Result types
+Computed output passes through the host transform and synchronous commit.
+Equal computed values still permit actions; ordinary downstream propagation
+requires a changed host, except for the initial seeded calculation pass.
+`SKIP_REACTION` skips the host transform/write, actions, and downstream
+propagation for that computation. A skipped successor still invalidates an
+older unstarted action group.
 
-TypeScript checks the `computed` result against the field's `type`:
-`string`, `number`, `boolean`, `Date`,
-`object`, or a readonly array, plus `SKIP_REACTION`. `enum` results are not
-checked. `values` is typed as `Record<string, any>`, so a result read straight
-from it (`(v) => v.name`) is `any` and also passes unchecked.
+Thrown computation/transform errors emit `reaction:error`, preserve the host
+value, and prevent that computation's action group. A Promise-like computed
+result is rejected as a contract violation; it is observed to prevent an
+unhandled rejection. Missing declared dependencies emit `dependency:error`
+and are supplied as `undefined`. Runtime calculation recursion emits
+`reaction:error` with `circular_dependency`; the core does not statically
+detect arbitrary action writeback cycles.
+
+## Action groups
 
 ```ts
-total: {
-    type: 'number',
-    // ❌ Type error: a number field cannot derive a string.
-    reaction: { fields: ['price'], computed: ({ price }) => `${price}` },
+reaction: {
+  fields: ['source'],
+  computed: ({ source }) => source * 2,
+  action: [
+    () => { model.setField('other', model.data.target); },
+    async () => { await save(model.data); },
+  ],
 }
 ```
 
-The check is strict: `null` and `undefined` are rejected even when the data
-type allows them. A standalone reaction can declare its result type with
-`Reaction<T>`; it then fits only fields of that type. A bare `Reaction` (that
-is, `Reaction<any>`) is unchecked and is the escape hatch for nullable derived
-values:
+`ReactionAction` is `() => void | PromiseLike<void>`. It receives no arguments;
+read model state through a closure. Each successfully handled computation can
+register a group, including initialization and unchanged computed values.
 
-```ts
-import type { Reaction } from 'model-reaction';
+- Registration captures the host version assigned when the reaction was
+  scheduled. Only the latest version can start or continue.
+- The first call is deferred to a microtask after all calculation tasks finish.
+  Each subsequent item checks the same barrier before calling synchronously.
+- Items follow array order and await their own returned work. Different
+  groups attempt to start in schema order and wait independently.
+- Repeated function references retain their last position within an array and
+  belong to their last registered host among pending items.
+- New host computations or changed direct host writes cancel unstarted items.
+  Running items continue and their returned Promises remain tracked.
+- An item that throws/rejects emits `reaction:error` and stops only its group.
+  A late old failure is still reported while the model is alive.
 
-const label: Reaction = {
-    fields: ['price'],
-    computed: ({ price }) => (price > 0 ? `$${price}` : null),
-};
-```
+The scheduler does not cancel requests or suppress writeback within a running
+action. Application revisions/AbortController handle stale responses,
+timeouts, and disposal. Return or await asynchronous work for it to be tracked.
+Never await this model's `settled()` inside its action: that would wait for
+the action itself.
 
-A function declared outside the schema that returns `SKIP_REACTION` infers the
-return type `symbol`; annotate it as `(): typeof SKIP_REACTION`. Schema
-fragment factories should return a single variant such as
-`FieldSchema<'string'>`, so a spread fragment keeps its tag when a reaction is
-added.
+## Settlement and disposal
 
-Repeated triggers can overlap validations of the same reaction. Validation
-request IDs decide which write can commit; action eligibility separately follows
-the host's latest scheduling version. A later `SKIP_REACTION` creates no write,
-so an earlier valid write may still commit while its actions are cancelled.
-A later computation that throws has the same separation. Debouncing keeps one
-pending computation per host, replacing it and restarting the window on another
-trigger. An already started action may overlap with later updates; `settled()`
-still waits for its returned Promise.
+`settled(): Promise<void>` waits for tracked batches,
+calculation cascades, and action groups. It does not validate values or reject
+when a reaction fails. Observe error events or application status separately.
+It cannot track detached work, future writes, or arbitrary application checks.
 
-#### Action groups
-
-```ts
-import { createModel } from 'model-reaction';
-import type { ReactionAction } from 'model-reaction';
-
-const saveTotal: ReactionAction = async () => {
-  const { price, quantity, total } = model.data;
-  await saveAmount({ price, quantity, total }); // application-provided function
-};
-
-const model = createModel({
-  price: { type: 'number', default: 10 },
-  quantity: { type: 'number', default: 2 },
-  total: {
-    type: 'number', default: 0,
-    reaction: {
-      fields: ['price', 'quantity'],
-      computed: ({ price, quantity }) => price * quantity,
-      action: [saveTotal, () => { console.log(model.data.total); }],
-    },
-  },
-});
-await model.settled();
-```
-
-The public signature is `type ReactionAction = () => void | PromiseLike<void>`
-and `Reaction<T>.action?: ReactionAction[]`. `Reaction<T>` remains an interface;
-its `T` only constrains `computed`. Actions receive no dependency projection,
-result argument, or injected `computed` property. Their reads do not add
-dependencies: declare trigger fields in `fields`.
-
-Overlapping input validation, batch commits, reaction debounce, computation,
-and computed-value validation form one calculation phase. When it becomes idle,
-the scheduler attempts the eligible group for each host field. Each actual
-reaction scheduling replaces the host's action version, including reactions
-with no actions or an empty array. If the latest reaction skips, throws, returns
-a Promise, fails validation, or loses its write, no earlier group is restored.
-Later independent updates can start new groups.
-
-Successful initialization and equal computed values remain eligible. The first
-action call occurs after `createModel` returns, so initialization closures can
-read `model`. Direct successful value changes through `setField`, `setFields`,
-or dirty-value promotion in `validateAll` cancel the host's pending and remaining
-items without starting actions themselves. Equal or failed direct writes do not
-cancel them. Computed writeback does not invalidate its own group.
-
-Each item, including the first, checks the host version and waits for calculation
-to become idle immediately before its no-argument call. It then waits for that
-item's PromiseLike before considering the next item. An unrelated calculation
-pauses remaining items; a new host version cancels them. Already started
-functions continue, and a new valid group starts from index zero without waiting
-for an old function to finish. Empty arrays do nothing.
-
-Pending functions within each model keep only their last array position in the
-last registered group; matching references are removed from older pending lists.
-For example, `[save, log, save]` executes `log` then `save`. Distinct wrappers are
-distinct functions. Group scheduling and already started calls are unchanged.
-
-Groups ready in the same scheduler turn are attempted in schema field order.
-Each group waits independently for its own Promise. A synchronous write starting
-new calculation pauses other ready items. An exception or rejection stops only
-that group. It appends `reaction_error` to the host's `validationErrors` before
-emitting `reaction:error`, even if that action's version has since expired.
-A late old error can therefore accompany a newer successful value. After
-`dispose`, returned rejections are still observed, but errors and events are
-no longer recorded; pending `settled()` calls are released immediately.
-
-The barrier protects entry to each array item. An ordinary `await` inside an
-item does not protect later reads: `await model.setField()` waits for that write,
-and its downstream computation may still be running. Put a later operation in
-the next array item to get a new calculation barrier. Capture `const data =
-model.data` at function entry when one request needs consistent top-level values;
-the snapshot includes transformed committed values and is only shallow-frozen.
-Nested values must not be mutated in place.
-
-For writeback, use `async () => { await model.setField('field', value); }`.
-An expression returning `Promise<boolean>` does not fit `ReactionAction` and
-may create circular schema inference. Never await the same model's `settled()`
-or `validateAll()` inside an action: both wait for the current group itself.
-Only returned or awaited business Promises are tracked. Cancellation of requests, stale response
-protection, and writeback cycles remain application responsibilities.
-For side effects without a derived field, use `model.subscribe`; its callback
-Promises are not included in `settled()`.
-
-### Validation
-
-| Method | Description |
-| --- | --- |
-| `validateAll(): Promise<boolean>` | Validate every field once, wait for all tracked model work, and return the final result. |
-| `getDirtyData(): Partial<T>` | Get a stable, shallow-frozen snapshot of values that failed validation. |
-| `clearDirtyData(): void` | Clear all dirty data records. |
-
-For submission, wait for existing inputs and initialization before creating
-the full-validation candidate snapshot:
-
-```ts
-await model.settled();
-const valid = await model.validateAll();
-if (!valid) return;
-await api.save(model.data);
-```
-
-`validateAll()` validates a shared snapshot of committed and dirty values once,
-commits valid fields independently, then waits for tracked calculations,
-actions, and writebacks. The wait is global: overlapping work and already
-running actions whose host versions became stale are included. There is no
-implicit wait before taking the candidate snapshot.
-
-The result is `true` only if this pass succeeded, no dirty values remain, and
-every field's error array is empty after settlement. A failed pass stays
-`false` even if later work repairs its fields. Computation or action failures
-use existing error reporting; remaining errors or failed writebacks make the
-result `false`. An exceptional batch rejection waits for tracked work before
-propagating the original exception, without `validation:complete`.
-
-This is one full pass followed by settlement, not repeated validation of the
-final data. Action writebacks validate their written fields; they do not
-revalidate untouched cross-field rules. Complete related corrections before
-full validation or write the related fields together with `setFields()`.
-The application must pause editing, prevent duplicate submissions, and handle
-input-layer write errors separately; see [Submission Flow](REACT.md#submission-flow).
-
-Disposal during a normally completing call returns `false` and suppresses
-`validation:complete`. It releases settlement waits immediately, but does not
-cancel a field validator already awaited by the batch: that validator must
-return or reach `asyncValidationTimeout` first. Calling after disposal still
-rejects with the existing disposed error.
-
-### Subscription
-
-| Method | Description |
-| --- | --- |
-| `subscribe(selector, callback, isEqual?)` | Observe a selected value, compared with `Object.is` by default. The callback receives `(next, prev)`; returns an unsubscribe function. |
-| `on(event, callback)` | Observe typed event payloads, including errors, validation, and field changes; returns an unsubscribe function. |
-
-Single fields and derived values share `subscribe`:
-
-```ts
-const off = model.subscribe((data) => data.name, (next, prev) => {
-  console.log(prev, '→', next);
-});
-off();
-```
-
-Use `on('field:change', handler)` and check the payload's `field` when raw
-field events are needed. `useModelSelector` uses model-side filtering;
-`useModelComputed` subscribes directly to field events. Both share snapshot
-comparison logic.
-
-### Lifecycle
-
-| Method | Description |
-| --- | --- |
-| `settled(): Promise<void>` | Wait for all pending or cascading reactions, async actions, and async validations to complete. |
-| `dispose(): void` | Release timers, listeners, and internal state. |
+`dispose(): void` is idempotent: cancels unstarted actions, releases
+settlement waiters, clears subscriptions and data. Running action rejections
+remain observed; application code must avoid writing after disposal.
+Setters on a disposed model throw; reads see cleared data and `settled()`
+resolves.
 
 ## Events
 
-Subscribe via `model.on(eventName, handler)`.
-
-| Event | Triggered when |
-| --- | --- |
-| `field:change` | A field value changes. |
-| `field:validation-complete` | A field validation finishes, including batch operations and reactions, even when its value did not change. Payload includes `field`, `isValid`, and whether the field remains dirty. |
-| `dirty-data:cleared` | `clearDirtyData()` removes one or more dirty values. Payload lists the affected fields. |
-| `validation:complete` | `validateAll()` finishes after tracked work settles; `isValid` matches its final boolean. Not emitted on batch rejection or disposal. |
-| `validation:error` | A validation rule fails. |
-| `reaction:error` | A reaction throws or rejects. |
-| `dependency:error` | A reaction dependency is misconfigured. |
-| `field:not-found` | `setField` or `setFields` attempts to write a field absent from the schema. |
-
-The final result is checked immediately before `validation:complete`. A
-listener's writes, disposal, or new calls are subsequent operations; this
-validation call does not wait again for work started by its completion event.
-Use the event to observe the result, and keep submission-time updates outside it.
-
-## ModelOptions
-
-```typescript
-interface ModelOptions {
-  debounceReactions?: number;
-  asyncValidationTimeout?: number;
-}
-```
-
-| Option | Default | Description |
+| `ModelEvents` key | Event | Payload |
 | --- | --- | --- |
-| `debounceReactions` | `0` | Debounce window (ms) for reaction triggers. |
-| `asyncValidationTimeout` | `5000` | Timeout (ms) for async validators. |
+| `FIELD_CHANGE` | `field:change` | `{ field, value }` |
+| `FIELD_NOT_FOUND` | `field:not-found` | `ModelError` |
+| `DEPENDENCY_ERROR` | `dependency:error` | `ModelError` |
+| `REACTION_ERROR` | `reaction:error` | `ModelError` |
 
-## Validation Rules
+`ModelError` has `code`, optional `field`, `message`, optional `originalError`.
+Codes: `field_not_found`, `dependency_error`, `circular_dependency`,
+`reaction_error`. There is no model error store; subscribe before the operation
+you want to observe. Constructor-time calculations may precede subscriptions.
 
-`ValidationRules` is a collection of reusable built-in rules, and `Rule` is the
-class behind them. Both are exported from `model-reaction/validation`:
+## Removing validation migration (unreleased)
 
-```typescript
-import { ValidationRules, Rule } from 'model-reaction/validation';
-```
+This release removes built-in validation rather than retaining an adapter.
 
-Each rule implements the `Validator` interface, so it can be dropped straight
-into a field's `validator` array.
-
-Rules run in declaration order, evaluating each `condition` immediately before
-its `validate`. A false condition skips that rule. The first condition exception,
-failed validation, exception, or timeout stops the field; later rules are not
-evaluated. Errors retain their array shape. Async rules in one field run
-sequentially; different fields can validate concurrently. Put cheap synchronous
-checks first, and combine independent requests inside one validator if needed.
-
-### Built-in rules
-
-| Rule | Form | Passes when |
-| --- | --- | --- |
-| `required` | constant | value is not `undefined`, `null`, or `''` |
-| `number` | constant | value is a finite number |
-| `integer` | constant | value is a finite integer |
-| `boolean` | constant | value is a boolean |
-| `string` | constant | value is a string |
-| `min(n)` | factory | numeric value `>= n` |
-| `max(n)` | factory | numeric value `<= n` |
-| `minLength(n)` | factory | string/array length `>= n` |
-| `maxLength(n)` | factory | string/array length `<= n` |
-| `pattern(regex, message?)` | factory | string matches `regex` |
-| `email` | constant | value is a valid email string |
-
-### Rule chaining
-
-Every rule (constant or factory result) is a `Rule` instance with two chainable
-helpers that return a **new** rule, leaving the original untouched:
-
-| Method | Description |
+| Removed/changed | Migration |
 | --- | --- |
-| `.withMessage(message)` | Override the error message. |
-| `.when(predicate)` | Only run the rule when `predicate(data)` is truthy — handy for cross-field conditional validation. |
+| `FieldSchema.validator`, `Validator`, `ValidationError` | Application checks or a validation library |
+| `model-reaction/validation`, `Rule`, `ValidationRules`, `formatValidationErrors` | Application helpers; the subpath is no longer exported |
+| `asyncValidationTimeout` | Request/service timeout |
+| `debounceReactions`, `ModelOptions`, `createModel` options argument | Call `createModel(schema)`; rate-limit requests/input in application code |
+| `setField`/`setFields: Promise<boolean>` | Synchronous `void`; remove boolean branching, catch exceptions |
+| `validateAll()` | Wait for model work, then check the business snapshot |
+| `validationErrors`, `getDirtyData()`, `clearDirtyData()` | Application/UI errors and rejected draft values |
+| Validation and dirty-data events | Application state or events |
+| `FieldMeta`, `[value, setter, meta]`, `<Field>`'s `meta` | `[value, setter]` and application feedback |
+| `useDraftField`, `DraftField`, `UseDraftFieldOptions` | Direct `useModelFieldState` binding; text/blur/error policy in application controls |
+| DevTools dirty/error snapshots, validator count, snapshot subscription | Committed data and change subscription |
 
-```typescript
-createModel({
-  discountCode: {
-    type: 'string',
-    default: '',
-    validator: [
-      ValidationRules.required
-        .withMessage('Code required when a discount is applied')
-        .when((data) => data.hasDiscount === true),
-    ],
-  },
-});
+Previously rejected direct/computed values now commit after transformation.
+Computations formerly delayed by `debounceReactions` now run on each changed
+input, including during construction. Reading after a setter sees the completed
+calculation chain. Actions remain deferred and tracked by `settled()`.
+Typed tags and enum literals do not replace removed checks. Move acceptance
+rules before writes if committed data must remain valid. Keep incomplete text
+outside the model when appropriate, or accept incomplete editor values and
+check at submission. The React adapter no longer provides draft text,
+formatter synchronization, touched state, or local write-exception storage.
+
+```ts
+model.setFields(input);
+await model.settled();
+const snapshot = model.data;
+const errors = checkBusinessData(snapshot);
+if (Object.keys(errors).length === 0) await save(snapshot);
 ```
 
-## Error Formatting
-
-Formatting is independent from model state:
-
-```typescript
-import { formatValidationErrors } from 'model-reaction/validation';
-
-const summary = formatValidationErrors(model.validationErrors);
-const custom = formatValidationErrors(
-  model.validationErrors,
-  (error) => `[${error.field}] ${error.message}`
-);
-```
-
-## Type Definitions
-
-Publicly exported types include `Model`, `ModelOptions`, `ModelReturn`,
-`Validator`, `Reaction`, `ReactionAction`, `FieldSchema`, `ValidationError`, `ModelError`,
-`ModelErrorCode`, `ModelEventMap`, `InferFieldType`, and `InferModelData`.
-
-The core entry exports `createModel`, `ModelEvents`, and `SKIP_REACTION`.
-`model-reaction/validation` exports `ValidationRules`, `Rule`,
-`formatValidationErrors`, and the `ValidationErrorFormatter` type.
-
-For full type definitions, see [`src/types.ts`](../src/types.ts).
-
-## API simplification migration (Unreleased)
-
-These changes are breaking and require updating consumers:
-
-- `validateAll()` now waits for all tracked model work after its full pass and
-  includes remaining dirty values and errors in its boolean. Keep
-  `await model.settled(); const valid = await model.validateAll();` before
-  submission; remove the second settlement and repeated model error checks.
-  Preserve UI write-error handling and submission locks.
-  `validation:complete` now fires after settlement with the final result.
-  Never await the same model's `validateAll()` or `settled()` inside actions
-  or validators; move that orchestration to the external entry point.
-  Gate-based callers must release action gates before awaiting full validation.
-- Unwrap single-entry `reaction` arrays. Rewrite multiple rules as one business
-  calculation or split independent results into separate fields; merging
-  dependency lists mechanically does not preserve the old semantics.
-- Remove `strictMode` and `failFast`. Unknown fields now always reject after
-  `field:not-found`, before any field in that batch is prepared. Map external
-  DTO keys before writing. Per-field validation always stops at the first error,
-  with interleaved condition/validation evaluation rather than condition
-  prefiltering; this also changes error priority for former `failFast: true` users.
-- A single-field validator's `data[field]` now contains the transformed candidate,
-  not the previous committed value. Move checks that require the old value to
-  the business write entry point or provide an explicit business baseline.
-  `validateAll()` does not transform dirty values again.
-- React `DraftField` adds required `writeError: Error | null`; update manually
-  constructed values and display `writeError?.message ?? meta.error`.
-  `showError` is now gated by `touched` and either error source. See
-  [React bindings](REACT.md).
-- Structural field equality and both selector Hooks remain unchanged.
-- Replace `action: fn` with `action: [fn]` and migrate parameter reads to model
-  closures. Direct callers must iterate the array and invoke items without
-  arguments. Actions now wait for calculation to settle and merge by host's
-  latest scheduling version; they no longer run after every intermediate
-  successful computation. A later skip or failure cancels earlier actions even
-  when an earlier value commits. Remaining items can be cancelled after a new
-  host version; combine operations in one item when they must complete together.
-- Pending actions keep only the last registered occurrence of each function
-  reference within a model. Use distinct wrappers when repeated array positions
-  or host fields must each execute the function.
-- Import `ValidationRules`, `Rule`, `formatValidationErrors`, and the
-  `ValidationErrorFormatter` type from `model-reaction/validation`.
-  Browser UMD consumers also load `dist/validation.js`; helpers are on the
-  `ModelReactionValidation` global.
-- Replace `model.subscribeField(field, callback)` with
-  `model.subscribe(data => data[field], callback)`. The callback also receives
-  the previous value. Use `on('field:change', handler)` with field filtering
-  when callbacks must follow raw field events.
-- `reaction.computed` results are now type-checked against the field `type`
-  (see [Result types](#result-types)). Nullable results need a bare
-  `Reaction`, and standalone functions returning `SKIP_REACTION` need a
-  `(): typeof SKIP_REACTION` annotation. `FieldSchema` is now a union of
-  per-tag variants, so `interface X extends FieldSchema` no longer compiles;
-  use a type intersection or a single variant such as `FieldSchema<'string'>`.
+Retained contracts: one reaction per field, action arrays, structural equality,
+two selector Hook policies, batch key preflight. Older removed `strictMode`,
+`failFast`, and reaction arrays remain unsupported.

@@ -11,12 +11,6 @@
       "require": "./dist/index.cjs.js",
       "default": "./dist/index.js"
     },
-    "./validation": {
-      "types": "./dist/types/validation/index.d.ts",
-      "import": "./dist/validation.mjs",
-      "require": "./dist/validation.cjs.js",
-      "default": "./dist/validation.js"
-    },
     "./react": {
       "types": "./dist/types/react/index.d.ts",
       "import": "./dist/react.mjs",
@@ -54,23 +48,22 @@
     "example:basic": "tsx --tsconfig tsconfig.examples.json examples/basic-usage.ts",
     "example:react": "tsx --tsconfig tsconfig.examples.json examples/react-bindings-runner.tsx",
     "example:reaction": "tsx --tsconfig tsconfig.examples.json examples/reaction-system.ts",
-    "example:async": "tsx --tsconfig tsconfig.examples.json examples/async-validation.ts",
+    "example:async": "tsx --tsconfig tsconfig.examples.json examples/async-action.ts",
     "example:event": "tsx --tsconfig tsconfig.examples.json examples/event-listening.ts",
     "example:complex": "tsx --tsconfig tsconfig.examples.json examples/complex-form.ts",
-    "example:dirty": "tsx --tsconfig tsconfig.examples.json examples/dirty-data-conditional.ts",
+    "example:business": "tsx --tsconfig tsconfig.examples.json examples/business-validation.ts",
     "example:multi-record": "tsx --tsconfig tsconfig.examples.json examples/multi-record-deep-deps.ts",
-    "examples": "npm run example:basic && npm run example:reaction && npm run example:async && npm run example:event && npm run example:complex && npm run example:dirty && npm run example:multi-record && npm run example:react"
+    "examples": "npm run example:basic && npm run example:reaction && npm run example:async && npm run example:event && npm run example:complex && npm run example:business && npm run example:multi-record && npm run example:react"
   },
   "keywords": [
     "model",
     "reaction",
-    "validation",
     "batch",
     "typescript"
   ],
   "author": "Zephyr <zzh627@126.com>",
   "license": "ISC",
-  "description": "A TypeScript model library with validation, reaction system, and batch operations",
+  "description": "A TypeScript field model with synchronous writes, computed dependencies, and scheduled actions",
   "homepage": "https://github.com/EdwardZZZ/model-reaction",
   "repository": {
     "type": "git",

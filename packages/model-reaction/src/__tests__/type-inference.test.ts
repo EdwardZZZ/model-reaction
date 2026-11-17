@@ -11,10 +11,16 @@ describe('createModel type inference', () => {
     test('both entries reject removed options and reaction arrays at type level', () => {
         const invalidDeclarations = () => {
             for (const create of [createModel, createDevtoolsModel]) {
+                // @ts-expect-error model construction no longer accepts options
+                create({ count: { type: 'number' } }, { debounceReactions: 5 });
                 // @ts-expect-error unknown fields always reject; strictMode was removed
                 create({ count: { type: 'number' } }, { strictMode: true });
-                // @ts-expect-error field validation always stops at the first error
+                // @ts-expect-error failFast was removed
                 create({ count: { type: 'number' } }, { failFast: true });
+                // @ts-expect-error validation timeout was removed
+                create({ count: { type: 'number' } }, { asyncValidationTimeout: 100 });
+                // @ts-expect-error field validators were removed
+                create<{ count: number }>({ count: { type: 'number', validator: [] } });
                 create({
                     count: {
                         type: 'number',
@@ -34,7 +40,7 @@ describe('createModel type inference', () => {
         const action: ReactionAction = () => { calls.push(model.data.target); };
         const reaction: NamedReaction = {
             label: 'double', fields: ['source'], computed: ({ source }) => source * 2,
-            action: [action, async () => { await model.setField('note', 'saved'); }],
+            action: [action, () => { model.setField('note', 'saved'); }],
         };
         const model = createModel({
             source: { type: 'number', default: 1 },
@@ -46,7 +52,6 @@ describe('createModel type inference', () => {
             const single: Reaction<number> = { fields: [], computed: () => 1, action };
             // @ts-expect-error action receives no dependency projection
             const parameter: ReactionAction = (values: Record<string, any>) => { void values; };
-            // @ts-expect-error boolean write results are not side-effect return values
             const write: ReactionAction = () => model.setField('note', 'saved');
             // @ts-expect-error action requires no arguments
             action(model.data);

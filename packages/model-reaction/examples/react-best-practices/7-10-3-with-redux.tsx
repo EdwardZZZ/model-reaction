@@ -50,9 +50,9 @@ export function EditUserPage() {
         const current = model;
         if (!current) return;
         await current.settled();
-        const ok = await current.validateAll();
-        if (!ok) return;
-        dispatch(saveUser(current.data));
+        const snapshot = current.data;
+        if (!snapshot.name.trim()) return;
+        dispatch(saveUser(snapshot));
     }
 
     return (

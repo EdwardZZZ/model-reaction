@@ -114,69 +114,38 @@ describe('model-reaction/devtools createModel', () => {
         model.dispose();
     });
 
-    test('snapshot surfaces dirtyData and errors for failed validation', async () => {
+    test('snapshot contains committed data only', () => {
         const instances = installHook();
-        const withValidator: Model = {
-            age: {
-                type: 'number',
-                default: 0,
-                validator: [
-                    {
-                        type: 'min',
-                        message: 'too small',
-                        validate: (v: number) => v >= 18,
-                    },
-                ],
-            },
-        };
-        const model = createModel(withValidator);
+        const model = createModel({ age: { type: 'number', default: 0 } });
         const inst = instances[0]!;
-
-        await model.setField('age', 5);
-        const snap = inst.getSnapshot();
-        expect(snap.dirtyData.age).toBe(5);
-        expect(snap.errors.age!.length).toBeGreaterThan(0);
+        model.setField('age', 5);
+        expect(inst.getSnapshot()).toEqual({ data: { age: 5 } });
         model.dispose();
     });
 
-    test('snapshot notifications include rejected input, dirty clearing, and reaction errors', async () => {
+    test('write exceptions leave the snapshot unchanged and subscriptions detach', () => {
         const instances = installHook();
         const model = createModel({
             age: {
                 type: 'number',
                 default: 18,
-                validator: [{ type: 'min', message: 'too small', validate: (v: number) => v >= 18 }],
-            },
-            derived: {
-                type: 'number',
-                default: 0,
-                reaction: {
-                    fields: ['age'],
-                    computed: () => { throw new Error('compute failed'); },
+                transform: (value) => {
+                    if (value < 0) throw new Error('negative');
+                    return value;
                 },
             },
         });
-        await model.settled();
         const inst = instances[0]!;
-        const snapshots: ReturnType<typeof inst.getSnapshot>[] = [];
         const changes: DevtoolsChange[] = [];
-        const unsub = inst.subscribeSnapshot?.(() => snapshots.push(inst.getSnapshot()));
         const unsubChanges = inst.subscribe((change) => changes.push(change));
-
-        await model.setField('age', 5);
-        expect(snapshots.some((s) => s.dirtyData.age === 5 && s.errors.age?.length)).toBe(true);
+        expect(() => model.setField('age', -1)).toThrow('negative');
+        expect(inst.getSnapshot().data.age).toBe(18);
         expect(changes).toHaveLength(0);
-        model.clearDirtyData();
-        expect(snapshots.at(-1)?.dirtyData).toEqual({});
-        await model.setField('age', 20);
-        await model.settled();
-        expect(snapshots.at(-1)?.errors.derived?.[0]?.message).toContain('compute failed');
-
-        unsub?.();
+        model.setField('age', 20);
+        expect(changes).toHaveLength(1);
         unsubChanges();
-        const count = snapshots.length;
-        await model.setField('age', 6);
-        expect(snapshots).toHaveLength(count);
+        model.setField('age', 6);
+        expect(changes).toHaveLength(1);
         model.dispose();
     });
 

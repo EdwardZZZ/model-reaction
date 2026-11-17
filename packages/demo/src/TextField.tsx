@@ -1,44 +1,37 @@
-import { useDraftField, useModel } from 'model-reaction/react';
+import { useModelFieldState, useModel } from 'model-reaction/react';
 
-/**
- * A controlled text input bound to the nearest provided model.
- *
- * All edit-lifecycle state (the draft, seeding from committed data, the
- * validate-then-commit on change, and the `touched`/blur gate for errors) lives
- * in `useDraftField` from `model-reaction/react`. This component owns only
- * presentation: layout, the validating/dirty badges, and rendering the gated
- * error.
- */
+/** A controlled input bound directly to the nearest provided model. */
 export function TextField<T extends Record<string, any>>({
     field,
     label,
     placeholder,
     readOnly,
+    type = 'text',
 }: {
     field: keyof T & string;
     label: string;
     placeholder?: string;
     readOnly?: boolean;
+    type?: 'text' | 'number';
 }) {
     const model = useModel<T>();
-    const { draft, setDraft, meta, writeError, onBlur, showError } = useDraftField(model, field);
+    const [value, setValue] = useModelFieldState(model, field);
+    const displayed = typeof value === 'number' && !Number.isFinite(value) ? '' : value ?? '';
 
     return (
         <label className="field">
             <span className="field-label">
                 {label}
-                {meta.validating && <span className="badge">validating…</span>}
-                {meta.dirty && <span className="badge badge-warn">dirty</span>}
             </span>
             <input
-                value={draft}
+                type={type}
+                value={displayed}
                 placeholder={placeholder}
                 readOnly={readOnly}
-                aria-invalid={showError}
-                onChange={(e) => setDraft(e.target.value)}
-                onBlur={onBlur}
+                onChange={(e) => setValue(
+                    (type === 'number' ? Number(e.target.value) : e.target.value) as T[keyof T & string]
+                )}
             />
-            {showError && <small role="alert" className="field-error">{writeError?.message ?? meta.error}</small>}
         </label>
     );
 }

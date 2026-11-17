@@ -1,290 +1,120 @@
 # Advanced Usage
 
-Patterns beyond the README quick start.
+[中文版本](ADVANCED_CN.md) | [Documentation](README.md)
 
-[中文版本](ADVANCED_CN.md) | English
+## Business validation
 
-[← Back to README](../README.md)
-
----
-
-## Table of Contents
-
-- [Asynchronous Validation](#asynchronous-validation)
-- [Custom Validation Rules and Messages](#custom-validation-rules-and-messages)
-- [Typed Error Events](#typed-error-events)
-- [Conditional and Cross-field Validation](#conditional-and-cross-field-validation)
-- [Transformation and Asynchronous Validation](#transformation-and-asynchronous-validation)
-- [Waiting for Async Operations](#waiting-for-async-operations)
-- [Schema Type Inference](#schema-type-inference)
-- [Model Organization](#model-organization)
-- [Performance and Error Handling](#performance-and-error-handling)
-- [Testing Application Models](#testing-application-models)
-
----
-
-## Asynchronous Validation
-
-```typescript
-import { createModel } from 'model-reaction';
-import { Rule, ValidationRules } from 'model-reaction/validation';
-
-interface AsyncUser {
-  name: string;
-  username: string;
-}
-
-const asyncUniqueRule = new Rule(
-  'asyncUnique',
-  'Username already exists',
-  async (value: string): Promise<boolean> => {
-    return new Promise<boolean>((resolve) => {
-      setTimeout(() => resolve(value !== 'admin'), 100);
-    });
-  }
-);
-
-const asyncUserModel = createModel<AsyncUser>({
-  name: {
-    type: 'string',
-    validator: [ValidationRules.required.withMessage('Username cannot be empty')],
-    default: '',
-  },
-  username: {
-    type: 'string',
-    validator: [
-      ValidationRules.required.withMessage('Account cannot be empty'),
-      asyncUniqueRule,
-    ],
-    default: '',
-  },
-}, { asyncValidationTimeout: 3000 });
-
-const ok = await asyncUserModel.setField('username', 'admin');
-console.log(ok); // false
-console.log(asyncUserModel.validationErrors);
-console.log(asyncUserModel.getDirtyData());
-```
-
-## Custom Validation Rules and Messages
-
-```typescript
-import { createModel } from 'model-reaction';
-import { Rule } from 'model-reaction/validation';
-
-const customRule = new Rule(
-  'custom',
-  'Does not meet custom rules',
-  (value: any) => value === 'custom'
-);
-
-const model = createModel({
-  field: {
-    type: 'string',
-    validator: [customRule.withMessage('Field value must be "custom"')],
-    default: '',
-  },
-});
-```
-
-## Typed Error Events
-
-```typescript
-import { createModel, ModelEvents } from 'model-reaction';
-import { ValidationRules } from 'model-reaction/validation';
-
-const model = createModel({
-  name: {
-    type: 'string',
-    validator: [ValidationRules.required.withMessage('Name cannot be empty')],
-    default: '',
-  },
-});
-
-const unsubscribeValidation = model.on(
-  ModelEvents.VALIDATION_ERROR,
-  (error) => console.error(`Validation error: ${error.field} - ${error.message}`)
-);
-const unsubscribeMissing = model.on(
-  ModelEvents.FIELD_NOT_FOUND,
-  (error) => console.error(`Field not found: ${error.field}`)
-);
-
-unsubscribeValidation();
-unsubscribeMissing();
-```
-
-## Conditional and Cross-field Validation
-
-Define rules that only run under specific conditions, or that validate one
-field based on another via the `data` parameter.
-
-```typescript
-import { createModel } from 'model-reaction';
-import { ValidationRules, Rule } from 'model-reaction/validation';
-
-const model = createModel({
-  hasDiscount: { type: 'boolean', default: false },
-  discountCode: {
-    type: 'string',
-    validator: [
-      // Conditional: only runs when hasDiscount is true. `.when(predicate)`
-      // is the concise form of attaching a `condition`.
-      ValidationRules.required
-        .withMessage('Discount code is required when discount is enabled')
-        .when((data) => data.hasDiscount === true),
-      // Cross-field: read other fields via `data`.
-      new Rule(
-        'validCode',
-        'Invalid discount code',
-        (value, data) => {
-          if (data?.hasDiscount && value !== 'PROMO2024') return false;
-          return true;
-        }
-      ),
-    ],
-    default: '',
-  },
-});
-```
-
-## Transformation and Asynchronous Validation
-
-```typescript
-import { createModel } from 'model-reaction';
-import { Rule } from 'model-reaction/validation';
-
-const asyncModel = createModel({
-  field: {
-    type: 'string',
-    transform: (value: string) => value.toUpperCase(),
-    validator: [
-      new Rule(
-        'asyncValidator',
-        'Asynchronous validation failed',
-        async (value: string) => value.length > 3
-      ).withMessage('Field length must be greater than 3 characters'),
-    ],
-    default: '',
-  },
-});
-```
-
-## Waiting for Async Operations
-
-Awaiting `setField` waits for that field's validation and commit. Cascading
-reactions and action groups may still be running, including without debounce.
-Use `settled()` outside actions:
-
-```typescript
-interface Schema {
-  source: string;
-  target: string;
-}
-
-const model = createModel<Schema>({
-  source: { type: 'string', default: '' },
-  target: {
-    type: 'string',
-    default: '',
-    reaction: {
-      fields: ['source'],
-      computed: (vals) => vals.source.toUpperCase(),
-    },
-  },
-}, { debounceReactions: 100 });
-
-await model.setField('source', 'hello');
-
-console.log(model.getField('target')); // '' (debounce pending)
-
-await model.settled();
-
-console.log(model.getField('target')); // 'HELLO'
-```
-
-## Schema Type Inference
-
-`createModel` supports two call styles:
+The model stores transformed field values and runs declared computations.
+Application functions or a separate validation library own required fields,
+cross-field checks, server acceptance, and error display.
 
 ```ts
-// 1. Explicit type argument (recommended for complex models):
-const user = createModel<User>(userSchema);
+interface Budget { total: number; daily: number }
 
-// 2. Inferred from a schema literal:
-const m = createModel({
-  name: { type: 'string', default: '' },
-  age:  { type: 'number', default: 0 },
-  ok:   { type: 'boolean', default: false },
-});
-// m.data is typed as { name: string; age: number; ok: boolean }
+function checkBudget(data: Readonly<Budget>): string | null {
+  if (!Number.isFinite(data.total) || data.total < 100) return 'Total must be at least 100';
+  if (!Number.isFinite(data.daily) || data.daily < 10 || data.daily > data.total) {
+    return 'Daily must be between 10 and total';
+  }
+  return null;
+}
 
-// Without a default, the inferred value also includes undefined.
-const optional = createModel({ note: { type: 'string' } });
-// optional.data.note is string | undefined
-
-// `values` gives an enum field a useful inferred union. Runtime validation
-// still comes from the field's validators.
-const status = createModel({
-  state: {
-    type: 'enum',
-    values: ['draft', 'published'] as const,
-    default: 'draft',
-  },
-});
-// status.data.state is 'draft' | 'published'
+function updateBudget(model: ModelReturn<Budget>, input: Partial<Budget>): string | null {
+  const candidate = { ...model.data, ...input };
+  const error = checkBudget(candidate);
+  if (error) return error;
+  model.setFields(input);
+  return null;
+}
 ```
 
-Schema inference describes the runtime value, including a mismatched default
-because defaults intentionally bypass validation. Explicit `createModel<T>` is
-an assertion by the caller that the schema initializes that shape. For object
-and array fields without useful defaults, provide an explicit data type.
+Normalize the candidate before checking when transforms change business
+meaning; share a pure parser between schema and domain entry points. A
+preflight of input fields does not automatically check subsequent computed
+values. Keep calculations valid by construction, check after settlement, or
+evaluate an isolated candidate model when a domain needs full graph acceptance.
+Do not use transform as a replacement validator framework.
 
-## Model Organization
+An editor may instead commit incomplete values, check on blur/submission, and
+retain errors outside the model. Conditional checks are plain application
+conditions. See [business-validation.ts](../examples/business-validation.ts).
 
-Keep one model for fields that share a lifecycle and dependency graph. Split a
-large schema into focused modules, then spread the fragments into one flat
-schema. Field names must be unique across fragments: object spread replaces an
-earlier definition silently. Separate models are useful for independently owned
-forms; cross-model coordination belongs in application code.
+## Async actions and stale responses
 
-Extract reusable checks into named rules and put orchestration in domain
-functions. Keep `computed` synchronous and pure, declare every input in
-`reaction.fields`, and use separate fields for independent computed results.
-Async work and side effects belong in action groups; see the
-[action contract](API.md#action-groups).
+Keep `computed` synchronous; put requests in an action or application service.
+Return/await the request when `settled()` should track it.
 
-Use an explicit domain interface for shared contracts and schema inference for
-small local models. `FieldSchema.type` is metadata, not runtime validation:
-untyped input still needs validators. Map API payloads to known field keys
-before writing them. The [ad-creation recipe](../examples/AD_CREATION_CN.md)
-demonstrates schema composition and DTO conversion.
+```ts
+let revision = 0;
+const model = createModel({
+  query: { type: 'string', default: '' },
+  results: { type: 'array', default: [] as string[] },
+  normalized: { type: 'string', reaction: {
+    fields: ['query'],
+    computed: ({ query }) => query.trim(),
+    action: [async () => {
+      const version = revision;
+      const query = model.data.normalized;
+      const results = await search(query);
+      if (version !== revision) return;
+      model.setField('results', results);
+    }],
+  } },
+});
+const off = model.subscribe((data) => data.query, () => { revision++; });
+// Owner cleanup: revision++; off(); model.dispose();
+```
 
-## Performance and Error Handling
+Increment revisions on input change, before responses can resume. Comparing
+only the current text fails for A → B → A edits. Also invalidate on disposal.
+The scheduler cancels unstarted items; it cannot interrupt running requests.
+Use service timeouts or AbortController where needed. The complete runnable
+[async action example](../examples/async-action.ts) includes cleanup.
 
-- Put cheap rules first. A field runs rules sequentially and stops at its first
-  error; different fields can validate concurrently.
-- Cache reusable remote checks at the service boundary and configure
-  `asyncValidationTimeout` for that service.
-- Debounce input before `setField` when remote validation should not run on
-  every keystroke. `debounceReactions` only delays derived calculations.
-- Use field or selector subscriptions for narrow views. Hook choice, draft
-  buffering, and model ownership are documented in [React bindings](REACT.md).
-- A `false` write result is a validation failure; rejected writes are separate
-  exceptions. Read `validationErrors[field]` or use
-  `formatValidationErrors` from `model-reaction/validation` for a summary.
-  Subscribe to typed error events for logging and always unsubscribe in cleanup.
-  Text bindings display `writeError?.message ?? meta.error` under `showError`.
+All calculation cascades complete synchronously; actions always start later.
+Equal normalized values still permit an action group. When request frequency
+needs limiting, debounce at the application input or service boundary.
 
-## Testing Application Models
+## Typed error events
 
-Test business boundaries: rule limits, transforms, invalid input preserved in
-dirty data, rejected computed values, stale async results, and reaction chains.
-Submission tests should `await settled()`, then `await validateAll()` and check
-its result before reading the payload. Full validation includes settlement of
-work that it triggered. Include server rejection and retry behavior when the
-application owns them.
+```ts
+const off = model.on(ModelEvents.REACTION_ERROR, (error) => {
+  console.error(error.field, error.message);
+});
+try {
+  model.setFields(input);
+} catch (error) {
+  // Direct getter/transform/unknown-field failures throw synchronously.
+}
+```
 
-React integration checks should cover editing text while validation is pending,
-field-specific updates, and owner cleanup. Repository contribution checks are
-maintained in [AGENTS.md](../AGENTS.md).
+Reaction failures are event diagnostics, not a model error store or business
+validation result. `settled()` resolves after tracked work even if an action
+fails; observe domain status/error events to decide whether submission is safe.
+The [API](API.md#events) owns event names and payloads.
+
+## Model organization and inference
+
+Keep one model for fields sharing a lifecycle and dependency graph. Compose
+focused schema fragments into a flat object, with unique names. Independent
+editors use independent models; coordination belongs in application code.
+Separate fields own separate computed outputs.
+
+Use `createModel<T>(schema)` for explicit domain contracts and schema inference
+for small local models. `type` and enum `values` do not validate runtime payloads.
+Missing defaults infer `undefined`; useful object/array defaults retain shape.
+Map API payloads to known field keys before writing. See the
+[ad-creation recipe](../examples/AD_CREATION_CN.md) for schema/DTO boundaries.
+
+## Performance and testing
+
+Use `setFields` for related inputs, narrow subscriptions for readers, and pure
+computations with declared dependencies. The dependency engine is not a
+transaction or a topological
+single-pass scheduler; a diamond can compute intermediate values before its
+final value. Actions wait for the calculation chain.
+
+Test business limits, normalization, submission snapshots, stale requests,
+action failures, owner disposal, and transformed text/IME behavior.
+For asynchronous scenarios wait for model settlement and your application
+checks separately. Repository checks live in [AGENTS.md](../AGENTS.md).

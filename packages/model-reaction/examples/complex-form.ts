@@ -1,253 +1,62 @@
 import { createModel } from 'model-reaction';
-import { formatValidationErrors, Rule, ValidationRules } from 'model-reaction/validation';
 
-interface UserInfo {
-    name: string;
-    email: string;
-    phone: string;
-}
-
-interface Product {
-    id: number;
-    name: string;
-    price: number;
-    quantity: number;
-}
-
-interface CreditCardInfo {
-    cardNumber?: string;
-    expiry?: string;
-    cvv?: string;
-}
-
-interface OrderForm {
-    userInfo: UserInfo;
+interface Product { name: string; price: number; quantity: number }
+interface Order {
     email: string;
     products: Product[];
-    totalAmount: number;
     couponCode: string;
+    totalAmount: number;
     discountAmount: number;
     finalAmount: number;
-    paymentMethod: string;
-    creditCardInfo: CreditCardInfo;
 }
 
-// 模拟API调用 - 检查邮箱唯一性
-async function checkEmailUnique(email: string): Promise<boolean> {
-  return new Promise(resolve => {
-    setTimeout(() => {
-      resolve(email !== 'existing@example.com');
-    }, 500);
-  });
+async function submitOrder(data: Readonly<Order>): Promise<string[]> {
+    const errors: string[] = [];
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(data.email)) errors.push('邮箱格式无效');
+    if (!data.products.length) errors.push('至少选择一个产品');
+    if (data.products.some((item) => !Number.isFinite(item.price) || item.price < 0 ||
+        !Number.isInteger(item.quantity) || item.quantity < 1)) errors.push('产品价格或数量无效');
+    if (errors.length) return errors;
+    // The server remains responsible for authoritative checks.
+    await new Promise<void>((resolve) => setTimeout(resolve, 100));
+    if (data.email === 'existing@example.com') return ['邮箱已被注册'];
+    console.log('提交订单:', data);
+    return [];
 }
 
-// 模拟API调用 - 验证信用卡信息
-async function validateCreditCard(cardNumber: string): Promise<boolean> {
-  return new Promise(resolve => {
-    setTimeout(() => {
-      // 简单验证: 卡号长度为16位数字
-      resolve(/^\d{16}$/.test(cardNumber));
-    }, 800);
-  });
+async function runExample(): Promise<void> {
+    const model = createModel<Order>({
+        email: { type: 'string', default: '', transform: (value) => value.trim() },
+        products: { type: 'array', default: [] },
+        couponCode: { type: 'string', default: '' },
+        totalAmount: { type: 'number', default: 0, reaction: {
+            fields: ['products'],
+            computed: ({ products }) => products.reduce(
+                (sum: number, item: Product) => sum + item.price * item.quantity, 0),
+        } },
+        discountAmount: { type: 'number', default: 0, reaction: {
+            fields: ['totalAmount', 'couponCode'],
+            computed: ({ totalAmount, couponCode }) => couponCode === 'DISCOUNT10' ? totalAmount * 0.1 : 0,
+        } },
+        finalAmount: { type: 'number', default: 0, reaction: {
+            fields: ['totalAmount', 'discountAmount'],
+            computed: ({ totalAmount, discountAmount }) => totalAmount - discountAmount,
+            action: [() => { console.log('计算落定:', model.data.finalAmount); }],
+        } },
+    });
+    try {
+        model.setFields({
+            email: ' buyer@example.com ',
+            products: [{ name: '产品1', price: 50, quantity: 2 }, { name: '产品2', price: 30, quantity: 1 }],
+            couponCode: 'DISCOUNT10',
+        });
+        await model.settled();
+        // Validate and submit the same snapshot; subsequent edits create a new map.
+        const snapshot = model.data;
+        console.log('业务错误:', await submitOrder(snapshot));
+    } finally {
+        model.dispose();
+    }
 }
 
-// 创建复杂表单模型
-const orderFormModel = createModel<OrderForm>({
-  // 基本信息
-  userInfo: {
-    type: 'object',
-    default: {
-      name: '',
-      email: '',
-      phone: ''
-    },
-    validator: [
-      new Rule(
-        'objectValidation',
-        '用户信息不完整',
-        (value) => {
-          if (!value || typeof value !== 'object') return false;
-          return Boolean(value.name && value.email);
-        }
-      )
-    ]
-  },
-
-  // 邮箱字段(单独提取以便异步验证)
-  email: {
-    type: 'string',
-    validator: [
-      ValidationRules.required.withMessage('邮箱不能为空'),
-      ValidationRules.email.withMessage('邮箱格式无效'),
-      new Rule(
-        'emailUnique',
-        '邮箱已被注册',
-        checkEmailUnique
-      )
-    ],
-    reaction: {
-      // computed 返回值即为字段新值，框架会自动写入。无需在 action 中再调用 setField。
-      fields: ['userInfo'],
-      computed: (values) => values.userInfo?.email || ''
-    },
-    default: ''
- },
-
-  // 产品信息 - 数组
-  products: {
-    type: 'array',
-    default: [],
-    validator: [
-      new Rule(
-        'minProducts',
-        '至少选择一个产品',
-        (value) => Array.isArray(value) && value.length > 0
-      )
-    ]
-  },
-
-  // 总金额 - 依赖于产品数组
-  totalAmount: {
-    type: 'number',
-    default: 0,
-    reaction: {
-      fields: ['products'],
-      computed: (values) => {
-        if (!Array.isArray(values.products)) return 0;
-        return values.products.reduce((sum, product) => {
-          return sum + (product.price || 0) * (product.quantity || 0);
-        }, 0);
-      }
-    }
-  },
-
-  // 优惠券代码
-  couponCode: {
-    type: 'string',
-  },
-
-  // 折扣金额 - 依赖于总金额和优惠券
-  discountAmount: {
-    type: 'number',
-    default: 0,
-    reaction: {
-      fields: ['totalAmount', 'couponCode'],
-      computed: (values) => {
-        if (values.couponCode === 'DISCOUNT10') {
-          return values.totalAmount * 0.1;
-        } else if (values.couponCode === 'DISCOUNT20' && values.totalAmount >= 100) {
-          return values.totalAmount * 0.2;
-        }
-        return 0;
-      },
-      action: [() => {
-        const { couponCode, discountAmount } = orderFormModel.data;
-        if (discountAmount > 0) {
-          console.log(`应用优惠券 ${couponCode}，折扣金额: ${discountAmount}`);
-        }
-      }]
-    }
-  },
-
-  // 最终金额 - 依赖于总金额和折扣
-  finalAmount: {
-    type: 'number',
-    default: 0,
-    reaction: {
-      fields: ['totalAmount', 'discountAmount'],
-      computed: (values) => values.totalAmount - values.discountAmount
-    }
-  },
-
-  // 支付方式
-  paymentMethod: {
-    type: 'string',
-    validator: [ValidationRules.required.withMessage('请选择支付方式')],
-    default: ''
-  },
-
-  // 信用卡信息 - 条件验证（使用 condition + data 跨字段 API）
-  creditCardInfo: {
-    type: 'object',
-    default: {},
-    validator: [
-      new Rule(
-        'creditCardValidation',
-        '信用卡信息无效',
-        async (value) => {
-          if (!value || typeof value !== 'object') return false;
-          const isCardValid = await validateCreditCard(value.cardNumber || '');
-          const isExpiryValid = /^\d{2}\/\d{2}$/.test(value.expiry || '');
-          const isCvvValid = /^\d{3,4}$/.test(value.cvv || '');
-          return isCardValid && isExpiryValid && isCvvValid;
-        }
-      ).when((data) => data.paymentMethod === 'creditCard')
-    ]
-  }
-}, {
-  debounceReactions: 100,
-  asyncValidationTimeout: 5000
-});
-
-orderFormModel.on('validation:error', (error) => {
-  console.error(`验证错误 [${error.field}]: ${error.message}`);
-});
-orderFormModel.on('reaction:error', (error) => {
-  console.error(`反应错误: ${error.message}`);
-});
-
-// 运行示例
-async function runExample() {
-  console.log('=== 复杂表单示例 ===');
-
-  // 监听字段变化
-  orderFormModel.on('field:change', (data) => {
-    if (['totalAmount', 'discountAmount', 'finalAmount'].includes(data.field)) {
-      console.log(`${data.field}: ${data.value}`);
-    }
-  });
-
-  // 1. 设置用户信息
-  await orderFormModel.setField('userInfo', {
-    name: 'John Doe',
-    email: 'john.doe@example.com',
-    phone: '123-456-7890'
-  });
-
-  // 2. 添加产品
-  await orderFormModel.setField('products', [
-    { id: 1, name: '产品1', price: 50, quantity: 2 },
-    { id: 2, name: '产品2', price: 30, quantity: 1 }
-  ]);
-
-  // 3. 应用优惠券
-  await orderFormModel.setField('couponCode', 'DISCOUNT10');
-
-  // 4. 设置支付方式
-  await orderFormModel.setField('paymentMethod', 'creditCard');
-
-  // 5. 设置信用卡信息
-  await orderFormModel.setField('creditCardInfo', {
-    cardNumber: '1234567890123456',
-    expiry: '12/25',
-    cvv: '123'
-  });
-
-  // 等待所有 debounced reaction 与 in-flight 异步校验全部完成
-  await orderFormModel.settled();
-
-  // 6. 验证整个表单
-  const isValid = await orderFormModel.validateAll();
-  console.log('表单验证结果:', isValid);
-
-  if (isValid) {
-    console.log('订单提交成功，总金额:', orderFormModel.getField('finalAmount'));
-  } else {
-    console.log('验证错误摘要:', formatValidationErrors(orderFormModel.validationErrors));
-  }
-
-  // 清理资源
-  orderFormModel.dispose();
-}
-
-runExample();
+runExample().catch((error) => { console.error(error); process.exitCode = 1; });

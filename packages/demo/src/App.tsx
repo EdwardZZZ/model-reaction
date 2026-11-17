@@ -1,13 +1,13 @@
 import { useState } from 'react';
 import { ReactionChain } from './scenarios/ReactionChain';
-import { AsyncValidation } from './scenarios/AsyncValidation';
+import { AsyncAction } from './scenarios/AsyncAction';
 import { MultiInstance } from './scenarios/MultiInstance';
 
 type TabId = 'chain' | 'async' | 'multi';
 
 const TABS: Array<{ id: TabId; label: string }> = [
     { id: 'chain', label: 'Reaction chain' },
-    { id: 'async', label: 'Async validation' },
+    { id: 'async', label: 'Async action' },
     { id: 'multi', label: 'Multiple instances' },
 ];
 
@@ -41,7 +41,7 @@ export function App() {
 
             <main>
                 {tab === 'chain' && <ReactionChain />}
-                {tab === 'async' && <AsyncValidation />}
+                {tab === 'async' && <AsyncAction />}
                 {tab === 'multi' && <MultiInstance />}
             </main>
         </div>

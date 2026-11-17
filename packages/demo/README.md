@@ -5,8 +5,8 @@ its [DevTools extension](../devtools) across three scenarios:
 
 - **Reaction chain** — `firstName`/`lastName` → `fullName` → `greeting`
   (two derivation layers in the dependency graph).
-- **Async validation** — an async "username available?" check showing
-  `validating` state and `dirtyData` on rejection.
+- **Async action** — username edits commit immediately; a returned request
+  checks availability, with application revisions ignoring stale responses.
 - **Multiple instances** — two independent models on one page, exercising the
   DevTools panel's instance picker.
 
@@ -46,10 +46,8 @@ Each ready model is mounted at the scenario's form boundary with
 scenario lets each line-item card create, provide, and dispose its own model, so
 the two model contexts and lifecycles remain isolated.
 
-Text inputs keep their draft in local component state (see
-[`TextField`](src/TextField.tsx), which uses `useDraftField` from
-`model-reaction/react`) rather than reading `getField`, because the
-library uses verify-then-commit: a transiently invalid value never lands in
-`data`, so a value-from-`data` controlled input would snap back to empty while
-typing. This matches the library's guidance that edit-in-progress text is a
-local UI concern, not model state.
+[`TextField`](src/TextField.tsx) binds directly with `useModelFieldState`.
+Numeric controls parse their text with `Number` before writing, so empty text
+becomes `0` and intermediate spellings such as `2.` are not retained.
+Applications can add local text/IME handling when their input policy requires it.
+Business checks and request status belong to application code.

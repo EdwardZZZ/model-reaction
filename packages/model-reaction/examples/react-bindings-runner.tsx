@@ -18,12 +18,10 @@ async function runExample(): Promise<void> {
 
         console.log('=== React Bindings SSR Example ===');
         console.log(renderToString(<ModelProvider model={cart}><CartContents /></ModelProvider>));
-        await cart.setField('name', 'Zephyr');
-        await cart.setField('qty', 3);
-        await cart.setField('coupon', 'SAVE10');
+        cart.setFields({ name: 'Zephyr', qty: 3, coupon: 'SAVE10' });
         await cart.settled();
         console.log(renderToString(<ModelProvider model={cart}><CartContents /></ModelProvider>));
-        await inferred.setField('tax', 200);
+        inferred.setField('tax', 200);
     } finally {
         cart.dispose();
         inferred.dispose();

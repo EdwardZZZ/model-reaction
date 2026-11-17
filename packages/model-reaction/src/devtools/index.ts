@@ -16,14 +16,13 @@
  * code — it lives solely in this separately-bundled entry.
  *
  * The wrapper reads the model exclusively through its public API
- * (`data` / `getDirtyData()` / `validationErrors` / `on`) plus the schema it was
+ * (`data` / `on`) plus the schema it was
  * handed, so it needs no privileged access to `ModelManager` internals.
  */
 import { createModel as baseCreateModel } from '../index';
 import type {
     FieldSchema,
     Model,
-    ModelOptions,
     ModelReturn,
 } from '../types';
 import { ModelEvents } from '../types';
@@ -35,10 +34,9 @@ import {
 } from './devtools-hook';
 
 export const createModel: typeof baseCreateModel = (
-    schema: Record<string, FieldSchema>,
-    options: ModelOptions = {}
+    schema: Record<string, FieldSchema>
 ): ModelReturn<any> => {
-    const model = baseCreateModel(schema as Model<Record<string, any>>, options);
+    const model = baseCreateModel(schema as Model<Record<string, any>>);
 
     const hook = getDevtoolsHook();
     // Avoid building integration state when no front-end is listening.
@@ -53,13 +51,6 @@ export const createModel: typeof baseCreateModel = (
             // The data getters return stable shallow snapshots; serialization
             // in the DevTools agent handles transport formatting and size limits.
             data: model.data,
-            dirtyData: model.getDirtyData(),
-            errors: Object.fromEntries(
-                Object.entries(model.validationErrors).map(([field, errors]) => [
-                    field,
-                    [...errors],
-                ])
-            ),
         }),
         subscribe: (listener) =>
             model.on(ModelEvents.FIELD_CHANGE, ({ field, value }) =>
@@ -69,14 +60,6 @@ export const createModel: typeof baseCreateModel = (
                     timestamp: Date.now(),
                 })
             ),
-        subscribeSnapshot: (listener) => {
-            const unsubscribers = [
-                model.on(ModelEvents.FIELD_VALIDATION_COMPLETE, listener),
-                model.on(ModelEvents.DIRTY_DATA_CLEARED, listener),
-                model.on(ModelEvents.REACTION_ERROR, listener),
-            ];
-            return () => unsubscribers.forEach((unsubscribe) => unsubscribe());
-        },
     });
 
     // Chain the disposer so unregistering happens on the model's own lifecycle.

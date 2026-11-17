@@ -8,7 +8,6 @@ import {
 import type { ModelReturn } from '../types';
 import {
     useModelFieldState,
-    type FieldMeta,
     type FieldSetter,
 } from './field-state';
 
@@ -58,7 +57,6 @@ export function useModel<T extends Record<string, any>>(): ModelReturn<T> {
 export interface FieldRenderProps<V> {
     value: V;
     setValue: FieldSetter<V>;
-    meta: FieldMeta;
 }
 
 /** Props for `<Field>`. */
@@ -74,13 +72,12 @@ export interface FieldProps<
 
 /**
  * Bind a child render-prop to a single field of the surrounding model.
- * This exposes committed-value semantics; prefer `useDraftField` for text
- * inputs that must preserve rejected or in-flight edits.
+ * Inputs read committed values and write synchronously.
  *
  * ```tsx
  * <ModelProvider model={userModel}>
  *   <Field name="plan">
- *     {({ value, setValue, meta }) => (
+ *     {({ value, setValue }) => (
  *       <select value={value} onChange={e => setValue(e.target.value)}>
  *         <option value="free">Free</option>
  *         <option value="pro">Pro</option>
@@ -101,6 +98,6 @@ export function Field<
             '[model-reaction] <Field> requires either a `model` prop or a surrounding <ModelProvider>.'
         );
     }
-    const [value, setValue, meta] = useModelFieldState(model, props.name);
-    return props.children({ value, setValue, meta }) as ReactElement;
+    const [value, setValue] = useModelFieldState(model, props.name);
+    return props.children({ value, setValue }) as ReactElement;
 }

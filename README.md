@@ -14,7 +14,7 @@ The documentation index covers API contracts, React, architecture, and examples:
 
 | Package | Path | Description |
 | --- | --- | --- |
-| `model-reaction` | [packages/model-reaction](packages/model-reaction) | The core library: schema-driven model with validation, reactions, and batch operations. Published to npm. |
+| `model-reaction` | [packages/model-reaction](packages/model-reaction) | Field model with synchronous writes, computed dependencies, and scheduled actions. Published to npm. |
 | `model-reaction-devtools` | [packages/devtools](packages/devtools) | Browser DevTools extension: inspect the data tree, dependency graph, and change timeline. Not published. |
 | `model-reaction-demo` | [packages/demo](packages/demo) | Vite + React app demonstrating the library and the extension. Not published. |
 

@@ -2,7 +2,7 @@
  * docs/COMPARISON.md#one-field-in-three-styles — Code-style comparison
  *
  * The same `name: required` requirement, three styles. Only the
- * `model-reaction` variant is fully self-contained — the other two
+ * variants keep the requirement in application code — the other two
  * stubs intentionally elide the boilerplate they would normally
  * require.
  *
@@ -16,7 +16,6 @@ import { createSlice } from '@reduxjs/toolkit';
 import { create } from 'zustand';
 
 import { createModel } from 'model-reaction';
-import { ValidationRules } from 'model-reaction/validation';
 
 // Redux Toolkit
 export const userSlice = createSlice({
@@ -47,5 +46,9 @@ export const useUserStore = create<{
 
 // model-reaction
 export const userModel = createModel<{ name: string }>({
-    name: { type: 'string', default: '', validator: [ValidationRules.required] },
+    name: { type: 'string', default: '' },
 });
+export function setName(value: string): string {
+    userModel.setField('name', value);
+    return value ? '' : 'Name is required';
+}

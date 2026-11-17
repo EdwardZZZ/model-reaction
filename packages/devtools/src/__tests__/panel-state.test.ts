@@ -13,13 +13,11 @@ function makeInstance(id: number, timelineLen = 0): InstanceState {
     return {
         id,
         fields: {
-            a: { type: 'string', hasDefault: true, validatorCount: 0, reactionDeps: [] },
+            a: { type: 'string', hasDefault: true, reactionDeps: [] },
         },
         graph: { nodes: ['a'], edges: [] },
         snapshot: {
             data: { a: { t: 'primitive', v: '' } },
-            dirtyData: {},
-            errors: {},
         },
         timeline: Array.from({ length: timelineLen }, (_, i) => ({
             seq: i,
@@ -111,8 +109,6 @@ describe('panelReducer', () => {
             id: 1,
             snapshot: {
                 data: { a: { t: 'primitive', v: 'updated' } },
-                dirtyData: {},
-                errors: {},
             },
         });
         expect(state.instances.get(1)!.snapshot.data.a).toEqual({
@@ -127,7 +123,7 @@ describe('panelReducer', () => {
             source: AGENT_SOURCE,
             kind: 'snapshot',
             id: 999,
-            snapshot: { data: {}, dirtyData: {}, errors: {} },
+            snapshot: { data: {} },
         });
         expect(after).toBe(before);
     });

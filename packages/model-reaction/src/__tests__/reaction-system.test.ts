@@ -1,1317 +1,206 @@
-import { createModel, Model, Reaction, SKIP_REACTION } from '../index';
-import { ReactionSystem } from '../reaction/reaction-system';
-import { ModelManager } from '../core/model-manager';
-import { PendingTasks } from '../core/pending-tasks';
+import { createModel, ModelEvents, Reaction, SKIP_REACTION } from '../index';
 
-describe('ReactionSystem - via createModel', () => {
-    beforeEach(() => {
-        jest.spyOn(console, 'error').mockImplementation(() => {});
-        jest.spyOn(console, 'warn').mockImplementation(() => {});
-    });
-
-    afterEach(() => {
-        jest.restoreAllMocks();
-    });
-
-    test('triggers reactions when dependent fields change', async () => {
-        interface ReactionSchema {
-            firstName: string;
-            lastName: string;
-            fullName: string;
-        }
-        const schema: Model<ReactionSchema> = {
-            firstName: { type: 'string', default: '' },
-            lastName: { type: 'string', default: '' },
-            fullName: {
-                type: 'string',
-                default: '',
-                reaction: {
-                    fields: ['firstName', 'lastName'],
-                    computed: (values) =>
-                        `${values.firstName} ${values.lastName}`,
-                },
-            },
-        };
-        const model = createModel<ReactionSchema>(schema);
-        await model.setField('firstName', 'John');
-        await model.setField('lastName', 'Doe');
-        await model.settled();
-        expect(model.getField('fullName')).toBe('John Doe');
-        model.dispose();
-    });
-
-    test('runs a shared reaction definition once for each target field', async () => {
-        const sharedReaction: Reaction = {
-            fields: ['source'],
-            computed: (values) => values.source * 2,
-        };
-        const model = createModel(
-            {
-                source: { type: 'number' as const, default: 1 },
-                left: {
-                    type: 'number' as const,
-                    default: 0,
-                    reaction: sharedReaction,
-                },
-                right: {
-                    type: 'number' as const,
-                    default: 0,
-                    reaction: sharedReaction,
-                },
-            },
-            { debounceReactions: 5 }
-        );
-
-        await model.setField('source', 3);
-        await model.settled();
-
-        expect(model.getField('left')).toBe(6);
-        expect(model.getField('right')).toBe(6);
-        model.dispose();
-    });
-
-    test('runs an initial reaction pass so derived fields reflect defaults', async () => {
-        interface ReactionSchema {
-            firstName: string;
-            lastName: string;
-            fullName: string;
-        }
-        const schema: Model<ReactionSchema> = {
-            firstName: { type: 'string', default: 'Ada' },
-            lastName: { type: 'string', default: 'Lovelace' },
-            fullName: {
-                type: 'string',
-                default: '',
-                reaction: {
-                    fields: ['firstName', 'lastName'],
-                    computed: (v) => `${v.firstName} ${v.lastName}`.trim(),
-                },
-            },
-        };
-        const model = createModel<ReactionSchema>(schema);
-        // Without any user interaction, the derived field is computed from the
-        // seeded defaults rather than left at its own empty default.
-        await model.settled();
-        expect(model.getField('fullName')).toBe('Ada Lovelace');
-        model.dispose();
-    });
-
-    test('initial reaction pass cascades through a multi-layer chain', async () => {
-        // first/last -> full -> greeting. The second layer must see the
-        // committed `full` (not its empty default), so greeting derives fully.
-        interface S {
-            first: string;
-            last: string;
-            full: string;
-            greeting: string;
-        }
-        const schema: Model<S> = {
-            first: { type: 'string', default: 'Ada' },
-            last: { type: 'string', default: 'Lovelace' },
-            full: {
-                type: 'string',
-                default: '',
-                reaction: {
-                    fields: ['first', 'last'],
-                    computed: (v) => `${v.first} ${v.last}`.trim(),
-                },
-            },
-            greeting: {
-                type: 'string',
-                default: '',
-                reaction: {
-                    fields: ['full'],
-                    computed: (v) =>
-                        v.full ? `Hello, ${v.full}!` : 'Hello, stranger!',
-                },
-            },
-        };
-        const model = createModel<S>(schema);
-        await model.settled();
-        expect(model.getField('full')).toBe('Ada Lovelace');
-        expect(model.getField('greeting')).toBe('Hello, Ada Lovelace!');
-        model.dispose();
-    });
-
-    test('no initial reaction when a derived field has no default dependencies', async () => {
-        interface S {
-            source: string;
-            mirror: string;
-        }
-        // `source` has no default, so nothing is seeded for it; the reaction
-        // must not fire at construction (mirror keeps its own default).
-        const schema: Model<S> = {
-            source: { type: 'string' },
-            mirror: {
-                type: 'string',
-                default: 'untouched',
-                reaction: {
-                    fields: ['source'],
-                    computed: (v) => v.source,
-                },
-            },
-        };
-        const model = createModel<S>(schema);
-        await model.settled();
-        expect(model.getField('mirror')).toBe('untouched');
-        model.dispose();
-    });
-
-    test('emits reaction error and stores it under the computed field', async () => {
-        interface S {
-            input: string;
-            output: string;
-        }
-        const schema: Model<S> = {
-            input: { type: 'string', default: '' },
-            output: {
-                type: 'string',
-                default: '',
-                reaction: {
-                    fields: ['input'],
-                    computed: (values) => {
-                        if (values.input === 'error') {
-                            throw new Error('Computation error');
-                        }
-                        return values.input.toUpperCase();
-                    },
-                },
-            },
-        };
-        const model = createModel<S>(schema);
-
-        await model.setField('input', 'error');
-        await model.settled();
-
-        // The failure is recorded under the field the reaction computes,
-        // reachable via validationErrors[field] (not a hidden key).
-        expect(model.validationErrors).toHaveProperty('output');
-        expect(
-            model.validationErrors?.output?.[0]?.message
-        ).toContain('Computation error');
-        expect(model.validationErrors).not.toHaveProperty('__reactions');
-        model.dispose();
-    });
-
-    test('detects invalid (non-existent) dependent fields', async () => {
-        interface S {
-            validField: string;
-            invalidField: string;
-        }
-        const schema: Model<S> = {
-            validField: { type: 'string', default: 'valid' },
-            invalidField: {
-                type: 'string',
-                default: '',
-                reaction: {
-                    fields: ['validField', 'nonexistentField'],
-                    computed: (values) =>
-                        values.validField + (values.nonexistentField || ''),
-                },
-            },
-        };
-        const model = createModel<S>(schema);
-        const depErrors: Array<{ field?: string; message: string }> = [];
-        model.on('dependency:error', (error) => depErrors.push(error));
-
-        await model.setField('validField', 'test');
-        await model.settled();
-
-        expect(depErrors).toContainEqual(
-            expect.objectContaining({
-                field: 'invalidField',
-                message:
-                    'Dependency field nonexistentField is not defined',
-            })
-        );
-        model.dispose();
-    });
-
-    test('detects circular dependencies', async () => {
-        interface S {
-            fieldA: number;
-            fieldB: number;
-        }
-        const schema: Model<S> = {
-            fieldA: {
-                type: 'number',
-                default: 0,
-                reaction: {
-                    fields: ['fieldB'],
-                    computed: (v) => v.fieldB + 1,
-                },
-            },
-            fieldB: {
-                type: 'number',
-                default: 0,
-                reaction: {
-                    fields: ['fieldA'],
-                    computed: (v) => v.fieldA + 1,
-                },
-            },
-        };
-
-        const model = createModel<S>(schema);
-        const reactionErrors: Array<{ code: string; message: string }> = [];
-        model.on('reaction:error', (error) => reactionErrors.push(error));
-
-        await model.setField('fieldA', 1);
-        await model.settled();
-
-        expect(reactionErrors).toContainEqual(
-            expect.objectContaining({
-                code: 'circular_dependency',
-                message: expect.stringContaining(
-                    'Circular dependency detected'
-                ),
-            })
-        );
-        model.dispose();
-    });
-
-    test('legitimate undefined value in dep does NOT trigger DEPENDENCY_ERROR', async () => {
-        interface S {
-            source: any;
-            mirror: any;
-        }
-        const schema: Model<S> = {
-            source: { type: 'string' },
-            mirror: {
-                type: 'string',
-                reaction: {
-                    fields: ['source'],
-                    computed: (deps) => deps.source ?? 'fallback',
-                },
-            },
-        };
-        const model = createModel<S>(schema);
-        const depErrors: string[] = [];
-        model.on('dependency:error', (error) => {
-            depErrors.push(error.message);
-        });
-
-        await model.setField('source', undefined);
-        await model.settled();
-
-        expect(depErrors).toHaveLength(0);
-        model.dispose();
-    });
-
-    test.each([0, 1, 2])('rejects reaction arrays of length %i before initialization', (length) => {
-        const readDefault = jest.fn(() => 1);
-        const computed = jest.fn(() => 2);
-        const timeout = jest.spyOn(globalThis, 'setTimeout');
-        const schema: Model = {
-            source: { type: 'number', get default() { return readDefault(); } },
-            derived: { type: 'number', reaction: { fields: ['source'], computed } },
-            target: {
-                type: 'number',
-                // @ts-expect-error test JavaScript callers bypassing the public type
-                reaction: Array.from({ length }, () => ({ fields: ['source'], computed })),
-            },
-        };
-        try {
-            expect(() => createModel(schema, { debounceReactions: 5 })).toThrow(TypeError);
-            expect(() => createModel(schema)).toThrow(/target.*single reaction/);
-            expect(readDefault).not.toHaveBeenCalled();
-            expect(computed).not.toHaveBeenCalled();
-            expect(timeout).not.toHaveBeenCalled();
-        } finally {
-            timeout.mockRestore();
-        }
-    });
-
-    test.each([0, 5])(
-        'does not fall back to an earlier in-flight write when the latest is invalid (debounce: %s)',
-        async (debounceReactions) => {
-            const action = jest.fn();
-            let release!: (valid: boolean) => void;
-            let signalFirst!: () => void;
-            let signalLast!: () => void;
-            const first = new Promise<void>((resolve) => { signalFirst = resolve; });
-            const last = new Promise<void>((resolve) => { signalLast = resolve; });
-            const gate = new Promise<boolean>((resolve) => { release = resolve; });
-            const downstreamComputed = jest.fn(({ target }) => target * 2);
-            const model = createModel({
-                source: { type: 'number' },
-                target: {
-                    type: 'number',
-                    default: 10,
-                    validator: [{
-                        type: 'positive',
-                        message: 'must be positive',
-                        validate: (value) => {
-                            if (value === 1) {
-                                signalFirst();
-                                return gate;
-                            }
-                            signalLast();
-                            return value > 0;
-                        },
-                    }],
-                    reaction: {
-                        fields: ['source'], computed: ({ source }) => source, action: [action],
-                    },
-                },
-                downstream: {
-                    type: 'number',
-                    default: 20,
-                    reaction: { fields: ['target'], computed: downstreamComputed },
-                },
-            }, { debounceReactions });
-            const changes = jest.fn();
-            model.subscribe((data) => data.target, changes);
-            try {
-                await model.setField('source', 1);
-                await first;
-                await model.setField('source', -1);
-                await last;
-                release(true);
-                await model.settled();
-                expect(model.getField('target')).toBe(10);
-                expect(model.getDirtyData()).toEqual({ target: -1 });
-                expect(model.validationErrors.target).toEqual([
-                    { field: 'target', rule: 'positive', message: 'must be positive' },
-                ]);
-                expect(model.getField('downstream')).toBe(20);
-                expect(downstreamComputed).not.toHaveBeenCalled();
-                expect(changes).not.toHaveBeenCalled();
-                expect(action).not.toHaveBeenCalled();
-            } finally {
-                release(true);
-                model.dispose();
-            }
-        }
-    );
-
-    test('reactions on different fields trigger only relevant ones', async () => {
-        const spy1 = jest.fn();
-        const spy2 = jest.fn();
-
-        interface Schema {
-            dep1: string;
-            dep2: string;
-            target: string;
-            other: string;
-        }
-        const schema: Model<Schema> = {
-            dep1: { type: 'string', default: 'a' },
-            dep2: { type: 'string', default: 'b' },
-            target: {
-                type: 'string',
-                default: '',
-                reaction: {
-                    fields: ['dep1'],
-                    computed: (values) => {
-                        spy1();
-                        return values.dep1;
-                    },
-                },
-            },
-            other: {
-                type: 'string',
-                default: '',
-                reaction: {
-                    fields: ['dep2'],
-                    computed: (values) => {
-                        spy2();
-                        return values.dep2;
-                    },
-                },
-            },
-        };
-
-        const model = createModel<Schema>(schema);
-        // Defaults now fire an initial reaction pass at construction; wait for
-        // it and clear the spies so this test measures only the change below.
-        await model.settled();
-        spy1.mockClear();
-        spy2.mockClear();
-
-        await model.setField('dep1', 'changed');
-        await model.settled();
-
-        expect(spy1).toHaveBeenCalled();
-        expect(spy2).not.toHaveBeenCalled();
-        expect(model.getField('target')).toBe('changed');
-        model.dispose();
-    });
-
-    test('setFields triggers depending reaction only once', async () => {
-        const reactionFn = jest.fn(
-            (deps: Record<string, any>) => deps.a + deps.b
-        );
-        interface Schema {
-            a: number;
-            b: number;
-            c: number;
-        }
-        const schema: Model<Schema> = {
-            a: { type: 'number', default: 0 },
-            b: { type: 'number', default: 0 },
-            c: {
-                type: 'number',
-                default: 0,
-                reaction: {
-                    fields: ['a', 'b'],
-                    computed: reactionFn,
-                },
-            },
-        };
-        const model = createModel<Schema>(schema);
-        await model.settled();
-        reactionFn.mockClear();
-
-        await model.setFields({ a: 1, b: 2 });
-        await model.settled();
-
-        expect(reactionFn).toHaveBeenCalledTimes(1);
-        expect(model.getField('c')).toBe(3);
-        model.dispose();
-    });
-
-    test('setFields tracks only the real dependency path for cascaded reactions', async () => {
-        interface Schema {
-            a: number;
-            b: number;
-            c: number;
-        }
-        const model = createModel<Schema>({
-            a: { type: 'number', default: 0 },
-            b: {
-                type: 'number',
-                default: 0,
-                reaction: {
-                    fields: ['a'],
-                    computed: ({ a }) => a + 1,
-                },
-            },
-            c: {
-                type: 'number',
-                default: 0,
-                reaction: {
-                    fields: ['b'],
-                    computed: ({ b }) => b * 2,
-                },
-            },
-        });
-        await model.settled();
-
-        await model.setFields({ a: 2, c: 99 });
-        await model.settled();
-
-        expect(model.getField('b')).toBe(3);
-        expect(model.getField('c')).toBe(6);
-        model.dispose();
-    });
-
-    test('setFields fires reactions only for fields that actually changed', async () => {
-        const aReaction = jest.fn((deps: Record<string, any>) => deps.a);
-        const bAction = jest.fn();
-        interface Schema {
-            a: number;
-            b: number;
-            mirrorA: number;
-            mirrorB: number;
-        }
-        const schema: Model<Schema> = {
-            a: { type: 'number', default: 1 },
-            b: { type: 'number', default: 2 },
-            mirrorA: {
-                type: 'number',
-                default: 0,
-                reaction: { fields: ['a'], computed: aReaction },
-            },
-            mirrorB: {
-                type: 'number',
-                default: 0,
-                reaction: {
-                    fields: ['b'],
-                    computed: (deps) => deps.b,
-                    action: [bAction],
-                },
-            },
-        };
-        const model = createModel<Schema>(schema);
-        await model.settled();
-        aReaction.mockClear();
-        bAction.mockClear();
-
-        // `b` is set to its current value → not a real change. Its reaction's
-        // action must not fire, while `a` (a real change) still reacts.
-        await model.setFields({ a: 10, b: 2 });
-        await model.settled();
-
-        expect(aReaction).toHaveBeenCalledTimes(1);
-        expect(bAction).not.toHaveBeenCalled();
-        expect(model.getField('mirrorA')).toBe(10);
-        model.dispose();
-    });
-
-    test('does not run reaction action when computed value fails validation', async () => {
-        const action = jest.fn();
-        interface Schema {
-            source: string;
-            target: string;
-        }
-        const schema: Model<Schema> = {
-            source: { type: 'string', default: 'valid' },
-            target: {
-                type: 'string',
-                default: 'valid',
-                validator: [
-                    {
-                        type: 'minLength',
-                        message: 'Target must have at least 3 characters',
-                        validate: (value) =>
-                            typeof value === 'string' && value.length >= 3,
-                    },
-                ],
-                reaction: {
-                    fields: ['source'],
-                    computed: (deps) => deps.source,
-                    action: [action],
-                },
-            },
-        };
-        const model = createModel<Schema>(schema);
-        await model.settled();
-        action.mockClear();
-
-        await model.setField('source', 'no');
-        await model.settled();
-
-        expect(model.getField('target')).toBe('valid');
-        expect(model.getDirtyData()).toHaveProperty('target', 'no');
-        expect(action).not.toHaveBeenCalled();
-        model.dispose();
-    });
-
-    test('validateAll fires reactions only for fields that commit a change', async () => {
-        const action = jest.fn();
-        interface Schema {
-            source: string;
-            mirror: string;
-        }
-        const schema: Model<Schema> = {
-            source: { type: 'string', default: 'stable' },
-            mirror: {
-                type: 'string',
-                default: '',
-                reaction: {
-                    fields: ['source'],
-                    computed: (deps) => deps.source,
-                    action: [action],
-                },
-            },
-        };
-        const model = createModel<Schema>(schema);
-        await model.settled();
-        action.mockClear();
-
-        // Nothing is dirty and no value changes → validateAll must not
-        // re-fire the reaction action for unchanged fields.
-        await model.validateAll();
-        await model.settled();
-
-        expect(action).not.toHaveBeenCalled();
-        model.dispose();
-    });
-
-    test('async race in setField: latest value wins, intermediate reactions converge', async () => {
-        interface Schema {
-            field: string;
-        }
-        const schema: Model<Schema> = {
-            field: {
-                type: 'string',
-                validator: [
-                    {
-                        type: 'async',
-                        validate: async (val: any) => {
-                            if (val === 'slow') {
-                                await new Promise((resolve) =>
-                                    setTimeout(resolve, 50)
-                                );
-                                return true;
-                            }
-                            if (val === 'fast') {
-                                await new Promise((resolve) =>
-                                    setTimeout(resolve, 10)
-                                );
-                                return true;
-                            }
-                            return true;
-                        },
-                        message: 'error',
-                    },
-                ],
-                default: '',
-            },
-        };
-        const model = createModel<Schema>(schema);
-
-        const p1 = model.setField('field', 'slow');
-        const p2 = model.setField('field', 'fast');
-
-        await Promise.all([p1, p2]);
-        await model.settled();
-
-        expect(model.getField('field')).toBe('fast');
-        model.dispose();
-    });
-});
-
-describe('ReactionSystem - settled() waits for chained reactions and async actions', () => {
-    test('settled() should not resolve until chained reactions finish (no debounce)', async () => {
-        interface S {
-            a: number;
-            b: number;
-            c: number;
-        }
-        const schema: Model<S> = {
-            a: { type: 'number', default: 0 },
-            b: {
-                type: 'number',
-                default: 0,
-                reaction: {
-                    fields: ['a'],
-                    computed: (deps) => deps.a + 1,
-                },
-            },
-            c: {
-                type: 'number',
-                default: 0,
-                reaction: {
-                    fields: ['b'],
-                    computed: (deps) => deps.b + 1,
-                },
-            },
-        };
-
-        const model = createModel<S>(schema, { debounceReactions: 0 });
-
-        await model.setField('a', 10);
-        await model.settled();
-
-        expect(model.getField('b')).toBe(11);
-        expect(model.getField('c')).toBe(12);
-        model.dispose();
-    });
-
-    test('SKIP_REACTION bypasses validation, commit, action, and downstream reactions', async () => {
-        const targetValidator = jest.fn(() => true);
-        const targetComputed = jest.fn((): typeof SKIP_REACTION => SKIP_REACTION);
-        const targetAction = jest.fn();
-        const downstreamComputed = jest.fn(() => 'updated');
-        const targetSubscriber = jest.fn();
-        const reactionError = jest.fn();
-        interface S {
-            source: string;
-            target: string;
-            downstream: string;
-        }
-        const model = createModel<S>({
-            source: { type: 'string' },
-            target: {
-                type: 'string',
-                default: 'initial',
-                validator: [
-                    {
-                        type: 'test',
-                        message: 'invalid',
-                        validate: targetValidator,
-                    },
-                ],
-                reaction: {
-                    fields: ['source'],
-                    computed: targetComputed,
-                    action: [targetAction],
-                },
-            },
-            downstream: {
-                type: 'string',
-                default: 'downstream-initial',
-                reaction: {
-                    fields: ['target'],
-                    computed: downstreamComputed,
-                },
-            },
-        });
-        model.subscribe((data) => data.target, targetSubscriber);
-        model.on('reaction:error', reactionError);
-
-        await model.setField('source', 'update');
-        await model.settled();
-
-        expect(targetComputed).toHaveBeenCalledWith({ source: 'update' });
-        expect(model.getField('target')).toBe('initial');
-        expect(model.getField('downstream')).toBe('downstream-initial');
-        expect(targetValidator).not.toHaveBeenCalled();
-        expect(targetSubscriber).not.toHaveBeenCalled();
-        expect(targetAction).not.toHaveBeenCalled();
-        expect(downstreamComputed).not.toHaveBeenCalled();
-        expect(reactionError).not.toHaveBeenCalled();
-        model.dispose();
-    });
-
-    test('SKIP_REACTION does not cancel later computations for the same target', async () => {
-        const committedAction = jest.fn();
+describe('reaction computation', () => {
+    test('shares a reaction definition between distinct targets', () => {
+        const computed = jest.fn(({ input }) => input * 2);
+        const reaction: Reaction<number> = { fields: ['input', 'input'], computed };
         const model = createModel({
-            source: { type: 'string' as const },
-            target: {
-                type: 'string' as const,
-                default: 'initial',
-                reaction: {
-                    fields: ['source'],
-                    computed: ({ source }) => source === 'skip' ? SKIP_REACTION : source.toUpperCase(),
-                    action: [committedAction],
-                },
-            },
+            input: { type: 'number' },
+            left: { type: 'number', reaction },
+            right: { type: 'number', reaction },
         });
-
-        await model.setField('source', 'skip');
-        await model.settled();
-        expect(committedAction).not.toHaveBeenCalled();
-        await model.setField('source', 'update');
-        await model.settled();
-
-        expect(model.getField('target')).toBe('UPDATE');
-        expect(committedAction).toHaveBeenCalledTimes(1);
+        model.setField('input', 3);
+        expect(model.data).toEqual({ input: 3, left: 6, right: 6 });
+        expect(computed).toHaveBeenCalledTimes(2);
         model.dispose();
     });
 
-    test('a skipped later computation leaves an earlier committed value intact', async () => {
-        const firstAction = jest.fn();
+    test('does not initialize a target without seeded dependencies', () => {
+        const computed = jest.fn(() => 'updated');
         const model = createModel({
-            source: { type: 'number' },
-            target: {
-                type: 'number',
-                default: 0,
-                reaction: {
-                    fields: ['source'],
-                    computed: ({ source }) => source === 1 ? 1 : SKIP_REACTION,
-                    action: [firstAction],
-                },
-            },
+            input: { type: 'string' },
+            target: { type: 'string', default: 'initial', reaction: { fields: ['input'], computed } },
         });
-        try {
-            await model.setField('source', 1);
-            await model.settled();
-            expect(firstAction).toHaveBeenCalledTimes(1);
-            firstAction.mockClear();
-            await model.setField('source', 2);
-            await model.settled();
-            expect(model.getField('target')).toBe(1);
-            expect(firstAction).not.toHaveBeenCalled();
-        } finally {
-            model.dispose();
-        }
-    });
-
-    test('rejects an async computed value without committing it', async () => {
-        const action = jest.fn();
-        const errorMessage =
-            'reaction.computed must return synchronously; move async work to reaction.action';
-        const model = createModel({
-            source: { type: 'number' as const },
-            // @ts-expect-error a Promise is not a number; bypass the types to
-            // exercise the runtime guard.
-            target: {
-                type: 'number' as const,
-                default: 0,
-                reaction: {
-                    fields: ['source'],
-                    computed: async (deps) => deps.source * 2,
-                    action: [action],
-                },
-            },
-        });
-        const errors: string[] = [];
-        model.on('reaction:error', (error) => errors.push(error.message));
-
-        await model.setField('source', 5);
-        await model.settled();
-
-        expect(model.getField('target')).toBe(0);
-        expect(action).not.toHaveBeenCalled();
-        expect(errors).toEqual([errorMessage]);
-        expect(model.validationErrors.target?.[0]).toEqual(
-            expect.objectContaining({
-                rule: 'reaction_error',
-                message: errorMessage,
-            })
-        );
+        expect(computed).not.toHaveBeenCalled();
+        expect(model.data.target).toBe('initial');
         model.dispose();
     });
 
-    test('settled() resolves only after async reaction.action microtasks finish', async () => {
-        let releaseAction!: () => void;
-        let actionFinished = false;
-        interface S {
-            a: number;
-            b: number;
-        }
-        const schema: Model<S> = {
+    test('passes legitimate undefined dependencies without an error', () => {
+        const model = createModel({
+            input: { type: 'number' },
+            trigger: { type: 'number' },
+            target: { type: 'number', reaction: { fields: ['input', 'trigger'], computed: ({ input }) => input ?? 0 } },
+        });
+        const error = jest.fn();
+        model.on(ModelEvents.DEPENDENCY_ERROR, error);
+        model.setField('trigger', 1);
+        expect(model.data.target).toBe(0);
+        expect(error).not.toHaveBeenCalled();
+        model.dispose();
+    });
+
+    test('reports a missing dependency and supplies undefined', () => {
+        const model = createModel({
+            input: { type: 'number' },
+            target: { type: 'number', reaction: { fields: ['input', 'missing'], computed: ({ missing }) => missing ?? 7 } },
+        });
+        const error = jest.fn();
+        model.on(ModelEvents.DEPENDENCY_ERROR, error);
+        model.setField('input', 1);
+        expect(error).toHaveBeenCalledWith(expect.objectContaining({ code: 'dependency_error', field: 'target' }));
+        expect(model.data.target).toBe(7);
+        model.dispose();
+    });
+
+    test('detects runtime cycles without claiming cycles in independent batch paths', () => {
+        const model = createModel({
+            a: { type: 'number', reaction: { fields: ['b'], computed: ({ b }) => b + 1 } },
+            b: { type: 'number', reaction: { fields: ['a'], computed: ({ a }) => a + 1 } },
+        });
+        const error = jest.fn();
+        model.on(ModelEvents.REACTION_ERROR, error);
+        model.setField('a', 1);
+        expect(error).toHaveBeenCalledWith(expect.objectContaining({ code: 'circular_dependency' }));
+        model.dispose();
+
+        const independent = createModel({
             a: { type: 'number' },
-            b: {
-                type: 'number',
-                default: 0,
-                reaction: {
-                    fields: ['a'],
-                    computed: (deps) => deps.a * 2,
-                    action: [async () => {
-                        await new Promise<void>((resolve) => {
-                            releaseAction = resolve;
-                        });
-                        actionFinished = true;
-                    }],
-                },
-            },
-        };
-        const model = createModel<S>(schema);
-        await model.setField('a', 5);
-
-        let settled = false;
-        const settledPromise = model.settled().then(() => {
-            settled = true;
+            b: { type: 'number' },
+            c: { type: 'number', reaction: { fields: ['a'], computed: ({ a }) => a + 1 } },
+            d: { type: 'number', reaction: { fields: ['b', 'c'], computed: ({ b, c }) => b + c } },
         });
-        await Promise.resolve();
-        await Promise.resolve();
-
-        expect(settled).toBe(false);
-        expect(actionFinished).toBe(false);
-
-        releaseAction();
-        await settledPromise;
-        expect(actionFinished).toBe(true);
-        model.dispose();
+        const onError = jest.fn();
+        independent.on(ModelEvents.REACTION_ERROR, onError);
+        independent.setFields({ a: 1, b: 2 });
+        expect(independent.data.d).toBe(4);
+        expect(onError).not.toHaveBeenCalled();
+        independent.dispose();
     });
 
-    test('reports an async action rejection before settled resolves', async () => {
-        interface S {
-            source: number;
-            target: number;
-        }
-        const model = createModel<S>({
-            source: { type: 'number' },
-            target: {
-                type: 'number',
-                default: 0,
-                reaction: {
-                    fields: ['source'],
-                    computed: (deps) => deps.source * 2,
-                    action: [async () => {
-                        await Promise.resolve();
-                        throw new Error('async action failed');
-                    }],
-                },
-            },
-        });
-        const errors: string[] = [];
-        model.on('reaction:error', (error) => errors.push(error.message));
-
-        await model.setField('source', 4);
-        await model.settled();
-
-        expect(model.getField('target')).toBe(8);
-        expect(errors).toEqual(['async action failed']);
-        expect(model.validationErrors.target?.[0]).toEqual(
-            expect.objectContaining({
-                rule: 'reaction_error',
-                message: 'async action failed',
-            })
-        );
-        model.dispose();
+    test.each([[[]], [[{ fields: [], computed: () => 1 }]]])('rejects reaction arrays before initialization (%p)', (reaction) => {
+        expect(() => createModel({ target: { type: 'number', reaction } } as any)).toThrow('single reaction');
     });
 
-    test('settled() waits for debounced reactions to flush', async () => {
-        interface Schema {
-            source: string;
-            target: string;
-        }
-        const schema: Model<Schema> = {
-            source: { type: 'string', default: '' },
-            target: {
-                type: 'string',
-                default: '',
-                reaction: {
-                    fields: ['source'],
-                    computed: (deps) => deps.source.toUpperCase(),
-                },
-            },
-        };
-
-        const model = createModel<Schema>(schema, {
-            debounceReactions: 50,
-        });
-
-        await model.setField('source', 'hello');
-        // Debounced — should not have fired yet.
-        expect(model.getField('target')).toBe('');
-
-        await model.settled();
-
-        expect(model.getField('target')).toBe('HELLO');
-        model.dispose();
-    });
-
-    test('settled() stays pending when a debounced reaction is rescheduled', async () => {
+    test('SKIP_REACTION skips transforms, writes, actions and downstream work', async () => {
+        const transform = jest.fn(Number), action = jest.fn(), downstream = jest.fn(() => 3);
         const model = createModel({
-            source: { type: 'string', default: '' },
-            target: {
-                type: 'string',
-                default: '',
-                reaction: {
-                    fields: ['source'],
-                    computed: (deps) => deps.source.toUpperCase(),
-                },
-            },
-        }, { debounceReactions: 30 });
-
-        await model.setField('source', 'first');
-        let settled = false;
-        const settledPromise = model.settled().then(() => {
-            settled = true;
+            input: { type: 'number' },
+            target: { type: 'number', default: 1, transform, reaction: { fields: ['input'], computed: () => SKIP_REACTION, action: [action] } },
+            downstream: { type: 'number', reaction: { fields: ['target'], computed: downstream } },
         });
-
-        await model.setField('source', 'second');
-        await new Promise((resolve) => setTimeout(resolve, 10));
-        expect(settled).toBe(false);
-
-        await settledPromise;
-        expect(model.getField('target')).toBe('SECOND');
+        const listener = jest.fn();
+        model.subscribe((data) => data.target, listener);
+        model.setField('input', 2);
+        await model.settled();
+        expect(model.data.target).toBe(1);
+        for (const callback of [transform, action, downstream, listener]) expect(callback).not.toHaveBeenCalled();
         model.dispose();
     });
-});
 
-describe('ReactionSystem - lifecycle and rejected actions', () => {
-    test.each([false, true])(
-        'does not resume debounced work or record a late error after dispose (reject: %s)',
-        async (rejectAction) => {
-            let releaseAction!: () => void;
-            let signalStarted!: () => void;
-            const gate = new Promise<void>((resolve) => {
-                releaseAction = resolve;
-            });
-            const started = new Promise<void>((resolve) => {
-                signalStarted = resolve;
-            });
-            const laterComputed = jest.fn(() => 2);
-            const laterAction = jest.fn();
-            const model = createModel({
-                source: { type: 'number' },
-                target: {
-                    type: 'number',
-                    default: 0,
-                    reaction: {
-                        fields: ['source'],
-                        computed: () => 1,
-                        action: [async () => {
-                            signalStarted();
-                            await gate;
-                            if (rejectAction) throw new Error('late failure');
-                        }],
-                    },
-                },
-                downstream: {
-                    type: 'number',
-                    default: 0,
-                    reaction: {
-                        fields: ['target'],
-                        computed: laterComputed,
-                        action: [laterAction],
-                    },
-                },
-            }, { debounceReactions: 5 });
-            await model.setField('source', 1);
-            await started;
+    test('a later skip preserves the earlier synchronous computation and cancels its action', async () => {
+        const action = jest.fn();
+        const model = createModel({
+            input: { type: 'number' },
+            target: { type: 'number', reaction: { fields: ['input'], computed: ({ input }) => input === 2 ? SKIP_REACTION : input, action: [action] } },
+        });
+        model.setField('input', 1);
+        model.setField('input', 2);
+        await model.settled();
+        expect(model.data.target).toBe(1);
+        expect(action).not.toHaveBeenCalled();
+        model.dispose();
+    });
+
+    test.each([false, true])('reports Promise computed values without unhandled rejections (reject %s)', async (reject) => {
+        const action = jest.fn();
+        const model = createModel({
+            input: { type: 'number' },
+            target: {
+                type: 'number', default: 0,
+                reaction: { fields: ['input'], computed: () => reject ? Promise.reject(new Error('bad')) : Promise.resolve(2), action: [action] },
+            },
+        } as any);
+        const error = jest.fn();
+        model.on(ModelEvents.REACTION_ERROR, error);
+        model.setField('input', 1);
+        await model.settled();
+        expect(model.data.target).toBe(0);
+        expect(error).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining('must return synchronously') }));
+        expect(action).not.toHaveBeenCalled();
+        model.dispose();
+    });
+
+    test.each([null, undefined, 'offline', new Error('failed')])('normalizes computation failure %p and recovers', async (reason) => {
+        const action = jest.fn();
+        const model = createModel({
+            input: { type: 'number' },
+            target: { type: 'number', default: 0, reaction: {
+                fields: ['input'],
+                computed: ({ input }) => { if (input === 1) throw reason; return input; },
+                action: [action],
+            } },
+        });
+        const error = jest.fn();
+        model.on(ModelEvents.REACTION_ERROR, error);
+        model.setField('input', 1);
+        expect(error).toHaveBeenCalledWith(expect.objectContaining({
+            code: 'reaction_error', field: 'target',
+            message: reason instanceof Error ? reason.message : String(reason), originalError: expect.any(Error),
+        }));
+        expect(model.data.target).toBe(0);
+        model.setField('input', 2);
+        await model.settled();
+        expect(model.data.target).toBe(2);
+        expect(action).toHaveBeenCalledTimes(1);
+        model.dispose();
+    });
+
+    test('reports a computed transform failure and keeps the target unchanged', () => {
+        const model = createModel({
+            input: { type: 'number' },
+            target: { type: 'number', default: 0, transform: () => { throw new Error('bad transform'); }, reaction: { fields: ['input'], computed: () => 2 } },
+        });
+        const error = jest.fn();
+        model.on(ModelEvents.REACTION_ERROR, error);
+        model.setField('input', 1);
+        expect(model.data.target).toBe(0);
+        expect(error).toHaveBeenCalledWith(expect.objectContaining({ message: 'bad transform' }));
+        model.dispose();
+    });
+
+    test.each(['computed', 'transform', 'listener'])('does not continue after disposal from %s', async (stage) => {
+        const action = jest.fn();
+        const model = createModel({
+            input: { type: 'number' },
+            target: {
+                type: 'number', default: 0,
+                transform: (value) => { if (stage === 'transform') model.dispose(); return value; },
+                reaction: { fields: ['input'], computed: () => { if (stage === 'computed') model.dispose(); return 2; }, action: [action] },
+            },
+        });
+        if (stage === 'listener') model.subscribe((data) => data.target, () => model.dispose());
+        model.setField('input', 1);
+        await model.settled();
+        expect(model.data).toEqual({});
+        expect(action).not.toHaveBeenCalled();
+    });
+
+    test('computes every changed input synchronously before returning', () => {
+        const computed = jest.fn(({ input }) => input * 2);
+        const model = createModel({
+            input: { type: 'number' },
+            target: { type: 'number', default: 0, reaction: { fields: ['input'], computed } },
+        });
+        try {
+            model.setField('input', 1);
+            expect(model.data.target).toBe(2);
+            expect(computed).toHaveBeenCalledTimes(1);
+            model.setField('input', 2);
+            expect(model.data.target).toBe(4);
+            expect(computed).toHaveBeenCalledTimes(2);
+        } finally {
             model.dispose();
-            releaseAction();
-            // The owner releases settled waiters on dispose. A new event-loop
-            // turn drains these already-resolved action continuations.
-            await new Promise((resolve) => setTimeout(resolve, 0));
-
-            expect(laterComputed).toHaveBeenCalledTimes(1);
-            expect(laterAction).toHaveBeenCalledTimes(1);
-            expect(model.data).toEqual({});
-            expect(model.validationErrors).toEqual({});
-            expect(model.getDirtyData()).toEqual({});
         }
-    );
-
-    test('skips action when a target change listener disposes the model', async () => {
-        const action = jest.fn();
-        const model = createModel({
-            source: { type: 'number' },
-            target: {
-                type: 'number',
-                default: 0,
-                reaction: { fields: ['source'], computed: () => 1, action: [action] },
-            },
-        });
-        model.subscribe((data) => data.target, () => model.dispose());
-        await model.setField('source', 1);
-        await new Promise((resolve) => setTimeout(resolve, 0));
-        expect(action).not.toHaveBeenCalled();
-        expect(model.data).toEqual({});
-    });
-
-    test('does not recreate state when a target transform disposes the model', async () => {
-        const action = jest.fn();
-        const schema: Model<{ source: number; target: number }> = {
-            source: { type: 'number' },
-            target: {
-                type: 'number',
-                default: 0,
-                transform: (value) => {
-                    model.dispose();
-                    return value;
-                },
-                reaction: { fields: ['source'], computed: () => 1, action: [action] },
-            },
-        };
-        const model = createModel(schema);
-        await model.setField('source', 1);
-        await new Promise((resolve) => setTimeout(resolve, 0));
-        expect(action).not.toHaveBeenCalled();
-        expect(model.data).toEqual({});
-        expect(model.validationErrors).toEqual({});
-    });
-
-    test.each(['computed', 'action'] as const)(
-        'normalizes non-Error %s failures and recovers on the next update',
-        async (stage) => {
-            for (const reason of [null, undefined, 'offline', new Error('failed')]) {
-                const laterAction = jest.fn();
-                const model = createModel({
-                    source: { type: 'number' },
-                    target: {
-                        type: 'number',
-                        default: 0,
-                        reaction: {
-                            fields: ['source'],
-                            computed: ({ source }) => {
-                                if (source === 1 && stage === 'computed') throw reason;
-                                return source;
-                            },
-                            action: [() => {
-                                if (model.data.target === 1) return Promise.reject(reason);
-                                laterAction();
-                            }],
-                        },
-                    },
-                });
-                const snapshots: unknown[] = [];
-                const onError = jest.fn(() => {
-                    snapshots.push(model.validationErrors.target);
-                });
-                model.on('reaction:error', onError);
-                try {
-                    await model.setField('source', 1);
-                    await model.settled();
-                    const message = reason instanceof Error
-                        ? reason.message
-                        : String(reason);
-                    expect(onError).toHaveBeenCalledTimes(1);
-                    expect(onError).toHaveBeenCalledWith(expect.objectContaining({
-                        code: 'reaction_error',
-                        field: 'target',
-                        message,
-                        originalError: expect.any(Error),
-                    }));
-                    expect(snapshots).toEqual([[
-                        { field: 'target', rule: 'reaction_error', message },
-                    ]]);
-                    await model.setField('source', 2);
-                    await model.settled();
-                    expect(model.getField('target')).toBe(2);
-                    expect(laterAction).toHaveBeenCalledTimes(1);
-                    expect(model.validationErrors.target).toEqual([]);
-                } finally {
-                    model.dispose();
-                }
-            }
-        }
-    );
-});
-
-describe('ReactionSystem - direct unit tests', () => {
-    test('reaction error when dependency access throws', () => {
-        const errorSpy = jest
-            .spyOn(console, 'error')
-            .mockImplementation(() => {});
-
-        const callOrder: string[] = [];
-        const setError = jest.fn(() => callOrder.push('setError'));
-        const reportError = jest.fn(() => callOrder.push('reportError'));
-        const system = new ReactionSystem(
-            {
-                a: { type: 'string', default: '' },
-                b: {
-                    type: 'string',
-                    default: '',
-                    reaction: {
-                        fields: ['a'],
-                        computed: (values) => values.a,
-                    },
-                },
-            },
-            { debounceReactions: 0 },
-            {
-                getValue: () => {
-                    throw new Error('getValue failed');
-                },
-                setValue: async () => true,
-                setError,
-                reportError,
-            },
-            new PendingTasks()
-        );
-
-        system.triggerReactionsForFields(['a']);
-
-        expect(setError).toHaveBeenCalledWith(
-            'b',
-            expect.objectContaining({ rule: 'reaction_error' })
-        );
-        expect(reportError).toHaveBeenCalledWith(
-            'reaction:error',
-            expect.objectContaining({
-                code: 'reaction_error',
-                field: 'b',
-                message: 'getValue failed',
-            })
-        );
-        expect(callOrder).toEqual(['setError', 'reportError']);
-
-        errorSpy.mockRestore();
-    });
-
-    test('clears pending reaction timeouts on dispose', () => {
-        jest.useFakeTimers();
-        const clearSpy = jest.spyOn(globalThis, 'clearTimeout');
-
-        const system = new ReactionSystem(
-            {
-                input: { type: 'string', default: '' },
-                output: {
-                    type: 'string',
-                    default: '',
-                    reaction: {
-                        fields: ['input'],
-                        computed: (values) => values.input.toUpperCase(),
-                    },
-                },
-            },
-            { debounceReactions: 100 },
-            {
-                getValue: () => 'x',
-                setValue: async () => true,
-                setError: () => {},
-                reportError: () => {},
-            },
-            new PendingTasks()
-        );
-
-        system.triggerReactionsForFields(['input']);
-        system.dispose();
-
-        expect(clearSpy).toHaveBeenCalled();
-
-        jest.useRealTimers();
-    });
-
-    test('clears previous timeout when re-scheduling debounced reactions', () => {
-        jest.useFakeTimers();
-        const clearSpy = jest.spyOn(globalThis, 'clearTimeout');
-
-        const system = new ReactionSystem(
-            {
-                input: { type: 'string', default: '' },
-                output: {
-                    type: 'string',
-                    default: '',
-                    reaction: {
-                        fields: ['input'],
-                        computed: (values) => values.input.toUpperCase(),
-                    },
-                },
-            },
-            { debounceReactions: 50 },
-            {
-                getValue: () => 'x',
-                setValue: async () => true,
-                setError: () => {},
-                reportError: () => {},
-            },
-            new PendingTasks()
-        );
-
-        system.triggerReactionsForFields(['input']);
-        system.triggerReactionsForFields(['input']);
-
-        expect(clearSpy).toHaveBeenCalled();
-
-        jest.useRealTimers();
-    });
-
-    test('scheduleReaction / processReaction work with default reactionStack', () => {
-        const reaction = {
-            fields: ['input'],
-            computed: (values: Record<string, any>) => values.input,
-        };
-
-        const system = new ReactionSystem(
-            {
-                input: { type: 'string', default: '' },
-                output: { type: 'string', default: '', reaction },
-            },
-            { debounceReactions: 0 },
-            {
-                getValue: () => 'x',
-                setValue: async () => true,
-                setError: () => {},
-                reportError: () => {},
-            },
-            new PendingTasks()
-        );
-
-        const anySystem = system as any;
-        const job = { field: 'output', reaction };
-        anySystem.scheduleReaction(job, 0);
-        anySystem.processReaction(job);
-    });
-
-    test('dispose on ModelManager clears scheduled reactions', async () => {
-        const spy = jest.fn();
-        interface Schema {
-            source: string;
-            target: string;
-        }
-        const schema: Model<Schema> = {
-            source: { type: 'string', default: 'a' },
-            target: {
-                type: 'string',
-                default: 'b',
-                reaction: {
-                    fields: ['source'],
-                    computed: (values) => {
-                        spy();
-                        return values.source;
-                    },
-                },
-            },
-        };
-
-        const manager = new ModelManager<Schema>(schema, {
-            debounceReactions: 100,
-        });
-
-        manager.setField('source', 'changed');
-        manager.dispose();
-
-        await new Promise((r) => setTimeout(r, 150));
-        expect(spy).not.toHaveBeenCalled();
     });
 });

@@ -159,7 +159,7 @@ describe('deepEqual', () => {
             const onSelection = jest.fn();
             model.subscribe((data) => data.value, onSelection);
 
-            expect(await model.setField('value', next)).toBe(true);
+            expect(model.setField('value', next)).toBeUndefined();
             await model.settled();
             expect(model.getField('value')).toBe(next);
             expect(model.getField('mirror')).toBe(next);

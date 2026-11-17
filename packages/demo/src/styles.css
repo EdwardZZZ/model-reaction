@@ -5,8 +5,6 @@
   --border: #e2e2e5;
   --accent: #0e639c;
   --accent-fg: #fff;
-  --warn: #b45309;
-  --error: #dc2626;
   --card: #fff;
 }
 
@@ -122,29 +120,6 @@ code {
   border: 1px solid var(--border);
   border-radius: 6px;
   font: inherit;
-}
-
-.field input[aria-invalid='true'] {
-  border-color: var(--error);
-}
-
-.field-error {
-  color: var(--error);
-  font-size: 12px;
-}
-
-.badge {
-  font-size: 10px;
-  font-weight: 500;
-  color: var(--accent);
-  background: #e6f0f6;
-  border-radius: 8px;
-  padding: 1px 6px;
-}
-
-.badge-warn {
-  color: var(--warn);
-  background: #fef3e2;
 }
 
 .derived {

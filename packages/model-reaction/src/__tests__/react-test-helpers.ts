@@ -1,6 +1,5 @@
 import { useRef } from 'react';
 import { createModel } from '../index';
-import { ValidationRules } from '../validation';
 import { useModelSelector } from '../react';
 import type { ModelReturn } from '../types';
 
@@ -39,7 +38,7 @@ export function makeOrderModel() {
             ],
         },
         coupon: { type: 'string', default: '' },
-        note: { type: 'string', default: '', validator: [ValidationRules.string] },
+        note: { type: 'string', default: '' },
     });
 }
 

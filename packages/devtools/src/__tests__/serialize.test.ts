@@ -187,31 +187,19 @@ describe('serializeRecord', () => {
 });
 
 describe('serializeSnapshot', () => {
-    test('shares one budget across committed, dirty, and error values', () => {
+    test('shares one budget across committed values', () => {
         const options = { ...DEFAULT_SERIALIZE_OPTIONS, maxBytes: 2048 };
         const snapshot = serializeSnapshot({
             data: { a: '汉字'.repeat(1000), b: 'text'.repeat(1000) },
-            dirtyData: { a: 'invalid'.repeat(1000) },
-            errors: { a: [{ field: 'a', message: 'error'.repeat(1000) }] },
         }, options);
         expect(Buffer.byteLength(JSON.stringify(snapshot))).toBeLessThanOrEqual(options.maxBytes);
         expect(snapshot.truncated).toBe(true);
     });
 
-    test('caps error lists and their text within the same wire budget', () => {
-        const options = { ...DEFAULT_SERIALIZE_OPTIONS, maxItems: 2, maxStringLength: 5, maxBytes: 2048 };
-        const error = { field: 'field'.repeat(50), message: '错误\0'.repeat(50), rule: 'rule'.repeat(50) };
-        const snapshot = serializeSnapshot({ data: {}, dirtyData: {}, errors: { a: [error, error, error] } }, options);
-        expect(snapshot.errors.a).toHaveLength(2);
-        expect(snapshot.errors.a?.[0]?.message).toContain('chars');
-        expect(snapshot.truncated).toBe(true);
-        expect(Buffer.byteLength(JSON.stringify(snapshot))).toBeLessThanOrEqual(options.maxBytes);
-    });
-
     test('signals omitted top-level fields without inventing a field name', () => {
         const options = { ...DEFAULT_SERIALIZE_OPTIONS, maxItems: 1 };
         const snapshot = serializeSnapshot({
-            data: { a: 1, b: 2 }, dirtyData: {}, errors: {},
+            data: { a: 1, b: 2 },
         }, options);
         expect(snapshot.data).toEqual({ a: { t: 'primitive', v: 1 } });
         expect(snapshot.truncated).toBe(true);

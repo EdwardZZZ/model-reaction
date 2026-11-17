@@ -1,5 +1,4 @@
 import { createModel } from 'model-reaction/devtools';
-import { ValidationRules } from 'model-reaction/validation';
 import { ModelProvider, useModel, useModelField } from 'model-reaction/react';
 import { TextField } from '../TextField';
 import { useOwnedModel } from '../useOwnedModel';
@@ -22,12 +21,10 @@ export function ReactionChain() {
             firstName: {
                 type: 'string',
                 default: 'Ada',
-                validator: [ValidationRules.required.withMessage('First name required')],
             },
             lastName: {
                 type: 'string',
                 default: 'Lovelace',
-                validator: [ValidationRules.required.withMessage('Last name required')],
             },
             fullName: {
                 type: 'string',
