@@ -6,7 +6,7 @@
       "model-reaction": ["./src/index.ts"],
       "model-reaction/react": ["./src/react/index.ts"],
       "model-reaction/validation": ["./src/validation/index.ts"],
-      "model-reaction/devtools": ["./src/devtools/index.ts"]
+      "model-reaction/devtools": ["./src/devtools.ts"]
     }
   },
   "include": ["examples/**/*"],

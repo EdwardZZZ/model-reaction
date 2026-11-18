@@ -45,10 +45,6 @@ export function createModel<T extends Record<string, any>>(
 export function createModel(
     schema: Record<string, FieldSchema>,
     options: ModelOptions = {}
-): ModelReturn<any> {
-    const manager = new ModelManager<Record<string, any>>(
-        schema as Model<Record<string, any>>,
-        options
-    );
-    return manager as unknown as ModelReturn<any>;
+): ModelReturn<Record<string, any>> {
+    return new ModelManager<Record<string, any>>(schema, options);
 }

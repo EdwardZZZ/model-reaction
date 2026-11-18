@@ -6,11 +6,10 @@ import {
     SKIP_REACTION,
     ValidationError,
 } from '../types';
-import type { CommitOptions } from '../core/internal-types';
+import type { CommitOptions } from '../core/write-preparation';
 import { eachReactionEdge } from './reaction-graph';
 import { PendingTasks } from '../core/pending-tasks';
 import { ActionExecutor } from './action-executor';
-import type { ReactionJob } from './reaction-job';
 
 type ReactionErrorEvent =
     | typeof ModelEvents.REACTION_ERROR
@@ -41,7 +40,7 @@ function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
 }
 
 export class ReactionSystem {
-    private reactionDeps: Map<string, ReactionJob[]> = new Map();
+    private reactionDeps = new Map<string, Set<string>>();
     private initializingFields = new Set<string>();
     private reactionTimeouts = new Map<string, ScheduledReaction>();
     private schema: Model;
@@ -69,20 +68,14 @@ export class ReactionSystem {
     }
 
     private collectReactions(): void {
-        // The "reaction.fields → edge" reading lives in eachReactionEdge, so
-        // this index and the DevTools graph never diverge on how dependencies
-        // are interpreted.
-        const jobsByField = new Map<string, ReactionJob>();
-        eachReactionEdge(this.schema, (field, depField, reaction) => {
-            let job = jobsByField.get(field);
-            if (!job) {
-                job = { field, reaction };
-                jobsByField.set(field, job);
+        // Shared dependency parsing with DevTools; see docs/ARCHITECTURE.md.
+        eachReactionEdge(this.schema, (field, depField) => {
+            let dependents = this.reactionDeps.get(depField);
+            if (!dependents) {
+                dependents = new Set<string>();
+                this.reactionDeps.set(depField, dependents);
             }
-            if (!this.reactionDeps.has(depField)) {
-                this.reactionDeps.set(depField, []);
-            }
-            this.reactionDeps.get(depField)!.push(job);
+            dependents.add(field);
         });
     }
 
@@ -93,24 +86,18 @@ export class ReactionSystem {
     ): void {
         if (this.disposed) return;
         const debounceTime = this.options.debounceReactions ?? 0;
-        const jobsToTrigger = new Map<ReactionJob, string>();
+        const fieldsToTrigger = new Map<string, string>();
 
-        changedFields.forEach((changedField) => {
-            const deps = this.reactionDeps.get(changedField);
-            if (deps) {
-                deps.forEach((job) => {
-                    if (!jobsToTrigger.has(job)) {
-                        jobsToTrigger.set(job, changedField);
-                    }
-                });
+        for (const changedField of changedFields) {
+            for (const field of this.reactionDeps.get(changedField) ?? []) {
+                if (!fieldsToTrigger.has(field)) {
+                    fieldsToTrigger.set(field, changedField);
+                }
             }
-        });
+        }
 
-        if (jobsToTrigger.size === 0) return;
-
-        jobsToTrigger.forEach((changedField, job) => {
+        fieldsToTrigger.forEach((changedField, field) => {
             if (this.disposed) return;
-            const { field } = job;
             if (reactionStack.includes(field)) {
                 this.callbacks.reportError(ModelEvents.REACTION_ERROR, {
                     code: 'circular_dependency',
@@ -121,20 +108,23 @@ export class ReactionSystem {
             }
 
             if (initializeReactions) this.initializingFields.add(field);
-            this.scheduleReaction(job, debounceTime, [...reactionStack, changedField]);
+            this.scheduleReaction(field, debounceTime, [...reactionStack, changedField]);
         });
     }
 
     private scheduleReaction(
-        job: ReactionJob,
+        field: string,
         debounceTime: number,
         reactionStack: string[] = []
     ): void {
         // Register the replacement before releasing the old task so settled()
         // never observes a false idle state during debounce rescheduling.
         const endTask = this.pendingTasks.begin();
+        const run = () => {
+            void this.processReaction(field, reactionStack).finally(endTask);
+        };
         if (debounceTime > 0) {
-            const scheduled = this.reactionTimeouts.get(job.field);
+            const scheduled = this.reactionTimeouts.get(field);
             if (scheduled) {
                 clearTimeout(scheduled.timeoutId);
                 scheduled.endTask();
@@ -142,31 +132,23 @@ export class ReactionSystem {
             const pending: ScheduledReaction = {
                 endTask,
                 timeoutId: setTimeout(() => {
-                    this.reactionTimeouts.delete(job.field);
-                    this.runReaction(job, reactionStack, endTask);
+                    this.reactionTimeouts.delete(field);
+                    run();
                 }, debounceTime),
             };
-            this.reactionTimeouts.set(job.field, pending);
+            this.reactionTimeouts.set(field, pending);
         } else {
-            this.runReaction(job, reactionStack, endTask);
+            run();
         }
     }
 
-    private runReaction(
-        job: ReactionJob,
-        reactionStack: string[],
-        endTask: () => void
-    ): void {
-        void this.processReaction(job, reactionStack).finally(endTask);
-    }
-
     private async processReaction(
-        job: ReactionJob,
-        reactionStack: string[]
+        field: string,
+        reactionStack: string[] = []
     ): Promise<void> {
         if (this.disposed) return;
-        const { field, reaction } = job;
         try {
+            const reaction = this.schema[field]!.reaction!;
             const dependentValues: Record<string, any> = Object.create(null);
             for (const f of reaction.fields) {
                 if (this.disposed) return;
@@ -199,8 +181,10 @@ export class ReactionSystem {
                 initializeReactions: this.initializingFields.has(field),
             });
             if (this.disposed) return;
-            if (committed) this.initializingFields.delete(field);
-            if (committed) this.actionExecutor.register(job);
+            if (committed) {
+                this.initializingFields.delete(field);
+                this.actionExecutor.register(field, reaction.action);
+            }
         } catch (error) {
             this.handleReactionError(field, error);
         }

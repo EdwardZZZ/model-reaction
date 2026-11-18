@@ -3,15 +3,47 @@
  * registration through the global hook, snapshots via the public API, and the
  * zero-touch pass-through when no DevTools front-end is present.
  */
-import { createModel } from '../devtools';
+import * as devtoolsEntry from '../devtools';
 import { createModel as baseCreateModel } from '../index';
-import {
-    DEVTOOLS_HOOK_KEY,
-    type DevtoolsChange,
-    type DevtoolsModelInstance,
-    type ModelReactionDevtoolsHook,
-} from '../devtools/devtools-hook';
-import type { Model } from '../types';
+import type { FieldSchema, Model, ValidationError } from '../types';
+import { ValidationRules } from '../validation';
+
+const { createModel } = devtoolsEntry;
+const DEVTOOLS_HOOK_KEY = '__MODEL_REACTION_DEVTOOLS_HOOK__';
+
+/** Test doubles describe the observable global-hook contract. */
+interface DevtoolsChange {
+    field: string;
+    value: unknown;
+    timestamp: number;
+}
+
+interface DevtoolsModelInstance {
+    readonly id: number;
+    getFields(): Record<string, {
+        type: FieldSchema['type'];
+        hasDefault: boolean;
+        validatorCount: number;
+        reactionDeps: string[];
+        actions?: Array<{ reactionIndex: number; actionIndex: number; name: string }>;
+    }>;
+    getDependencyGraph(): {
+        nodes: string[];
+        edges: Array<{ from: string; to: string }>;
+    };
+    getSnapshot(): {
+        data: Record<string, unknown>;
+        dirtyData: Record<string, unknown>;
+        errors: Record<string, ValidationError[]>;
+    };
+    subscribe(listener: (change: DevtoolsChange) => void): () => void;
+    subscribeSnapshot?(listener: () => void): () => void;
+}
+
+interface ModelReactionDevtoolsHook {
+    register(instance: DevtoolsModelInstance): void;
+    unregister(id: number): void;
+}
 
 interface Person {
     firstName: string;
@@ -221,5 +253,209 @@ describe('model-reaction/devtools createModel', () => {
         // Importing from the root must not wire DevTools.
         expect(instances).toHaveLength(0);
         model.dispose();
+    });
+
+    describe('hook contract', () => {
+        test('lists action indices with reactionIndex zero without changing calculation edges', () => {
+            function save() {}
+            const instances = installHook();
+            const model = createModel({
+                source: { type: 'number' },
+                target: { type: 'number', reaction: {
+                    fields: ['source'], computed: () => 1, action: [save, save, () => {}],
+                } },
+            });
+            const instance = instances[0]!;
+            const fields = instance.getFields();
+            expect(fields.target?.actions).toEqual([
+                { reactionIndex: 0, actionIndex: 0, name: 'save' },
+                { reactionIndex: 0, actionIndex: 1, name: 'save' },
+                { reactionIndex: 0, actionIndex: 2, name: '' },
+            ]);
+            expect(fields.source?.actions).toBeUndefined();
+            expect(instance.getDependencyGraph()).toEqual({
+                nodes: ['source', 'target'], edges: [{ from: 'source', to: 'target' }],
+            });
+            model.dispose();
+        });
+
+        describe('hook detection', () => {
+            test('exports only createModel and works when no hook is installed', () => {
+                expect(Object.keys(devtoolsEntry)).toEqual(['createModel']);
+                const model = createModel({ value: { type: 'number', default: 1 } });
+                expect(model.getField('value')).toBe(1);
+                model.dispose();
+            });
+
+            test('ignores a malformed hook with missing methods', () => {
+                (globalThis as Record<string, unknown>)[DEVTOOLS_HOOK_KEY] = {
+                    register: 'not a function',
+                };
+                const model = createModel({});
+                expect(() => model.dispose()).not.toThrow();
+            });
+
+            test('does not register when only one hook method is present', () => {
+                const register = jest.fn();
+                (globalThis as Record<string, unknown>)[DEVTOOLS_HOOK_KEY] = { register };
+                const model = createModel({});
+                expect(register).not.toHaveBeenCalled();
+                model.dispose();
+            });
+
+            test('uses the installed hook when it satisfies the contract', () => {
+                const register = jest.fn();
+                const unregister = jest.fn();
+                (globalThis as Record<string, unknown>)[DEVTOOLS_HOOK_KEY] = { register, unregister };
+                const model = createModel({});
+                expect(register).toHaveBeenCalledTimes(1);
+                const instance = register.mock.calls[0]![0] as DevtoolsModelInstance;
+                model.dispose();
+                expect(unregister).toHaveBeenCalledWith(instance.id);
+            });
+        });
+
+        describe('defensive registration', () => {
+            test('assigns a unique id and forwards each model to register', () => {
+                const registered = installHook();
+                const first = createModel({});
+                const second = createModel({});
+                expect(registered).toHaveLength(2);
+                expect(registered[0]!.id).not.toBe(registered[1]!.id);
+                first.dispose();
+                second.dispose();
+            });
+
+            test('model disposal calls unregister with the instance id', () => {
+                let registeredId = -1;
+                let unregisteredId = -1;
+                (globalThis as Record<string, unknown>)[DEVTOOLS_HOOK_KEY] = {
+                    register: (instance) => { registeredId = instance.id; },
+                    unregister: (id) => { unregisteredId = id; },
+                } satisfies ModelReactionDevtoolsHook;
+                const model = createModel({});
+                model.dispose();
+                expect(unregisteredId).toBe(registeredId);
+            });
+
+            test('swallows a throwing register without attempting unregister', () => {
+                const hook: ModelReactionDevtoolsHook = {
+                    register: () => { throw new Error('devtools boom'); },
+                    unregister: jest.fn(),
+                };
+                (globalThis as Record<string, unknown>)[DEVTOOLS_HOOK_KEY] = hook;
+                const model = createModel({});
+                expect(() => model.dispose()).not.toThrow();
+                expect(hook.unregister).not.toHaveBeenCalled();
+            });
+
+            test('swallows a throwing unregister', () => {
+                (globalThis as Record<string, unknown>)[DEVTOOLS_HOOK_KEY] = {
+                    register: () => {},
+                    unregister: () => { throw new Error('unregister boom'); },
+                } satisfies ModelReactionDevtoolsHook;
+                const model = createModel({});
+                expect(() => model.dispose()).not.toThrow();
+            });
+        });
+
+        describe('field metadata', () => {
+            test('summarises type, default, validator count, and reaction deps', () => {
+                const instances = installHook();
+                const model = createModel({
+                    first: { type: 'string', default: '' },
+                    last: {
+                        type: 'string',
+                        validator: [ValidationRules.required],
+                    },
+                    full: {
+                        type: 'string',
+                        reaction: {
+                            fields: ['first', 'last'],
+                            computed: (v) => `${v.first} ${v.last}`,
+                        },
+                    },
+                });
+                const info = instances[0]!.getFields();
+                expect(info.first).toEqual({
+                    type: 'string',
+                    hasDefault: true,
+                    validatorCount: 0,
+                    reactionDeps: [],
+                });
+                expect(info.last!.hasDefault).toBe(false);
+                expect(info.last!.validatorCount).toBe(1);
+                expect(info.full!.reactionDeps).toEqual(['first', 'last']);
+                model.dispose();
+            });
+
+            test('dedupes repeated reaction dependencies', () => {
+                const instances = installHook();
+                const model = createModel({
+                    a: { type: 'number', default: 0 },
+                    b: { type: 'number', default: 0 },
+                    c: {
+                        type: 'number',
+                        reaction: { fields: ['a', 'b', 'a'], computed: (v) => v.a + v.b },
+                    },
+                });
+                expect(instances[0]!.getFields().c!.reactionDeps).toEqual(['a', 'b']);
+                model.dispose();
+            });
+        });
+
+        describe('dependency graph', () => {
+            test('nodes cover every field; edges point dependency -> computed', () => {
+                const instances = installHook();
+                const model = createModel({
+                    firstName: { type: 'string', default: '' },
+                    lastName: { type: 'string', default: '' },
+                    fullName: {
+                        type: 'string',
+                        reaction: {
+                            fields: ['firstName', 'lastName'],
+                            computed: (v) => `${v.firstName} ${v.lastName}`,
+                        },
+                    },
+                });
+                const graph = instances[0]!.getDependencyGraph();
+                expect(graph.nodes).toEqual(['firstName', 'lastName', 'fullName']);
+                expect(graph.edges).toEqual(
+                    expect.arrayContaining([
+                        { from: 'firstName', to: 'fullName' },
+                        { from: 'lastName', to: 'fullName' },
+                    ])
+                );
+                expect(graph.edges).toHaveLength(2);
+                model.dispose();
+            });
+
+            test('a schema with no reactions has nodes but no edges', () => {
+                const instances = installHook();
+                const model = createModel({
+                    a: { type: 'string', default: '' },
+                    b: { type: 'number', default: 0 },
+                });
+                expect(instances[0]!.getDependencyGraph()).toEqual({
+                    nodes: ['a', 'b'], edges: [],
+                });
+                model.dispose();
+            });
+
+            test('dedupes repeated dependencies into a single edge', () => {
+                const instances = installHook();
+                const model = createModel({
+                    a: { type: 'number', default: 0 },
+                    b: { type: 'number', default: 0 },
+                    sum: {
+                        type: 'number',
+                        reaction: { fields: ['a', 'b', 'a'], computed: (v) => v.a + v.b },
+                    },
+                });
+                const edges = instances[0]!.getDependencyGraph().edges;
+                expect(edges.filter((e) => e.from === 'a' && e.to === 'sum')).toHaveLength(1);
+                model.dispose();
+            });
+        });
     });
 });

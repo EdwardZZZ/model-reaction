@@ -1,7 +1,7 @@
 import { eachReactionEdge } from '../reaction/reaction-graph';
 import { ReactionSystem } from '../reaction/reaction-system';
 import { PendingTasks } from '../core/pending-tasks';
-import { buildDependencyGraph, buildFieldInfo } from '../devtools/devtools-hook';
+import { createModel as createDevtoolsModel } from '../devtools';
 import type { Model } from '../types';
 
 /**
@@ -21,7 +21,7 @@ function edgesFromPrimitive(schema: Model): string[] {
 
 /**
  * Edges as the *runtime* actually indexes them: read `ReactionSystem`'s private
- * `reactionDeps` map (depField -> [{ field }]) and flatten it. This is the map
+ * `reactionDeps` map (depField -> Set<field>) and flatten it. This is the map
  * that drives real reaction scheduling, so matching it proves the DevTools
  * graph reflects runtime behaviour.
  */
@@ -37,13 +37,13 @@ function edgesFromRuntime(schema: Model): string[] {
         },
         new PendingTasks()
     );
-    const reactionDeps: Map<string, Array<{ field: string }>> = (
-        system as unknown as { reactionDeps: Map<string, Array<{ field: string }>> }
+    const reactionDeps = (
+        system as unknown as { reactionDeps: Map<string, Set<string>> }
     ).reactionDeps;
 
     const edges: Array<{ from: string; to: string }> = [];
     reactionDeps.forEach((dependents, from) => {
-        dependents.forEach(({ field: to }) => edges.push({ from, to }));
+        dependents.forEach((to) => edges.push({ from, to }));
     });
     system.dispose();
     return edgeKeys(edges);
@@ -51,7 +51,29 @@ function edgesFromRuntime(schema: Model): string[] {
 
 /** Edges as the DevTools graph projection produces them. */
 function edgesFromGraph(schema: Model): string[] {
-    return edgeKeys(buildDependencyGraph(buildFieldInfo(schema)).edges);
+    const key = '__MODEL_REACTION_DEVTOOLS_HOOK__';
+    const globals = globalThis as Record<string, unknown>;
+    const hadHook = Object.prototype.hasOwnProperty.call(globals, key);
+    const previousHook = globals[key];
+    let edges: string[] | undefined;
+    let model: { dispose(): void } | undefined;
+    globals[key] = {
+        register: (instance: {
+            getDependencyGraph(): { edges: Array<{ from: string; to: string }> };
+        }) => {
+            edges = edgeKeys(instance.getDependencyGraph().edges);
+        },
+        unregister: () => {},
+    };
+    try {
+        model = createDevtoolsModel(schema);
+        expect(edges).toBeDefined();
+        return edges!;
+    } finally {
+        model?.dispose();
+        if (hadHook) globals[key] = previousHook;
+        else delete globals[key];
+    }
 }
 
 describe('eachReactionEdge', () => {

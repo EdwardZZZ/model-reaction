@@ -64,7 +64,7 @@ describe('ModelManager - Dirty Data Management', () => {
 });
 
 
-describe('ModelManager - commitValid: dirty cleanup with deepEqual early-return', () => {
+describe('ModelManager - dirty cleanup for unchanged committed values', () => {
     test('setField with same valid value clears stale dirty', async () => {
         const m = createModel<{ age: number }>({
             age: {
@@ -79,7 +79,7 @@ describe('ModelManager - commitValid: dirty cleanup with deepEqual early-return'
         expect(m.getDirtyData()).toEqual({ age: 'abc' });
 
         // Re-typing the original valid value must drop the stale dirty entry,
-        // even though `data.age` itself does not change (deepEqual early-return).
+        // even though `data.age` itself does not change.
         await m.setField('age', 25);
         expect(m.getDirtyData()).toEqual({});
         expect(m.getField('age')).toBe(25);
@@ -128,4 +128,3 @@ describe('ModelManager - commitValid: dirty cleanup with deepEqual early-return'
         m.dispose();
     });
 });
-

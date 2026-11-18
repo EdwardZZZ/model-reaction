@@ -14,7 +14,7 @@
     "paths": {
       "model-reaction": ["../model-reaction/src/index.ts"],
       "model-reaction/validation": ["../model-reaction/src/validation/index.ts"],
-      "model-reaction/devtools": ["../model-reaction/src/devtools/index.ts"]
+      "model-reaction/devtools": ["../model-reaction/src/devtools.ts"]
     }
   },
   "include": ["src", "build.mjs", "types"]

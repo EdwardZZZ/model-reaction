@@ -11,6 +11,10 @@ the owning guides; public contracts live in API, React, and DevTools.
   through `getDirtyData()` / `clearDirtyData()`, not internal state.
 - Reactions derive field values from declared dependencies. Construction runs
   an initial reaction pass; await `settled()` to observe its completion.
+- Schema configuration stays fixed from `createModel` until disposal, including
+  shared definitions, rules, arrays, and defaults. This is a caller contract,
+  not deep freezing or a complete schema clone; see
+  [Schema lifetime](docs/API.md#schema-lifetime).
 
 The model tracks top-level field replacement. Snapshots are stable and
 shallow-frozen; nested values are not observed. Replace objects, arrays, and

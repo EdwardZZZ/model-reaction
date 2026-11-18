@@ -8,17 +8,16 @@ import {
     ModelReturn,
     ValidationError,
 } from '../types';
-import type { CommitOptions } from './internal-types';
 import { validateField } from '../validation/validate-field';
-import { cloneDefault } from '../utils/clone-default';
-import { deepEqual } from '../utils/deep-equal';
+import { cloneDefault } from './clone-default';
+import { deepEqual } from './deep-equal';
 import { EventEmitter } from './event-emitter';
 import { PendingTasks } from './pending-tasks';
 import {
     createValidationSnapshot,
     prepareFieldWrites,
 } from './write-preparation';
-import type { PreparedFieldWrite } from './write-preparation';
+import type { CommitOptions, PreparedFieldWrite } from './write-preparation';
 import { ReactionSystem } from '../reaction/reaction-system';
 
 /**
@@ -50,7 +49,6 @@ export class ModelManager<
 
     private readonly asyncValidationTimeout: number;
     private validationRequestIds: Record<string, number> = Object.create(null);
-    private requestIdCounter = 0;
 
     private disposed = false;
 
@@ -72,7 +70,7 @@ export class ModelManager<
                     this.updateField(field, value, opts),
                 setError: (field, error) => this.recordError(field, error),
                 reportError: (event, error) =>
-                    this.emit(event, error),
+                    this.eventEmitter.emit(event, error),
             },
             this.pendingTasks
         );
@@ -119,18 +117,6 @@ export class ModelManager<
     ): (() => void) => {
         return this.eventEmitter.on(event, callback);
     };
-
-    /**
-     * Surface an event through the typed bus. Failed validation and reaction
-     * errors are normal, recoverable outcomes, so the library does not log them
-     * itself — subscribe via `model.on(...)` to observe or log.
-     */
-    private emit<E extends keyof ModelEventMap<T>>(
-        event: E,
-        data: ModelEventMap<T>[E]
-    ): void {
-        this.eventEmitter.emit(event, data);
-    }
 
     // -------------------------------------------------------------------------
     // Public mutation API
@@ -184,7 +170,7 @@ export class ModelManager<
         const valid = allValid &&
             Object.keys(this.dirtyData).length === 0 &&
             Object.values(this.errors).every((errors) => errors.length === 0);
-        this.emit(ModelEvents.VALIDATION_COMPLETE, { isValid: valid });
+        this.eventEmitter.emit(ModelEvents.VALIDATION_COMPLETE, { isValid: valid });
         return valid;
     };
 
@@ -198,8 +184,9 @@ export class ModelManager<
         options: CommitOptions
     ): Promise<boolean> {
         const validationData = createValidationSnapshot(this.modelData, prepared);
+        const commitOptions = { ...options, validationData };
         const results = await Promise.allSettled(prepared.map(({ field, schema, value }) =>
-            this.validateAndCommit(field, schema, value, { ...options, validationData })
+            this.validateAndCommit(field, schema, value, commitOptions)
         ));
         const rejection = results.find(
             (result): result is PromiseRejectedResult => result.status === 'rejected'
@@ -290,7 +277,7 @@ export class ModelManager<
         this.dirtyData = Object.create(null);
         this.dirtyDataSnapshot = null;
         if (fields.length > 0) {
-            this.emit(ModelEvents.DIRTY_DATA_CLEARED, { fields });
+            this.eventEmitter.emit(ModelEvents.DIRTY_DATA_CLEARED, { fields });
         }
     };
 
@@ -330,7 +317,7 @@ export class ModelManager<
                 field,
                 message: `Field ${field} does not exist in the model schema`,
             };
-            this.emit(ModelEvents.FIELD_NOT_FOUND, error);
+            this.eventEmitter.emit(ModelEvents.FIELD_NOT_FOUND, error);
             throw new Error(error.message);
         }
         return this.schema[field]!;
@@ -359,7 +346,7 @@ export class ModelManager<
         if (this.disposed) return false;
         const endTask = this.pendingTasks.begin();
         try {
-            const requestId = ++this.requestIdCounter;
+            const requestId = (this.validationRequestIds[field] ?? 0) + 1;
             const isCurrent = () =>
                 !this.disposed && this.validationRequestIds[field] === requestId;
             this.validationRequestIds[field] = requestId;
@@ -376,7 +363,7 @@ export class ModelManager<
                 onError: (error) => {
                     if (!isCurrent()) return;
                     this.recordError(field, error);
-                    this.emit(ModelEvents.VALIDATION_ERROR, { ...error });
+                    this.eventEmitter.emit(ModelEvents.VALIDATION_ERROR, { ...error });
                 },
             });
 
@@ -388,7 +375,7 @@ export class ModelManager<
                 this.dirtyData[field as keyof T] = value as T[keyof T];
                 this.dirtyDataSnapshot = null;
             }
-            this.emit(ModelEvents.FIELD_VALIDATION_COMPLETE, {
+            this.eventEmitter.emit(ModelEvents.FIELD_VALIDATION_COMPLETE, {
                 field: field as keyof T & string,
                 isValid,
                 dirty: Object.prototype.hasOwnProperty.call(this.dirtyData, field),
@@ -409,16 +396,7 @@ export class ModelManager<
         this.errorsSnapshot = null;
     }
 
-    /**
-     * Commit a validated value:
-     *   - if the value differs from `data`, write it, drop any dirty entry,
-     *     emit `field:change`, and fire reactions.
-     *   - if the value equals `data` but a stale `dirtyData[field]` lingers
-     *     (e.g. user re-typed the original valid value to undo a bad input),
-     *     drop the dirty entry silently — `data` did not change, so neither
-     *     subscribers nor reactions should be disturbed.
-     *   - otherwise, no-op.
-     */
+    /** Commit validated values; see docs/ARCHITECTURE.md#write-path. */
     private commitValid(
         field: string,
         value: any,
@@ -433,22 +411,16 @@ export class ModelManager<
         const dataChanged = !deepEqual(this.modelData[fieldKey], value);
         const hadDirty = Object.prototype.hasOwnProperty.call(this.dirtyData, field);
 
-        if (!dataChanged && !hadDirty && !initializeReactions) return;
-
-        if (dataChanged) {
-            this.modelData[fieldKey] = value;
-            this.dataSnapshot = null;
-        }
         if (hadDirty) {
             delete this.dirtyData[field];
             this.dirtyDataSnapshot = null;
         }
 
         if (dataChanged) {
-            // Record the real change so a batched caller can trigger reactions
-            // for exactly the fields that moved.
+            this.modelData[fieldKey] = value;
+            this.dataSnapshot = null;
             changedFields?.add(field);
-            this.emit(ModelEvents.FIELD_CHANGE, {
+            this.eventEmitter.emit(ModelEvents.FIELD_CHANGE, {
                 field,
                 value,
             });

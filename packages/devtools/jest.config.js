@@ -10,7 +10,7 @@ module.exports = {
   // so the e2e test exercises the real source on both sides and needs no build
   // step. Anchored patterns keep the `/devtools` subpath distinct from the root.
   moduleNameMapper: {
-    '^model-reaction/devtools$': '<rootDir>/../model-reaction/src/devtools/index',
+    '^model-reaction/devtools$': '<rootDir>/../model-reaction/src/devtools',
     '^model-reaction/validation$': '<rootDir>/../model-reaction/src/validation/index',
     '^model-reaction$': '<rootDir>/../model-reaction/src/index',
   },

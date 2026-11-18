@@ -172,20 +172,14 @@ describe('actions after computation settles', () => {
         }
     );
 
-    test.each([{}, { action: [] }])('keeps queued functions when a later job has no actions: %p', async (config) => {
+    test.each([undefined, []])('keeps queued functions when a later registration has no actions: %p', async (actions) => {
         const tasks = new PendingTasks();
         const onError = jest.fn();
         const executor = new ActionExecutor(tasks, onError);
         const end = tasks.begin();
         const action = jest.fn();
-        executor.register({
-            field: 'target',
-            reaction: { fields: [], computed: () => 1, action: [action] },
-        });
-        executor.register({
-            field: 'target',
-            reaction: { fields: [], computed: () => 2, ...config },
-        });
+        executor.register('target', [action]);
+        executor.register('target', actions);
         end();
         await tasks.settled();
         expect(action).toHaveBeenCalledTimes(1);
@@ -948,7 +942,7 @@ describe('ActionExecutor function deduplication', () => {
             tasks.dispose();
         });
         const register = (field: string, action: ReactionAction[]) => {
-            executor.register({ field, reaction: { fields: [], computed: () => 1, action } });
+            executor.register(field, action);
         };
         return { tasks, register, executor, onError };
     }
@@ -1038,12 +1032,11 @@ describe('ActionExecutor task lifecycle', () => {
         const tasks = new PendingTasks();
         const executor = new ActionExecutor(tasks, jest.fn());
         const action = jest.fn();
-        const job = { field: 'target', reaction: { fields: [], computed: () => 1, action: [action] } };
-        executor.register(job);
+        executor.register('target', [action]);
         const settled = tasks.settled();
         executor.dispose();
         executor.dispose();
-        executor.register(job);
+        executor.register('target', [action]);
         await settled;
         await tasks.settled();
         expect(action).not.toHaveBeenCalled();
@@ -1054,10 +1047,7 @@ describe('ActionExecutor task lifecycle', () => {
         const tasks = new PendingTasks();
         const executor = new ActionExecutor(tasks, jest.fn());
         const rest = jest.fn();
-        executor.register({
-            field: 'target',
-            reaction: { fields: [], computed: () => 1, action: [() => executor.dispose(), rest] },
-        });
+        executor.register('target', [() => executor.dispose(), rest]);
         await tasks.settled();
         expect(rest).not.toHaveBeenCalled();
         tasks.dispose();
@@ -1068,9 +1058,7 @@ describe('ActionExecutor task lifecycle', () => {
         const action = jest.fn();
         const executor = new ActionExecutor(tasks, jest.fn());
         const end = tasks.begin();
-        executor.register(
-            { field: 'target', reaction: { fields: [], computed: () => 1, action: [action] } }
-        );
+        executor.register('target', [action]);
         end();
         const newCompute = tasks.begin();
         await drain();
@@ -1088,25 +1076,10 @@ describe('ActionExecutor task lifecycle', () => {
         const onError = jest.fn();
         const executor = new ActionExecutor(tasks, onError);
         const end = tasks.begin();
-        executor.register(
-            {
-                field: 'first',
-                reaction: {
-                    fields: [],
-                    computed: () => 1,
-                    action: [
-                        () => {
-                            executor.register(
-                                { field: 'third', reaction: { fields: [], computed: () => 1, action: [second] } }
-                            );
-                        },
-                    ],
-                },
-            }
-        );
-        executor.register(
-            { field: 'second', reaction: { fields: [], computed: () => 1, action: [second] } }
-        );
+        executor.register('first', [() => {
+            executor.register('third', [second]);
+        }]);
+        executor.register('second', [second]);
         end();
         await tasks.settled();
         expect(second).toHaveBeenCalledTimes(2);

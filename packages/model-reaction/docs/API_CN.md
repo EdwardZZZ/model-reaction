@@ -38,6 +38,41 @@ createModel<S extends Record<string, FieldSchema>>(
 可以先按职责拆成多个片段，再通过对象展开合并后传入。对象、数组等字段值本身仍可
 包含嵌套数据，但模型只在顶层跟踪字段变化。
 
+### Schema 固定性
+
+Schema 是模型实例的静态配置，应在调用 `createModel` 前完成组装。从该调用开始，
+直到实例被 `dispose()`，所有引用指向的配置都应保持不变：
+
+- 字段 key 与字段定义，包括 `type`、`default`、`values`、`transform`、
+  `validator` 和 `reaction`。
+- 数组内容及顺序：枚举值、校验规则、reaction 依赖和 action。校验规则的
+  `type`、`message`、`condition`、`validate` 等属性，以及 reaction 的函数引用
+  也应固定。
+- 可变默认值的内容与共享配置对象，包括 Schema 片段和规则实例。替换定义、
+  向数组追加元素或修改共享规则都属于配置变更；getter 或 Proxy 不能返回
+  随读取而变化的定义。
+
+同一 Schema、片段、规则和函数可以被多个实例复用，前提是配置保持不变。
+需要改变配置时，创建新的 Schema 和模型实例。对象展开只复制一层：
+应替换需要变更的嵌套定义，不能原地修改与已有实例共享的引用。
+
+这是调用方契约。`createModel` 不会对 Schema 做深克隆、冻结、变更监听，
+也不提供动态更新配置的 API；当前 TypeScript 类型不强制该生命周期约束。
+创建后修改 Schema 属于不支持的用法，不能依赖修改会生效、被忽略或抛错。
+reaction 索引和 DevTools 元数据在创建时建立，而部分写入配置会在后续读取，
+因此修改可能只影响实例的一部分。
+
+默认值克隆与 Schema 所有权是两件事。数组和普通对象会递归克隆，并处理循环引用；
+`Date`、`RegExp`、类实例等非普通对象仍按引用共享，作为不可变叶子使用。
+这不代表库保存了完整的 Schema 或值快照。模型值通过 `setField` / `setFields`
+更新，不能原地修改 `schema[field].default` 或共享的默认值叶子。
+
+函数引用固定，不代表模型数据或 action 闭包状态被冻结。动态校验条件通过模型
+字段与 `validator.condition` 表达；条件输入变化后，显式重新校验相关字段或调用
+`validateAll()`。会变化的计算输入声明在 `reaction.fields` 中，
+`computed` 仍须同步且纯净。action 可以通过闭包读取当前模型和业务服务，
+闭包读取不会自动增加依赖或触发重算。
+
 > **默认值不经过校验。** 每个字段的 `default` 在构造时被直接写入 `data`，
 > 验证器**不会**对其运行。因此 model 可能一开始就处于非法状态，而
 > `validationErrors` 却是空的。在信任初始 `data` 之前，请先
@@ -419,6 +454,9 @@ const custom = formatValidationErrors(
 
 这组变更不向后兼容，升级时需要修改调用处：
 
+- 在调用 `createModel` 前完成 Schema 组装。运行时修改字段、规则、依赖列表或
+  action 数组属于不支持的用法；配置变化时创建新的 Schema 和实例，并保持共享
+  嵌套引用不变。详见 [Schema 固定性](#schema-固定性)。
 - `validateAll()` 现在在完整校验后等待模型全部追踪工作，并把剩余 dirty 值与错误
   纳入 boolean。提交前保留
   `await model.settled(); const valid = await model.validateAll();`，

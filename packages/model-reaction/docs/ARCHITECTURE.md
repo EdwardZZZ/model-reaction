@@ -19,7 +19,7 @@ flowchart LR
     Actions --> Tasks
     ReactEntry[model-reaction/react] --> ReactAdapter[react/*]
     ReactAdapter --> PublicModel[ModelReturn / ModelEvents]
-    DevEntry[model-reaction/devtools] --> DevAdapter[devtools/*]
+    DevEntry[model-reaction/devtools] --> DevAdapter[devtools.ts]
     DevAdapter --> Entry
     DevAdapter --> Graph
 ```
@@ -27,17 +27,24 @@ flowchart LR
 | Path | Responsibility | Boundary |
 | --- | --- | --- |
 | `src/index.ts`, `src/types.ts` | Core entry point, public types, and factory | Does not export `ModelManager` or internal pipeline types |
-| `src/core/` | Model state, field-write flow, events, and pending tasks | `ModelManager` is the sole owner of data, dirty data, errors, and validation freshness |
+| `src/core/` | Model state, field-write flow, default cloning, structural comparison, events, and pending tasks | `ModelManager` is the sole owner of data, dirty data, errors, and validation freshness |
 | `src/validation/` | Field validation, rule builders, and error formatting | Core calls `validate-field.ts`; rules and formatting have a separate entry |
 | `src/reaction/` | Dependency indexing, scheduling, computed writeback, and action lifecycle | Uses `ReactionSystem` callbacks to access the model; owns no model data |
 | `src/react/` | Provider, field bindings, draft state, and selector hooks | Uses the public model surface and ships through `model-reaction/react` |
-| `src/devtools/` | Optional hook and model-inspection adapter | Reads through the public model API and shares dependency parsing |
-| `src/utils/` | General helpers such as default cloning and structural comparison | Does not depend on core, React, or DevTools |
+| `src/devtools.ts` | Optional hook and model-inspection adapter | Exports only `createModel`; reads through the public model API and shares dependency parsing |
 | `src/__tests__/` | Core behavior, React adapter, and integration tests | Integration tests also protect README examples |
 
-`core/internal-types.ts` and `core/write-preparation.ts` are private implementation
-modules and must not be added to package exports. React and DevTools also remain
-separate package entry points.
+`core/write-preparation.ts` owns the internal commit options, prepared-write type,
+and stateless preparation helpers; none are added to package exports. Default
+cloning and structural comparison stay in separate files under `core/`.
+`validation/index.ts` exports rule builders and implements the small error
+formatter. React and DevTools remain separate package entry points.
+`devtools.ts` keeps its hook types and helpers private. Tests observe registered
+instances through a capturing global hook instead of importing internal helpers.
+
+Type contract tests live together in `__tests__/type-inference.test.ts`.
+`tsconfig.build.json` excludes the whole test directory, including helpers;
+the default typecheck project still checks all source and tests.
 
 ## Write path
 
@@ -62,7 +69,35 @@ setFields┘    ├─ prepareFieldWrites: resolve the whole batch, then transfo
   pass or implicitly waiting before creating its candidate snapshot.
 - Reaction writeback uses `updateField()` and preserves its reaction stack and initialization context.
 - Fields commit independently, so `setFields()` is not an all-or-nothing transaction.
+- Each field increments its own validation request ID. Freshness compares only
+  requests for that field; there is no global request counter.
+- `validatePrepared()` builds one commit-options object per batch, sharing the
+  candidate snapshot and changed-field Set. The pipeline reads the options
+  without replacing their properties.
+- A valid commit clears any dirty entry before notifying listeners. Only
+  changed values update data, invalidate its snapshot, and emit `field:change`;
+  unchanged values can still propagate reaction initialization. `ModelManager`
+  emits directly through its typed event bus. Validation and reaction errors
+  are recoverable events; subscribe with `model.on(...)` to observe or log them.
 - `ModelManager` keeps request IDs, state updates, events, and commit logic. Extract stateless preparation or calculation helpers; avoid splitting state ownership.
+
+## Reaction Scheduling
+
+The owning field name identifies a reaction within its model instance.
+Construction uses `eachReactionEdge` to build
+`Map<dependency field, Set<owning field>>`. Execution reads the owner's
+definition from fixed schema without a job or definition cache. A trigger pass
+uses `Map<owner, first triggering source>`, preserving changed-field traversal
+and first owner appearance order and appending only the actual source to the
+reaction stack.
+
+Index deduplication does not alter `reaction.fields`; computation reads the
+original array, including repeated reads. `initializingFields` retains owners
+whose initialization is incomplete, surviving ordinary rescheduling.
+Debounce acquires a replacement compute task before releasing the old one and
+removes the timer record before user code. A local run closure captures this
+invocation's field, path, and task release function. Validation request IDs
+still protect commits; success passes the owner and action array to the executor.
 
 ## Action Scheduling
 
@@ -71,7 +106,7 @@ migration examples remain in [API.md](API.md#action-queue).
 
 | Owner | State and responsibility |
 | --- | --- |
-| `ReactionSystem` | One `ReactionJob` and at most one pending debounced computation per host; dependency index and runtime path diagnostics |
+| `ReactionSystem` | Field dependency index, first triggering sources, initialization markers; at most one pending debounced computation per owner and runtime path diagnostics |
 | `ActionExecutor` | One Map keyed by action reference and a coalesced microtask flush |
 | `PendingTasks` | Separate `compute` / `action` counts, compute-idle notification, and `settled()` completion |
 | `ModelManager` | Validation request IDs, committed state, and host-field errors |
@@ -94,10 +129,6 @@ migration examples remain in [API.md](API.md#action-queue).
    settlement immediately; started Promise rejections remain observed, with
    post-disposal model error reporting suppressed.
 
-Reaction debounce still acquires a replacement compute task before releasing
-the old one, and removes its timer record before running user code. Validation
-request IDs continue to protect computed commits; no action version is captured.
-
 The compute count covers input preparation, validation, debounce waits,
 computed writeback, reaction registration, and batch release. The
 action count covers unique queued functions and started calls. Reactions never await actions;
@@ -113,6 +144,12 @@ side-effect writeback cycles.
 
 ## Retained Design Decisions
 
+- **Fixed schema configuration:** compose definitions before `createModel` and
+  keep their shared references unchanged for the instance's lifetime. The
+  factory does not deep-clone or freeze schema. This permits construction-time
+  dependency indexing and later reads from the same definition source; it does
+  not imply that all dependencies are valid or change missing-dependency and
+  cycle diagnostics. The public contract is [Schema lifetime](API.md#schema-lifetime).
 - **Structural equality:** keep `deepEqual`; equal-content replacement objects
   do not become changes solely because their references differ. Switching to
   `Object.is` would alter downstream validation and reaction/action triggers
@@ -122,8 +159,9 @@ side-effect writeback cycles.
   subscribes by model and compares snapshots. Shared render-local caching
   protects concurrent renders; merging the Hooks would change a subscription
   policy. The public choice is documented in [REACT.md](REACT.md#usemodelselector-vs-usemodelcomputed).
-- **One reaction per field:** identify jobs by host, retain trigger-pass
-  deduplication, and keep separate jobs when hosts reuse a reaction object.
+- **One reaction per field:** use owning field names for identity, retain
+  trigger-pass deduplication, and compute independently when owners reuse a
+  reaction object.
 - **One validation policy:** rules execute condition/validation in order and
   stop at the first error. Batch keys are prechecked before input values are
   read or transformed; fields then validate and commit independently.
@@ -136,7 +174,7 @@ side-effect writeback cycles.
 
 ## Dependency rules
 
-1. `core` coordinates state and lifecycle; `validation`, `reaction`, and `utils` provide focused capabilities.
+1. `core` coordinates state, value handling, and lifecycle; `validation` and `reaction` provide focused capabilities.
 2. `reaction` requests model reads and writes through callbacks; it does not mutate `ModelManager` state directly.
 3. `react` consumes `ModelReturn` and model events; it does not import `core/` or `reaction/` implementations.
 4. `devtools` reads through the public model surface. Shared `eachReactionEdge` keeps dependency graph interpretation consistent.
@@ -148,11 +186,12 @@ side-effect writeback cycles.
 | Change | Read first |
 | --- | --- |
 | Writes, dirty data, events, lifecycle | `core/model-manager.ts`, `core/write-preparation.ts` |
+| Default cloning and structural equality | `core/clone-default.ts`, `core/deep-equal.ts` |
 | Validation order, timeout, and errors | `validation/validate-field.ts` |
 | Dependency edges or reaction scheduling | `reaction/reaction-graph.ts`, `reaction/reaction-system.ts` |
-| Action eligibility and execution | `reaction/action-executor.ts`, `reaction/reaction-job.ts` |
+| Action eligibility and execution | `reaction/reaction-system.ts`, `reaction/action-executor.ts` |
 | React field state and subscriptions | `react/field-state.ts`, `react/draft-field.ts`, `react/selectors.ts` |
-| DevTools hook, graph, and snapshots | `devtools/devtools-hook.ts`, `devtools/index.ts` |
+| DevTools hook, graph, and snapshots | `devtools.ts` |
 
 For public contract changes, check `src/index.ts`, both READMEs, and integration
 tests. For dependency graph changes, check both Reaction and DevTools consumers of

@@ -1,6 +1,5 @@
 import { PendingTasks } from '../core/pending-tasks';
 import type { ReactionAction } from '../types';
-import type { ReactionJob } from './reaction-job';
 
 interface PendingAction {
     field: string;
@@ -21,12 +20,12 @@ export class ActionExecutor {
         this.unsubscribe = tasks.onComputeIdle(() => this.scheduleFlush());
     }
 
-    register(job: ReactionJob): void {
+    register(field: string, actions: readonly ReactionAction[] = []): void {
         if (this.disposed) return;
-        for (const action of job.reaction.action ?? []) {
+        for (const action of actions) {
             const endTask = this.pending.get(action)?.endTask ?? this.tasks.begin('action');
             this.pending.delete(action);
-            this.pending.set(action, { field: job.field, endTask });
+            this.pending.set(action, { field, endTask });
         }
         if (this.pending.size && this.tasks.isComputeIdle) this.scheduleFlush();
     }

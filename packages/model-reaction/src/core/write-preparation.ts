@@ -1,5 +1,15 @@
 import type { FieldSchema } from '../types';
 
+/** Internal options for the validation and commit pipeline. */
+export interface CommitOptions {
+    reactionStack?: string[];
+    /** Collect fields whose committed values actually changed. */
+    changedFields?: Set<string>;
+    /** Shared candidate data used by all validators in a direct batch. */
+    validationData?: Readonly<Record<string, any>>;
+    initializeReactions?: boolean;
+}
+
 /** A field's transformed input and schema, ready for validation. */
 export interface PreparedFieldWrite {
     field: string;
@@ -12,8 +22,8 @@ export interface PreparedFieldWrite {
  * This preserves batch preflight: an unknown key rejects the whole batch
  * before transform or validation starts.
  */
-export function prepareFieldWrites<T extends Record<string, any>>(
-    fields: Partial<T>,
+export function prepareFieldWrites(
+    fields: Readonly<Record<string, unknown>>,
     resolveSchema: (field: string) => FieldSchema
 ): PreparedFieldWrite[] {
     const resolved = Object.keys(fields).map((field) => ({

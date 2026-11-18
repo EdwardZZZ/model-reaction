@@ -28,6 +28,9 @@ const cjsRoot = require('model-reaction');
 const esmDevtools = await import('model-reaction/devtools');
 const cjsDevtools = require('model-reaction/devtools');
 
+assert.deepEqual(Object.keys(esmDevtools), ['createModel'], 'ESM DevTools public exports');
+assert.deepEqual(Object.keys(cjsDevtools), ['createModel'], 'CommonJS DevTools public exports');
+
 for (const entry of [esmRoot, cjsRoot, esmDevtools, cjsDevtools]) {
   for (const name of ['Rule', 'ValidationRules', 'formatValidationErrors']) {
     assert.equal(name in entry, false, `${name} is available only via validation`);

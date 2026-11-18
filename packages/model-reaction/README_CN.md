@@ -77,6 +77,10 @@ console.log(ok, user.data); // true { name: 'John', age: 30 }
 大型 Schema 可以先按职责拆成片段，再通过对象展开合并后传入；对象、数组等字段值
 本身仍可包含嵌套数据，但模型只在顶层跟踪字段变化。
 
+在 `createModel` 前完成 Schema 组装；实例生命周期内，定义及共享配置保持固定。
+配置变化时创建新的 Schema 和实例。这是调用方契约，库不做运行时深冻结，
+详见 [Schema 固定性](docs/API_CN.md#schema-固定性)。
+
 始终 `await setField(...)`，确保验证完成后再读取 `data`；
 当 model 的 owner 卸载时，始终在 cleanup 路径里调用 `dispose()`。
 

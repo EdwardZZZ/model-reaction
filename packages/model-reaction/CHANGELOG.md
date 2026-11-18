@@ -30,6 +30,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and the `packages/devtools/` workspace package.
 
 ### Changed
+- **Source organization:** DevTools integration now lives in `src/devtools.ts`,
+  with only `createModel` exported. Hook types and helpers remain private;
+  tests observe registered instances through the global hook. Updated build,
+  declaration, example, demo, and extension source mappings. The
+  `model-reaction/devtools` import and runtime behavior remain unchanged.
+- **Source organization:** commit options now live with write preparation;
+  default cloning and structural equality move into `core/`. The validation
+  entry owns error formatting, and type contract tests share one file. Removed
+  three source/test files and the `utils/` directory without changing public
+  APIs. Production declarations exclude the whole test directory, including
+  React test helpers. See [module map](docs/ARCHITECTURE.md#module-map).
+- **Internal refactor:** `ModelManager` uses per-field validation request IDs,
+  shares commit options within a batch, and consolidates commit and event
+  forwarding paths. The factory returns its manager without a type assertion,
+  and write preparation no longer has an unrelated generic parameter. Public
+  overloads and runtime behavior remain unchanged. See
+  [write path](docs/ARCHITECTURE.md#write-path).
+- **Internal refactor:** reaction indexing and scheduling use owning field names
+  and read fixed schema definitions during execution. Removed `ReactionJob`;
+  action registration now receives its owner and function array directly.
+  Public APIs, trigger order, debounce, initialization, and action behavior
+  remain unchanged. See [source architecture](docs/ARCHITECTURE.md#reaction-scheduling).
+- **Documented contract:** schema configuration stays fixed from `createModel`
+  until disposal, including shared definitions, rules, arrays, and defaults.
+  Runtime mutation is unsupported; configuration changes require a new schema
+  and instance. No schema cloning or freezing is added. See
+  [Schema lifetime](docs/API.md#schema-lifetime).
 - **Breaking (behavior):** `validateAll()` now waits for all tracked model work
   after its full pass and returns `false` if dirty values or errors remain.
   `validation:complete` fires after settlement with the final result. Submission

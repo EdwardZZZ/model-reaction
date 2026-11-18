@@ -1,4 +1,4 @@
-import { createModel, Model, Reaction, SKIP_REACTION } from '../index';
+import { createModel, Model, ModelOptions, Reaction, SKIP_REACTION } from '../index';
 import { ReactionSystem } from '../reaction/reaction-system';
 import { ModelManager } from '../core/model-manager';
 import { PendingTasks } from '../core/pending-tasks';
@@ -156,6 +156,69 @@ describe('ReactionSystem - via createModel', () => {
         expect(model.getField('mirror')).toBe('untouched');
         model.dispose();
     });
+
+    test('does not initialize or trigger reactions with no dependencies', async () => {
+        const computed = jest.fn(() => 9);
+        const action = jest.fn();
+        const model = createModel({
+            source: { type: 'number', default: 1 },
+            target: {
+                type: 'number',
+                default: 7,
+                reaction: { fields: [], computed, action: [action] },
+            },
+        }, { debounceReactions: 5 });
+        try {
+            await model.settled();
+            await model.setField('source', 2);
+            await model.settled();
+            expect(model.data).toEqual({ source: 2, target: 7 });
+            expect(computed).not.toHaveBeenCalled();
+            expect(action).not.toHaveBeenCalled();
+        } finally {
+            model.dispose();
+        }
+    });
+
+    test.each(['toString', 'constructor', '__proto__'])(
+        'computes and propagates through the own host key %s',
+        async (field) => {
+            const action = jest.fn();
+            const schema: Model = {
+                source: { type: 'number', default: 1 },
+                [field]: {
+                    type: 'number',
+                    default: 0,
+                    reaction: {
+                        fields: ['source'],
+                        computed: ({ source }) => source * 2,
+                        action: [action],
+                    },
+                },
+                downstream: {
+                    type: 'number',
+                    default: 0,
+                    reaction: {
+                        fields: [field],
+                        computed: (values) => values[field] + 1,
+                    },
+                },
+            };
+            const model = createModel(schema);
+            try {
+                await model.settled();
+                expect(model.data).toEqual({ source: 1, [field]: 2, downstream: 3 });
+                expect(action).toHaveBeenCalledTimes(1);
+                await model.setField('source', 3);
+                await model.settled();
+                expect(model.data).toEqual({ source: 3, [field]: 6, downstream: 7 });
+                expect(action).toHaveBeenCalledTimes(2);
+                expect(model.validationErrors[field]).toEqual([]);
+            } finally {
+                model.dispose();
+            }
+        }
+    );
 
     test('emits reaction error and stores it under the computed field', async () => {
         interface S {
@@ -1136,6 +1199,230 @@ describe('ReactionSystem - lifecycle and rejected actions', () => {
     );
 });
 
+describe('ReactionSystem - field scheduling boundaries', () => {
+    type Callbacks = ConstructorParameters<typeof ReactionSystem>[2];
+    const cleanups: Array<() => void> = [];
+
+    function setup(
+        schema: Model,
+        options: ModelOptions = {},
+        overrides: Partial<Callbacks> = {}
+    ) {
+        const tasks = new PendingTasks();
+        const setValue = jest.fn<
+            ReturnType<Callbacks['setValue']>,
+            Parameters<Callbacks['setValue']>
+        >().mockResolvedValue(true);
+        const setError = jest.fn();
+        const reportError = jest.fn();
+        const system = new ReactionSystem(schema, options, {
+            getValue: () => 1,
+            setValue,
+            setError,
+            reportError,
+            ...overrides,
+        }, tasks);
+        cleanups.push(() => {
+            system.dispose();
+            tasks.dispose();
+        });
+        return { system, tasks, setValue, setError, reportError };
+    }
+
+    afterEach(() => {
+        cleanups.splice(0).forEach((dispose) => dispose());
+        jest.useRealTimers();
+    });
+
+    test.each([
+        {
+            changedFields: ['b', 'a', 'b'],
+            expected: [['combined', 'b'], ['onlyB', 'b'], ['onlyA', 'a']],
+        },
+        {
+            changedFields: ['a', 'b', 'a'],
+            expected: [['combined', 'a'], ['onlyA', 'a'], ['onlyB', 'b']],
+        },
+    ])('keeps owner order and first source for $changedFields', async ({ changedFields, expected }) => {
+        const { system, tasks, setValue } = setup({
+            a: { type: 'number' },
+            b: { type: 'number' },
+            combined: {
+                type: 'number',
+                reaction: { fields: ['a', 'b'], computed: (values) => values.a + values.b },
+            },
+            onlyA: {
+                type: 'number',
+                reaction: { fields: ['a'], computed: (values) => values.a },
+            },
+            onlyB: {
+                type: 'number',
+                reaction: { fields: ['b'], computed: (values) => values.b },
+            },
+        });
+        system.triggerReactionsForFields(changedFields, ['root']);
+        await tasks.settled();
+        expect(setValue.mock.calls.map(([field, , options]) => [field, options.reactionStack]))
+            .toEqual(expected.map(([field, source]) => [field, ['root', source]]));
+    });
+
+    test('reads repeated dependencies in declaration order while computing only once', async () => {
+        const getValue = jest.fn((field: string) => field === 'a' ? 2 : 3);
+        const computed = jest.fn((values: Record<string, any>) => values.a + values.b);
+        const { system, tasks, setValue } = setup({
+            a: { type: 'number' },
+            b: { type: 'number' },
+            target: {
+                type: 'number',
+                reaction: { fields: ['a', 'b', 'a'], computed },
+            },
+        }, {}, { getValue });
+        system.triggerReactionsForFields(['a', 'b', 'a']);
+        await tasks.settled();
+        expect(getValue.mock.calls).toEqual([['a'], ['b'], ['a']]);
+        expect(computed).toHaveBeenCalledTimes(1);
+        expect(computed).toHaveBeenCalledWith({ a: 2, b: 3 });
+        expect(setValue).toHaveBeenCalledTimes(1);
+        expect(setValue).toHaveBeenCalledWith('target', 5, {
+            reactionStack: ['a'],
+            initializeReactions: false,
+        });
+    });
+
+    test('reports each missing declaration and still supplies undefined to computed', async () => {
+        const getValue = jest.fn(() => 2);
+        const computed = jest.fn((values: Record<string, any>) => values.a);
+        const { system, tasks, setValue, setError, reportError } = setup({
+            a: { type: 'number' },
+            target: {
+                type: 'number',
+                reaction: { fields: ['missing', 'a', 'missing'], computed },
+            },
+        }, {}, { getValue });
+        system.triggerReactionsForFields(['a']);
+        await tasks.settled();
+        expect(getValue).toHaveBeenCalledTimes(1);
+        expect(reportError.mock.calls).toEqual([
+            ['dependency:error', {
+                code: 'dependency_error',
+                field: 'target',
+                message: 'Dependency field missing is not defined',
+            }],
+            ['dependency:error', {
+                code: 'dependency_error',
+                field: 'target',
+                message: 'Dependency field missing is not defined',
+            }],
+        ]);
+        expect(computed.mock.calls[0]![0]).toStrictEqual({ missing: undefined, a: 2 });
+        expect(setValue).toHaveBeenCalledWith('target', 2, expect.any(Object));
+        expect(setError).not.toHaveBeenCalled();
+    });
+
+    test('keeps the reaction definition as the computed call receiver', async () => {
+        const computed = jest.fn((values: Record<string, any>) => values.a);
+        const reaction: Reaction = {
+            fields: ['a'],
+            computed,
+        };
+        const { system, tasks } = setup({
+            a: { type: 'number' },
+            target: { type: 'number', reaction },
+        });
+        system.triggerReactionsForFields(['a']);
+        await tasks.settled();
+        expect(computed.mock.contexts).toEqual([reaction]);
+    });
+
+    test('preserves a timer registered synchronously by computed and its replacement path', async () => {
+        jest.useFakeTimers();
+        let runs = 0;
+        const computed = jest.fn(() => {
+            runs++;
+            if (runs === 1) system.triggerReactionsForFields(['b'], ['nested']);
+            return runs;
+        });
+        const fixture = setup({
+            a: { type: 'number' },
+            b: { type: 'number' },
+            target: { type: 'number', reaction: { fields: ['a', 'b'], computed } },
+        }, { debounceReactions: 5 });
+        const system = fixture.system;
+        system.triggerReactionsForFields(['a'], ['outer']);
+        let idle = false;
+        const settled = fixture.tasks.settled().then(() => { idle = true; });
+
+        await jest.advanceTimersByTimeAsync(5);
+        expect(computed).toHaveBeenCalledTimes(1);
+        expect(jest.getTimerCount()).toBe(1);
+        expect(idle).toBe(false);
+        system.triggerReactionsForFields(['b'], ['replacement']);
+        expect(jest.getTimerCount()).toBe(1);
+
+        await jest.advanceTimersByTimeAsync(5);
+        await settled;
+        expect(computed).toHaveBeenCalledTimes(2);
+        expect(idle).toBe(true);
+        expect(fixture.setValue.mock.calls.map(([field, value, options]) =>
+            [field, value, options.reactionStack]
+        )).toEqual([
+            ['target', 1, ['outer', 'a']],
+            ['target', 2, ['replacement', 'b']],
+        ]);
+    });
+
+    test.each(['read', 'computed'])('stops writeback when %s disposes the system', async (stage) => {
+        const action = jest.fn();
+        const getValue = jest.fn(() => {
+            if (stage === 'read') system.dispose();
+            return 1;
+        });
+        const computed = jest.fn(() => {
+            if (stage === 'computed') system.dispose();
+            return 2;
+        });
+        const fixture = setup({
+            a: { type: 'number' },
+            b: { type: 'number' },
+            target: {
+                type: 'number',
+                reaction: { fields: ['a', 'b'], computed, action: [action] },
+            },
+        }, {}, { getValue });
+        const system = fixture.system;
+        system.triggerReactionsForFields(['a']);
+        await fixture.tasks.settled();
+        system.triggerReactionsForFields(['b']);
+        expect(getValue).toHaveBeenCalledTimes(stage === 'read' ? 1 : 2);
+        expect(computed).toHaveBeenCalledTimes(stage === 'read' ? 0 : 1);
+        expect(fixture.setValue).not.toHaveBeenCalled();
+        expect(action).not.toHaveBeenCalled();
+        expect(fixture.reportError).not.toHaveBeenCalled();
+    });
+
+    test('stops the pass when a cycle error listener disposes the system', async () => {
+        const computed = jest.fn(() => 1);
+        const reportError = jest.fn(() => { system.dispose(); });
+        const fixture = setup({
+            a: { type: 'number' },
+            first: { type: 'number', reaction: { fields: ['a'], computed } },
+            second: { type: 'number', reaction: { fields: ['a'], computed } },
+        }, {}, { reportError });
+        const system = fixture.system;
+        system.triggerReactionsForFields(['a'], ['first']);
+        await fixture.tasks.settled();
+        expect(reportError).toHaveBeenCalledTimes(1);
+        expect(reportError).toHaveBeenCalledWith('reaction:error', {
+            code: 'circular_dependency',
+            field: 'first',
+            message: 'Circular dependency detected: first -> first',
+        });
+        expect(computed).not.toHaveBeenCalled();
+        expect(fixture.setValue).not.toHaveBeenCalled();
+        expect(fixture.setError).not.toHaveBeenCalled();
+    });
+});
+
 describe('ReactionSystem - direct unit tests', () => {
     test('reaction error when dependency access throws', () => {
         const errorSpy = jest
@@ -1256,12 +1543,14 @@ describe('ReactionSystem - direct unit tests', () => {
         jest.useRealTimers();
     });
 
-    test('scheduleReaction / processReaction work with default reactionStack', () => {
+    test('scheduleReaction / processReaction work with default reactionStack', async () => {
         const reaction = {
             fields: ['input'],
             computed: (values: Record<string, any>) => values.input,
         };
 
+        const tasks = new PendingTasks();
+        const setValue = jest.fn().mockResolvedValue(true);
         const system = new ReactionSystem(
             {
                 input: { type: 'string', default: '' },
@@ -1270,17 +1559,24 @@ describe('ReactionSystem - direct unit tests', () => {
             { debounceReactions: 0 },
             {
                 getValue: () => 'x',
-                setValue: async () => true,
+                setValue,
                 setError: () => {},
                 reportError: () => {},
             },
-            new PendingTasks()
+            tasks
         );
 
         const anySystem = system as any;
-        const job = { field: 'output', reaction };
-        anySystem.scheduleReaction(job, 0);
-        anySystem.processReaction(job);
+        anySystem.scheduleReaction('output', 0);
+        await anySystem.processReaction('output');
+        await tasks.settled();
+        expect(setValue).toHaveBeenCalledTimes(2);
+        expect(setValue).toHaveBeenCalledWith('output', 'x', {
+            reactionStack: [],
+            initializeReactions: false,
+        });
+        system.dispose();
+        tasks.dispose();
     });
 
     test('dispose on ModelManager clears scheduled reactions', async () => {

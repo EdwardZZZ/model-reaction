@@ -23,7 +23,7 @@
       "require": "./dist/react.cjs.js"
     },
     "./devtools": {
-      "types": "./dist/types/devtools/index.d.ts",
+      "types": "./dist/types/devtools.d.ts",
       "import": "./dist/devtools.mjs",
       "require": "./dist/devtools.cjs.js"
     }

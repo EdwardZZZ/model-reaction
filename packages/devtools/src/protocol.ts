@@ -9,7 +9,7 @@
  * arbitrary model values into the `SerializedValue` tree below before they
  * enter this protocol.
  *
- * The `Devtools*` shapes intentionally mirror `src/devtools/devtools-hook.ts` in the
+ * The `Devtools*` shapes intentionally mirror `src/devtools.ts` in the
  * library. They are re-declared (not imported) so the extension builds as a
  * standalone package with no dependency on the library's internal source.
  */
@@ -43,7 +43,7 @@ export type SerializedValue =
     | { t: 'object'; entries: Array<[string, SerializedValue]> };
 
 // -----------------------------------------------------------------------------
-// Domain payloads (mirror src/devtools/devtools-hook.ts)
+// Domain payloads (mirror src/devtools.ts)
 // -----------------------------------------------------------------------------
 
 export interface FieldInfo {

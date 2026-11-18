@@ -65,8 +65,8 @@ background.js   （MV3 service worker，按 tab 路由）
 panel           （React UI：数据树 · 依赖关系图 · 时间线）
 ```
 
-按需开启的包装入口见 [src/devtools/index.ts](../src/devtools/index.ts)，其 hook 契约见
-[src/devtools/devtools-hook.ts](../src/devtools/devtools-hook.ts)；扩展位于
+按需开启的包装入口和内部 hook 契约统一位于
+[src/devtools.ts](../src/devtools.ts)，该文件只导出 `createModel`；扩展位于
 [packages/devtools](../../devtools)。包根（`model-reaction`）不引用 DevTools
 集成代码。
 
@@ -132,7 +132,7 @@ React 面板）及注册面板的 DevTools 页面打包进 `packages/devtools/di
 的公共 API（`data` / `getDirtyData()` / `validationErrors` / `on`）以及它收到的 schema 来
 读取模型 —— 无需访问 `ModelManager` 的任何内部。
 
-契约定义（见 [src/devtools/devtools-hook.ts](../src/devtools/devtools-hook.ts)）：
+内部契约定义（见 [src/devtools.ts](../src/devtools.ts)）：
 
 ```ts
 interface ModelReactionDevtoolsHook {

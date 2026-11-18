@@ -40,6 +40,52 @@ and merged with object spread before being passed in. Object and array field
 values may still contain nested data, but the model tracks changes only at the
 top level.
 
+### Schema lifetime
+
+Schema is static configuration for a model instance. Finish composing it before
+calling `createModel`. From the start of that call until the instance is
+disposed, keep the configuration unchanged through every reference to it:
+
+- The field keys and field definitions, including `type`, `default`, `values`,
+  `transform`, `validator`, and `reaction`.
+- Array contents and order: enum values, validators, reaction dependencies, and
+  actions. Validator properties such as `type`, `message`, `condition`, and
+  `validate`, and reaction function references also remain fixed.
+- Mutable default contents and shared configuration objects, including schema
+  fragments and rule instances. Replacing a definition, pushing into an array,
+  or editing a shared rule all count as configuration changes. Accessors or
+  proxies must not return changing definitions.
+
+The same schema, fragments, rules, and functions may be reused by multiple
+instances while their configuration stays unchanged. To change configuration,
+create a new schema and a new model instance. Object spread copies only one
+level: replace the changed nested definitions instead of mutating references
+shared with an existing model.
+
+This is a caller obligation. `createModel` does not deep-clone, freeze, observe,
+or provide a live-update API for schema configuration. Current TypeScript types
+do not enforce this lifetime contract. Post-creation schema mutation is
+unsupported; callers must not rely on whether it takes effect, is ignored, or
+throws. Reaction indexing and DevTools metadata are built at creation, while
+some write-time configuration is read later, so mutation can affect only part
+of an instance.
+
+Default cloning is separate from schema ownership. Arrays and plain objects
+are recursively cloned, with cycle handling; `Date`, `RegExp`, class instances,
+and other non-plain objects remain shared references treated as immutable
+leaves. This is not a complete schema or value snapshot. Update model values
+through `setField` / `setFields`, without modifying `schema[field].default` or shared
+default leaves in place.
+
+Fixed function references do not freeze model data or action closure state.
+Express dynamic validation conditions through model fields and
+`validator.condition`; revalidate affected fields explicitly or call
+`validateAll()` when those inputs change. Declare changing computed inputs in
+`reaction.fields`.
+`computed` remains synchronous and pure. Actions can read current model data
+and business services through closures; closure reads do not automatically
+create dependencies or trigger recalculation.
+
 > **Defaults bypass validation.** Each field's `default` is written directly
 > into `data` at construction — validators do **not** run against it. A model
 > can therefore start in an invalid state while `validationErrors` is empty.
@@ -471,6 +517,10 @@ For full type definitions, see [`src/types.ts`](../src/types.ts).
 
 These changes are breaking and require updating consumers:
 
+- Finish schema composition before calling `createModel`. Runtime changes to
+  fields, rules, dependency lists, or action arrays are unsupported; create a
+  new schema and instance when configuration changes. Shared nested references
+  must remain unchanged. See [Schema lifetime](#schema-lifetime).
 - `validateAll()` now waits for all tracked model work after its full pass and
   includes remaining dirty values and errors in its boolean. Keep
   `await model.settled(); const valid = await model.validateAll();` before

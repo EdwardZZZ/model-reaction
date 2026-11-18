@@ -71,9 +71,8 @@ background.js   (MV3 service worker, routes by tab)
 panel           (React UI: data tree · dependency graph · timeline)
 ```
 
-The opt-in wrapper lives in [src/devtools/index.ts](../src/devtools/index.ts), and its hook
-contract lives in
-[src/devtools/devtools-hook.ts](../src/devtools/devtools-hook.ts). The extension
+The opt-in wrapper and its internal hook contract live in
+[src/devtools.ts](../src/devtools.ts), which exports only `createModel`. The extension
 lives under [packages/devtools](../../devtools). The package root
 (`model-reaction`) imports none of the integration code.
 
@@ -153,7 +152,7 @@ model only through its public API (`data` / `getDirtyData()` /
 `validationErrors` / `on`) plus the schema it was handed — it needs no
 privileged access to `ModelManager` internals.
 
-The contract (from [src/devtools/devtools-hook.ts](../src/devtools/devtools-hook.ts)):
+The internal contract (from [src/devtools.ts](../src/devtools.ts)):
 
 ```ts
 interface ModelReactionDevtoolsHook {

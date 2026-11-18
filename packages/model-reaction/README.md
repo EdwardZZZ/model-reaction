@@ -81,6 +81,11 @@ fragments and merged with object spread before being passed in. Object and
 array field values may still contain nested data, but the model tracks changes
 only at the top level.
 
+Finish composing schema before `createModel`; its definitions and shared
+configuration remain fixed for the instance's lifetime. Configuration changes
+require a new schema and instance. This is a caller contract, without runtime
+deep freezing; see [Schema lifetime](docs/API.md#schema-lifetime).
+
 Always `await setField(...)` so validation has settled before you read `data`;
 always call `dispose()` from your cleanup path when the model's owner unmounts.
 

@@ -30,7 +30,7 @@ export default tseslint.config(
     rules: {
       'no-restricted-imports': ['error', {
         patterns: [{
-          group: ['../core/**', '../reaction/**', '../devtools/**'],
+          group: ['../core/**', '../reaction/**', '../devtools', '../devtools.ts'],
           message: 'React adapters must depend on the public model contract, not internal runtime modules.',
         }],
       }],
@@ -41,7 +41,7 @@ export default tseslint.config(
     rules: {
       'no-restricted-imports': ['error', {
         patterns: [{
-          group: ['../react/**', '../devtools/**'],
+          group: ['../react/**', '../devtools', '../devtools.ts'],
           message: 'Core runtime modules must not depend on UI adapters or DevTools.',
         }],
       }],
@@ -52,7 +52,7 @@ export default tseslint.config(
     rules: {
       'no-restricted-imports': ['error', {
         patterns: [{
-          group: ['../core/**', '../reaction/**', '../react/**', '../devtools/**'],
+          group: ['../core/**', '../reaction/**', '../react/**', '../devtools', '../devtools.ts'],
           message: 'Validation helpers must remain independent of model runtime and adapters.',
         }],
       }],
@@ -63,18 +63,18 @@ export default tseslint.config(
     rules: {
       'no-restricted-imports': ['error', {
         patterns: [{
-          group: ['../react/**', '../devtools/**', '../core/model-manager'],
+          group: ['../react/**', '../devtools', '../devtools.ts', '../core/model-manager'],
           message: 'Reaction scheduling must not depend on UI, DevTools, or the ModelManager implementation.',
         }],
       }],
     },
   },
   {
-    files: ['src/devtools/**/*.{ts,tsx}'],
+    files: ['src/devtools.ts'],
     rules: {
       'no-restricted-imports': ['error', {
         patterns: [{
-          group: ['../core/**', '../react/**'],
+          group: ['./core/**', './react/**'],
           message: 'DevTools must observe models through the public API, not core or React internals.',
         }],
       }],
