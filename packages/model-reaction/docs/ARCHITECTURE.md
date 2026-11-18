@@ -60,53 +60,47 @@ setFields┘    ├─ prepareFieldWrites: resolve the whole batch, then transfo
 - `setField()` / `setFields()` return after the batch; downstream work may
   remain. Full validation waits for all tracked work, without repeating the
   pass or implicitly waiting before creating its candidate snapshot.
-- Reaction writeback uses `updateField()` and preserves its origin, reaction stack, and initialization context.
+- Reaction writeback uses `updateField()` and preserves its reaction stack and initialization context.
 - Fields commit independently, so `setFields()` is not an all-or-nothing transaction.
 - `ModelManager` keeps request IDs, state updates, events, and commit logic. Extract stateless preparation or calculation helpers; avoid splitting state ownership.
 
 ## Action Scheduling
 
 This section records internal scheduling invariants. Public behavior and
-migration examples remain in [API.md](API.md#action-groups).
+migration examples remain in [API.md](API.md#action-queue).
 
 | Owner | State and responsibility |
 | --- | --- |
 | `ReactionSystem` | One `ReactionJob` and at most one pending debounced computation per host; dependency index and runtime path diagnostics |
-| `ActionExecutor` | Host versions, one group set, schema field order, and a coalesced microtask flush |
+| `ActionExecutor` | One Map keyed by action reference and a coalesced microtask flush |
 | `PendingTasks` | Separate `compute` / `action` counts, compute-idle notification, and `settled()` completion |
 | `ModelManager` | Validation request IDs, committed state, and host-field errors |
 
-1. Scheduling a host reaction advances its action version. A successful direct
-   write that changes the host also advances it; reaction writeback does not.
-   Internal `origin: 'direct' | 'reaction'` distinguishes these paths.
-   Validation request IDs remain separate because they protect commits, not
-   action eligibility.
-2. Capture the version when scheduling, including in the debounce closure.
-   Never read the latest version when an older computation finishes. On
-   debounce replacement, acquire the new task before releasing the old one;
-   on timer fire, remove the waiting record before running user code.
-3. After a computed value validates and commits, register a group only if its
-   captured version is current. The group acquires one action task immediately
-   and keeps it across readiness, item execution, and inter-item waits. No
-   separate pending-candidate map or collection handoff is needed.
-   Each group stores its unstarted functions in an `actions` queue. Registration
-   keeps the last occurrence of each reference and removes it from older queues.
-4. Compute idle schedules a microtask flush. Each flush takes a ready snapshot
-   in schema field order. Immediately before every item, check disposal,
-   version, and compute idle synchronously, then call it without an intervening
-   `await`. A previous item may have started fresh calculations, so the check
-   is required for every item.
-5. Groups await their own returned Promises independently. A newer version
-   cancels unstarted items; an already running item remains observed and may
-   overlap a newer group. Failure stops only its group, but an old item's late
-   failure can still update the host's errors under existing error handling.
-6. Task release is idempotent. Disposal removes waiting groups and releases
-   pending settlement immediately; started Promise rejections remain observed,
-   with post-disposal model error reporting suppressed.
+1. After a computed value validates and commits, register each function in
+   `Map<ReactionAction, { field, endTask }>`. Delete and reinsert matching keys:
+   the last arrival supplies the host for errors and moves to the end.
+   Preserve the pending record's task on replacement; each unique function
+   acquires one action task covering its wait and returned Promise.
+2. Compute idle schedules a microtask flush. Recheck compute idle when that
+   microtask runs, take a snapshot, and clear the Map before calling user code.
+   Call all ready functions in registration order without waiting between them
+   or rechecking calculation. Reentrant registrations belong to a later flush.
+3. Each call observes its own PromiseLike and releases its task in `finally`.
+   Deduplication does not include running calls. Errors use the recorded host
+   and do not stop other functions. There are no host versions, execution
+   groups, schema sorting, or per-item calculation barriers.
+4. Task release is idempotent. Disposal clears the queue and prevents remaining
+   ready calls. `ModelManager` disposes the shared tasks to release pending
+   settlement immediately; started Promise rejections remain observed, with
+   post-disposal model error reporting suppressed.
+
+Reaction debounce still acquires a replacement compute task before releasing
+the old one, and removes its timer record before running user code. Validation
+request IDs continue to protect computed commits; no action version is captured.
 
 The compute count covers input preparation, validation, debounce waits,
 computed writeback, reaction registration, and batch release. The
-action count covers whole groups. Reactions never await actions;
+action count covers unique queued functions and started calls. Reactions never await actions;
 `settled()` waits for both counts, and `validateAll()` reuses that global wait
 after releasing its batch. Neither method may be awaited by an action or
 validator on the same model. The full-validation completion event runs after
@@ -121,8 +115,8 @@ side-effect writeback cycles.
 
 - **Structural equality:** keep `deepEqual`; equal-content replacement objects
   do not become changes solely because their references differ. Switching to
-  `Object.is` would alter downstream validation, reactions, and action
-  cancellation as well as `Date`, `NaN`, and signed-zero behavior.
+  `Object.is` would alter downstream validation and reaction/action triggers
+  as well as `Date`, `NaN`, and signed-zero behavior.
 - **Two selector Hooks:** `useModelSelector` filters model notifications and
   resubscribes when its selector/comparator changes; `useModelComputed`
   subscribes by model and compares snapshots. Shared render-local caching

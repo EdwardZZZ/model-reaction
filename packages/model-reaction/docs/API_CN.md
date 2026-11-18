@@ -53,8 +53,8 @@ createModel<S extends Record<string, FieldSchema>>(
 >
 > **反应产物会经过校验。** 字段的 `reaction.computed` 结果会走与 `setField`
 > 相同的"先校验再提交"流程。若该派生字段声明了 `validator` 且计算结果未通过，
-> `data` 会保留旧值，计算结果被存入 `dirtyData`。通过校验是 `action` 获得执行
-> 资格的必要条件；只有宿主字段最新调度的 reaction 能在计算落定后启动一组。
+> `data` 会保留旧值，计算结果被存入 `dirtyData`。验证并提交成功后，action 登记
+> 到待执行队列，按函数引用去重，并在计算落定后触发。
 > 结果校验失败时，既不会触发派生字段的变更，也不会执行 `action`。
 
 ## Model 方法
@@ -130,8 +130,7 @@ computed: ({ enabled, source }) =>
 
 返回 `SKIP_REACTION` 是正常的 no-op：不会验证或写入目标字段，不会修改
 `dirtyData`，也不会触发 `field:change`、下游 reaction 或当前 reaction 的
-`action`。本 reaction 的调度也会
-取消同一宿主字段较早的 action 资格，即使最终返回跳过。
+`action`。此前登记的函数仍保留在 action 队列中。
 
 #### 返回值类型
 
@@ -168,13 +167,12 @@ const label: Reaction = {
 `FieldSchema<'string'>` 这类单一分支，这样展开片段再添加 reaction 时，
 字段仍保留原来的 `type`。
 
-重复触发时，同一 reaction 的多次校验可能重叠。校验请求 ID 决定写入新鲜度，
-action 资格另由宿主最新调度版本决定。较晚的 `SKIP_REACTION` 不产生写入，
-因此较早有效值仍可能提交，但其 action 已被取消；较晚计算抛错也有相同的分离行为。
+重复触发时，同一 reaction 的多次校验可能重叠。校验请求 ID 决定写入新鲜度。
+只有成功计算才登记 action；较晚跳过或失败不会移除已经登记的函数。
 防抖时每个宿主只保留一项待执行计算，再次触发会替换它并重新计时。
 已开始的 action 可以与后续更新重叠执行；`settled()` 仍等待其返回的 Promise。
 
-#### action 组
+#### action 队列
 
 ```ts
 import { createModel } from 'model-reaction';
@@ -205,40 +203,37 @@ await model.settled();
 `computed`。action 不接收依赖投影、结果参数或注入的 `computed` 属性。
 闭包读取不会增加依赖，需要触发重跑的字段仍须声明在 `fields` 中。
 
+计算值通过校验并提交后，函数进入模型共享的待执行队列。初始化成功及相等计算值
+也会登记 action。跳过、失败或过期的写入不登记；空数组无操作。直接写入不会取消
+队列中的函数，也不会触发该字段自身的 action；下游 reaction 仍可正常登记 action。
+
+队列按函数引用判定相同。后登记的函数覆盖前一条待执行记录并移到队尾，包括错误
+归属的宿主字段。登记顺序指验证并提交成功后的实际进入顺序，与 reaction 调度顺序
+或 schema 字段声明顺序无关。例如 `[save, log, save]` 先调用 `log`，再调用 `save`。
+不同包装函数属于不同引用。去重仅作用于待执行队列；已经开始的函数可以再次入队，
+与上一次返回的 Promise 重叠执行。
+
 重叠的入口校验、批量提交、reaction 防抖、计算与计算结果校验构成一个计算阶段。
-计算归零时，调度器尝试启动各宿主的有效组。每次实际调度 reaction 都会
-替换宿主 action 版本，包括没有 action 或空数组的 reaction。最新者跳过、抛错、
-返回 Promise、校验失败或写入过期时，不恢复较早候选。后续独立更新仍可启动新组。
+计算归零后，在微任务中取出并清空队列，按顺序调用所有函数，不等待前一个函数的
+结果。首次调用晚于 `createModel` 返回，因此初始化闭包可以读取 model。某个 action
+回写并开始新计算时，本批次其他函数仍继续调用。flush 期间新登记的函数属于下一批，
+待计算再次归零后触发。
 
-初始化成功及相等计算值仍有执行资格。首次 action 调用晚于 `createModel` 返回，
-因此初始化闭包可以读取 model。`setField`、`setFields` 或 `validateAll` 提升脏值时，
-成功的直接值变更会取消宿主待执行及剩余项，但不会自行触发 action；相等或失败的
-直接写入不取消。computed 写回不会使自己的组失效。
+`settled()` 追踪每个函数返回的 PromiseLike。抛错或拒绝不阻止其他函数执行；
+先向登记记录中的宿主 `validationErrors` 追加 `reaction_error`，再发出
+`reaction:error`。旧错误晚到时可能与新的成功值并存。`dispose` 后丢弃未开始的调用，
+仍观察已经返回的 Promise 拒绝，但不再记录错误或发送事件，并立即释放挂起的
+`settled()`。
 
-每项（包括首项）都会在无参数调用前检查宿主版本，并等待计算归零；完成该项返回
-的 PromiseLike 后再考虑下一项。无关计算会暂停未启动项，新宿主版本会取消这些项。
-已经开始的函数继续执行，新有效组从下标零开始，不等待旧函数结束。空数组无操作。
-
-同一模型的待执行函数只保留最后登记组中的最后一个数组位置，旧待执行列表删除
-相同引用。例如 `[save, log, save]` 会先执行 `log`，再执行 `save`。不同包装函数
-属于不同引用，组调度及已启动调用的规则不变。
-
-同一轮就绪的组按 schema 字段声明顺序尝试启动，各组独立等待自己的 Promise。
-同步回写开始新计算时，其他就绪项暂停。抛错或拒绝只停止该组，先向宿主
-`validationErrors` 追加 `reaction_error`，再发出 `reaction:error`，即使该 action
-版本已经失效。旧错误晚到时可能与新版本成功值并存。`dispose` 后仍观察返回的
-Promise 拒绝，但不再记录错误或发送事件，并立即释放挂起的 `settled()`。
-
-屏障只保护每个数组项的进入时刻。函数内部普通 `await` 不保护后续读取：
-`await model.setField()` 等待该次写入，下游计算可能仍在进行。将后续操作放在下一
-数组项中，才能获得新的计算屏障。单次请求需要一致的顶层值时，在函数入口捕获
-`const data = model.data`；该快照包含 transform 后的已提交值，只做浅冻结，
-嵌套字段值不能原地修改。
+数组项是独立调用。有先后依赖的操作应放在同一个函数中，用 `await` 显式串联。
+`await model.setField()` 等待该次写入，下游计算可能仍在进行；数组项之间不再提供
+新的计算屏障。单次请求需要一致的顶层值时，在函数入口捕获 `const data = model.data`；
+该快照包含 transform 后的已提交值，只做浅冻结，嵌套字段值不能原地修改。
 
 回写推荐 `async () => { await model.setField('field', value); }` 块体。
 直接返回 `Promise<boolean>` 不符合 `ReactionAction`，表达式体还可能形成 schema
 类型推导循环。action 内不能等待同一模型的 `settled()` 或 `validateAll()`，
-因为两者都会等待当前组自身。
+因为两者都会等待该 action 返回的 Promise。
 只有返回或 await 的业务 Promise 才会被跟踪。请求取消、过期响应保护和回写循环
 由业务负责。不需要派生字段的副作用使用 `model.subscribe`，其回调 Promise
 不纳入 `settled()`。
@@ -261,8 +256,8 @@ await api.save(model.data);
 ```
 
 `validateAll()` 对已提交值与 dirty 值组成的共享快照校验一次，独立提交有效字段，
-再等待受追踪的计算、action 与回写。等待范围是整个模型，包含重叠任务以及宿主版本
-失效后仍在运行的旧 action；创建候选快照前没有隐式等待。
+再等待受追踪的计算、action 与回写。等待范围是整个模型，包含重叠任务以及较早批次
+仍在运行的 action；创建候选快照前没有隐式等待。
 
 只有本轮校验全部通过、落定后没有 dirty 值且全部字段错误数组为空，才返回 `true`。
 本轮失败不会因后续修复而转为成功。计算或 action 失败沿用现有错误处理；
@@ -445,9 +440,10 @@ const custom = formatValidationErrors(
   与任一错误来源共同决定，详见 [React 绑定](REACT_CN.md)。
 - 字段结构判等和两个 selector Hook 保持原有契约。
 - 将 `action: fn` 改为 `action: [fn]`，参数读取改为 model 闭包。直接调用者需要
-  遍历数组并无参数调用。action 现在等待计算落定，按宿主最新调度版本合并，
-  不再在每次中间计算提交后立即执行。较晚跳过或失败会取消较早 action，即使较早
-  值仍提交；新宿主版本也会取消剩余项。需要开始后连续完成的操作应放在同一项内。
+  遍历数组并无参数调用。action 等待计算落定，重复的待执行引用合并，
+  不再在每次中间计算提交后立即执行。宿主版本取消和数组串行执行已移除：
+  较晚跳过、失败或直接修改宿主字段都保留已登记的函数。本批次函数不等待前项
+  结果就会调用；有先后依赖的操作放在同一函数中显式串联。
 - 同一模型的待执行 action 按函数引用只保留最后登记的一项。重复数组位置或
   不同宿主都必须执行同一函数时，使用不同包装函数。
 - `ValidationRules`、`Rule`、`formatValidationErrors` 和类型

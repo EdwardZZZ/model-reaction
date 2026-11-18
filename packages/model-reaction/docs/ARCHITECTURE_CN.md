@@ -57,41 +57,40 @@ setFields ┘     ├─ prepareFieldWrites：先解析整批 schema，再各执
   `validation:complete` 并返回；不会为这个等待再登记任务。
 - `setField()` / `setFields()` 在批次结束后返回，下游工作可能仍在进行。完整校验
   等待全部追踪工作，不重复校验，也不在创建候选快照前隐式等待。
-- reaction 写回走 `updateField()`，保留 `origin`、reaction stack 和初始化上下文。
+- reaction 写回走 `updateField()`，保留 reaction stack 和初始化上下文。
 - 每个字段分别提交，所以 `setFields()` 不是全有或全无事务；一个字段失败不回滚其他有效字段。
 - `ModelManager` 保留请求 ID、状态更新、事件和提交逻辑。抽取 helper 时优先选择无状态的准备或计算逻辑，不把状态拆成多个所有者。
 
 ## Action 调度
 
 这里只记录调度的内部约束。公开行为和迁移示例统一见
-[API_CN.md](API_CN.md#action-组)。
+[API_CN.md](API_CN.md#action-队列)。
 
 | 所有者 | 状态与职责 |
 | --- | --- |
 | `ReactionSystem` | 每个宿主一个 `ReactionJob`、至多一个待执行防抖计算；依赖索引与运行时路径诊断 |
-| `ActionExecutor` | 宿主版本、单个组集合、Schema 字段顺序与合并后的微任务 flush |
+| `ActionExecutor` | 按 action 函数引用索引的单个 Map 与合并后的微任务 flush |
 | `PendingTasks` | 分别统计 `compute` / `action`，通知计算空闲，完成 `settled()` |
 | `ModelManager` | 校验请求 ID、已提交状态与宿主字段错误 |
 
-1. 调度宿主 reaction 时推进 action 版本；直接写入成功且宿主值变化时也推进，
-   reaction 写回不推进。内部 `origin: 'direct' | 'reaction'` 区分两种路径。
-   校验请求 ID 仍独立保留：它保护提交新鲜度，action 版本保护执行资格。
-2. 版本在调度时捕获，防抖闭包也捕获该版本，旧计算完成时不能读取最新版本。
-   防抖替换先取得新任务再释放旧任务；定时器触发先摘除等待记录再执行用户代码。
-3. 计算值通过校验并提交后，仅当捕获版本仍有效才登记组。登记时立即取得一个
-   action 任务，覆盖等待就绪、逐项执行与项间等待；不另设候选 Map 或集合交接。
-   每组用 `actions` 队列保存未启动函数。登记时按引用保留最后一项，并从旧队列
-   删除相同引用。
-4. 计算空闲后安排微任务 flush。每次固定 ready 快照，按 Schema 字段顺序尝试
-   启动。每项调用前同步检查销毁、版本与计算空闲，检查和调用之间不能 `await`。
-   前一项可能发起新计算，因此每项都必须重新检查。
-5. 各组独立等待自己的 Promise。新版本取消未启动项；已执行项仍被观察，可以
-   与新组重叠。失败只停止本组，但旧项晚到的失败仍可能按既有规则更新宿主错误。
-6. 任务释放幂等。销毁移除等待组并立即释放 settlement；已启动 Promise 的
-   拒绝仍被观察，销毁后不再向模型报告错误。
+1. 计算值通过校验并提交后，将每个函数登记到
+   `Map<ReactionAction, { field, endTask }>`。相同 key 先删除再插入，最后进入的记录
+   决定错误宿主并移到队尾。覆盖时复用原待执行任务；每个唯一函数持有一个 action
+   任务，覆盖排队等待及返回的 Promise。
+2. 计算空闲后安排微任务 flush。微任务执行时再次检查计算空闲，取出快照并在执行
+   用户代码前清空 Map。按登记顺序调用所有就绪函数，项间不等待、不重新检查计算。
+   重入时登记的函数属于后续 flush。
+3. 每次调用独立观察自己的 PromiseLike，并在 `finally` 释放任务。已经开始的调用
+   不参与去重。错误归属于登记记录中的宿主，不阻止其他函数；不再维护宿主版本、
+   执行组、schema 排序或逐项计算屏障。
+4. 任务释放幂等。销毁清空队列并阻止剩余就绪调用；`ModelManager` 销毁共享任务，
+   立即释放 settlement。已启动 Promise 的拒绝仍被观察，销毁后不再向模型报告错误。
+
+reaction 防抖仍先取得替换后的 compute 任务，再释放旧任务；定时器触发先摘除记录，
+再执行用户代码。校验请求 ID 继续保护计算提交，不再捕获 action 版本。
 
 compute 计数覆盖输入准备、校验、防抖等待、计算写回、reaction 登记与批次释放；
-action 计数覆盖整组生命周期。reaction 不等待 action，`settled()` 等待两类计数，
+action 计数覆盖唯一待执行函数及已启动调用。reaction 不等待 action，`settled()` 等待两类计数，
 `validateAll()` 在释放批次后复用这个全局等待。同模型的 action 或 validator 内
 不能 await 这两个方法。完整校验的完成事件在落定后发送，监听者更新属于后续工作。
 
@@ -101,7 +100,7 @@ action 计数覆盖整组生命周期。reaction 不等待 action，`settled()` 
 ## 保留的设计决策
 
 - **结构判等**：保留 `deepEqual`，内容相同的新对象不会仅因引用不同被判为变更。
-  改为 `Object.is` 会同时改变下游校验、reaction、action 取消，以及 Date、NaN
+  改为 `Object.is` 会同时改变下游校验、reaction/action 触发，以及 Date、NaN
   和正负零的行为。
 - **两个 selector Hook**：`useModelSelector` 在模型层过滤通知，selector / 比较器
   变化时重订阅；`useModelComputed` 按 model 订阅并在快照层比较。两者共享

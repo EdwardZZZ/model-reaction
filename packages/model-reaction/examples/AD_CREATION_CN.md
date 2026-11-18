@@ -200,7 +200,7 @@ async function submitAd(model: AdDraftModel,
 `validateAll()` 已等待计算与 action 收尾，并检查模型 dirty 值与错误；它只做一次
 完整校验，不会因 action 改写预算而自动重验其他字段的跨字段规则。预算等关联修正
 应在完整校验前完成，或同批写入相关字段。
-`requestId` 与版本由应用维护，不使用内部 action 版本作为业务幂等键。
+`requestId` 与业务版本由应用维护，action 去重不能替代业务幂等控制。
 服务端已接受而本地回填失败时，重新获取详情，不将它当作提审未成功而发起新请求。
 
 | 示例接口 | 用途 |

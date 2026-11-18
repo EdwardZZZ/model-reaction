@@ -59,11 +59,12 @@ data and cannot start actions. `SKIP_REACTION` skips that computation's write
 and actions.
 
 `action` is an optional array of no-argument functions reading the model
-through a closure. The latest eligible host group starts after calculation
-settles; each item checks calculation again. New host versions cancel
-unstarted items; running Promises remain tracked. Never await the same model's
+through a closure. Successful computations queue functions by reference; the
+last registration replaces the earlier pending record and moves to the end.
+After calculation settles, the whole queue is called without waiting between
+items. Returned Promises remain tracked. Never await the same model's
 `settled()` or `validateAll()` inside an action. Details:
-[action groups](docs/API.md#action-groups).
+[action queue](docs/API.md#action-queue).
 
 Use `useDraftField` for text inputs and show
 `writeError?.message ?? meta.error` under `showError`. Non-text controls can use

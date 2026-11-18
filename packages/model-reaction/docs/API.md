@@ -60,10 +60,9 @@ top level.
 > committed through the same validate-then-commit path as `setField`. If the
 > derived field declares a `validator` and the computed value fails it, `data`
 > keeps its previous value and the computed value is stored in `dirtyData`.
-> Passing validation is necessary for `action` eligibility. Only the host
-> field's latest scheduled reaction can start its group after calculation
-> settles; a failed value fires neither the derived field's change nor its
-> `action`.
+> Successful validation and commit queue the reaction's actions for execution
+> after calculation settles, deduplicating pending functions by reference.
+> A failed value fires neither the derived field's change nor its `action`.
 
 ## Model Methods
 
@@ -152,8 +151,8 @@ computed: ({ enabled, source }) =>
 
 `SKIP_REACTION` is a normal no-op: the target field is not validated or
 written, `dirtyData` is unchanged, and no `field:change`, downstream reaction,
-or current reaction `action` is triggered. Scheduling this reaction also cancels earlier
-action eligibility for the same host field, even when it skips.
+or current reaction `action` is triggered. Previously queued functions remain
+in the action queue.
 
 #### Result types
 
@@ -193,15 +192,13 @@ fragment factories should return a single variant such as
 added.
 
 Repeated triggers can overlap validations of the same reaction. Validation
-request IDs decide which write can commit; action eligibility separately follows
-the host's latest scheduling version. A later `SKIP_REACTION` creates no write,
-so an earlier valid write may still commit while its actions are cancelled.
-A later computation that throws has the same separation. Debouncing keeps one
-pending computation per host, replacing it and restarting the window on another
-trigger. An already started action may overlap with later updates; `settled()`
-still waits for its returned Promise.
+request IDs decide which write can commit. Only a successful computation queues
+its actions; a later skip or failure does not remove previously queued functions.
+Debouncing keeps one pending computation per host, replacing it and restarting
+the window on another trigger. An already started action may overlap with later
+updates; `settled()` still waits for its returned Promise.
 
-#### Action groups
+#### Action queue
 
 ```ts
 import { createModel } from 'model-reaction';
@@ -233,54 +230,47 @@ its `T` only constrains `computed`. Actions receive no dependency projection,
 result argument, or injected `computed` property. Their reads do not add
 dependencies: declare trigger fields in `fields`.
 
+After a computed value validates and commits, its functions enter a queue shared
+by the model. Successful initialization and equal computed values also queue
+actions. A skipped, failed, or stale write queues nothing. Empty arrays do nothing.
+Direct writes do not cancel queued functions or start actions for that field;
+their downstream reactions can queue actions as usual.
+
+The queue uses function reference identity. A later registration replaces the
+earlier pending record and moves it to the end, including the host field used
+for error reporting. Registration order means arrival after successful
+validation and commit, not reaction scheduling or schema field order.
+For example, `[save, log, save]` calls `log` then `save`. Distinct wrappers are
+distinct functions. Deduplication applies only while queued: an already started
+function can be queued again and overlap its earlier returned Promise.
+
 Overlapping input validation, batch commits, reaction debounce, computation,
 and computed-value validation form one calculation phase. When it becomes idle,
-the scheduler attempts the eligible group for each host field. Each actual
-reaction scheduling replaces the host's action version, including reactions
-with no actions or an empty array. If the latest reaction skips, throws, returns
-a Promise, fails validation, or loses its write, no earlier group is restored.
-Later independent updates can start new groups.
+a microtask takes and clears the queue, then calls every function in order
+without waiting for earlier results. The first call occurs after `createModel`
+returns, so initialization closures can read `model`. A write started by one
+action does not pause the rest of that batch. Actions queued during a flush
+belong to a later flush after calculation becomes idle again.
 
-Successful initialization and equal computed values remain eligible. The first
-action call occurs after `createModel` returns, so initialization closures can
-read `model`. Direct successful value changes through `setField`, `setFields`,
-or dirty-value promotion in `validateAll` cancel the host's pending and remaining
-items without starting actions themselves. Equal or failed direct writes do not
-cancel them. Computed writeback does not invalidate its own group.
+Each returned PromiseLike remains tracked by `settled()`. An exception or
+rejection does not stop other functions. It appends `reaction_error` to the
+recorded host's `validationErrors` before emitting `reaction:error`. A late
+error can accompany a newer successful value. After `dispose`, queued calls
+are discarded and returned rejections are still observed, but errors and events
+are no longer recorded; pending `settled()` calls are released immediately.
 
-Each item, including the first, checks the host version and waits for calculation
-to become idle immediately before its no-argument call. It then waits for that
-item's PromiseLike before considering the next item. An unrelated calculation
-pauses remaining items; a new host version cancels them. Already started
-functions continue, and a new valid group starts from index zero without waiting
-for an old function to finish. Empty arrays do nothing.
-
-Pending functions within each model keep only their last array position in the
-last registered group; matching references are removed from older pending lists.
-For example, `[save, log, save]` executes `log` then `save`. Distinct wrappers are
-distinct functions. Group scheduling and already started calls are unchanged.
-
-Groups ready in the same scheduler turn are attempted in schema field order.
-Each group waits independently for its own Promise. A synchronous write starting
-new calculation pauses other ready items. An exception or rejection stops only
-that group. It appends `reaction_error` to the host's `validationErrors` before
-emitting `reaction:error`, even if that action's version has since expired.
-A late old error can therefore accompany a newer successful value. After
-`dispose`, returned rejections are still observed, but errors and events are
-no longer recorded; pending `settled()` calls are released immediately.
-
-The barrier protects entry to each array item. An ordinary `await` inside an
-item does not protect later reads: `await model.setField()` waits for that write,
-and its downstream computation may still be running. Put a later operation in
-the next array item to get a new calculation barrier. Capture `const data =
-model.data` at function entry when one request needs consistent top-level values;
-the snapshot includes transformed committed values and is only shallow-frozen.
-Nested values must not be mutated in place.
+Array items are independent calls. Put dependent operations in one function and
+sequence them with `await`. `await model.setField()` waits for that write, and
+its downstream computation may still be running; no new calculation barrier is
+provided between array items. Capture `const data = model.data` at function entry
+when one request needs consistent top-level values; the snapshot includes
+transformed committed values and is only shallow-frozen. Nested values must not
+be mutated in place.
 
 For writeback, use `async () => { await model.setField('field', value); }`.
 An expression returning `Promise<boolean>` does not fit `ReactionAction` and
 may create circular schema inference. Never await the same model's `settled()`
-or `validateAll()` inside an action: both wait for the current group itself.
+or `validateAll()` inside an action: both wait for that action's returned Promise.
 Only returned or awaited business Promises are tracked. Cancellation of requests, stale response
 protection, and writeback cycles remain application responsibilities.
 For side effects without a derived field, use `model.subscribe`; its callback
@@ -307,7 +297,7 @@ await api.save(model.data);
 `validateAll()` validates a shared snapshot of committed and dirty values once,
 commits valid fields independently, then waits for tracked calculations,
 actions, and writebacks. The wait is global: overlapping work and already
-running actions whose host versions became stale are included. There is no
+running actions from earlier flushes are included. There is no
 implicit wait before taking the candidate snapshot.
 
 The result is `true` only if this pass succeeded, no dirty values remain, and
@@ -509,11 +499,12 @@ These changes are breaking and require updating consumers:
 - Structural field equality and both selector Hooks remain unchanged.
 - Replace `action: fn` with `action: [fn]` and migrate parameter reads to model
   closures. Direct callers must iterate the array and invoke items without
-  arguments. Actions now wait for calculation to settle and merge by host's
-  latest scheduling version; they no longer run after every intermediate
-  successful computation. A later skip or failure cancels earlier actions even
-  when an earlier value commits. Remaining items can be cancelled after a new
-  host version; combine operations in one item when they must complete together.
+  arguments. Actions wait for calculation to settle; repeated pending references
+  merge instead of running after every intermediate successful computation.
+  Host-version cancellation and sequential array execution have been removed:
+  later skips, failures, or direct host writes leave queued functions intact.
+  All functions in a flush are called without waiting for earlier results;
+  combine dependent operations in one function and sequence them explicitly.
 - Pending actions keep only the last registered occurrence of each function
   reference within a model. Use distinct wrappers when repeated array positions
   or host fields must each execute the function.

@@ -14,7 +14,7 @@ with an application store.
 | Modeling | Slices, reducers, actions | Stores with `set` / `get` | Flat field schema |
 | Updates | Immutable reducer updates with Immer | Immutable updates by convention; Immer optional | Validated field replacement, shallow-frozen snapshots |
 | Derived values | Selectors; `createSelector` available | Selectors or application logic | Declared `reaction.fields` and pure `computed` |
-| Async work | Thunks, listener middleware, RTK Query | Application actions or integrations | Async validators and `reaction.action` groups |
+| Async work | Thunks, listener middleware, RTK Query | Application actions or integrations | Async validators and `reaction.action` functions |
 | Field validation and dirty data | Application or form-library logic | Application or form-library logic | Built-in validators, `validationErrors`, `getDirtyData()` |
 | React subscription | React Redux selectors | Store selectors | Field bindings and selector Hooks |
 | Completion | Depends on the async integration | Depends on application actions | `settled()` covers model validation, calculation, and actions |

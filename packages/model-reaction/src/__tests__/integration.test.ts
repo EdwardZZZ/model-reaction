@@ -9,7 +9,7 @@
  * 覆盖范围：
  *   1.  README / ADVANCED 核心场景（同步 / 异步校验、自定义规则、类型化事件、
  *       transform、settled、setFields、首错校验、错误格式化）
- *   2.  Reaction 系统的 action 组、多字段 reaction、循环依赖
+ *   2.  Reaction 系统的 action 队列、多字段 reaction、循环依赖
  *   3.  事件系统、dirty 数据生命周期、dispose 资源回收
  *   4.  端到端注册表单流程
  *   5.  各类边界场景：异步超时、校验器抛错、reaction 计算抛错、

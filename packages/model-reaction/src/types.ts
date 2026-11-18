@@ -83,7 +83,7 @@ export interface Reaction<T = any> {
      * the target unchanged and skip `action`.
      */
     computed: (values: Record<string, any>) => T | typeof SKIP_REACTION;
-    /** Sequential side effects started after computation settles; see docs/API.md. */
+    /** Side effects deduplicated by reference and called after computation settles; see docs/API.md. */
     action?: ReactionAction[];
 }
 
@@ -198,7 +198,7 @@ export interface ModelReturn<T = Record<string, any>> {
     /** Return a stable shallow read-only snapshot of rejected input values. */
     getDirtyData: () => Readonly<Partial<T>>;
     clearDirtyData: () => void;
-    /** Wait for pending validations, computations, and action groups to complete. */
+    /** Wait for pending validations, computations, and returned action Promises to complete. */
     settled: () => Promise<void>;
     dispose: () => void;
     /**

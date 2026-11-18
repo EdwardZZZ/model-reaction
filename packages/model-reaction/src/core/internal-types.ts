@@ -4,7 +4,6 @@
  * of the package's public API.
  */
 export interface CommitOptions {
-    origin: 'direct' | 'reaction';
     reactionStack?: string[];
     /** Collect fields whose committed values actually changed. */
     changedFields?: Set<string>;

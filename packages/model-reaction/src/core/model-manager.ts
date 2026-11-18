@@ -222,7 +222,7 @@ export class ModelManager<
         try {
             let allValid: boolean;
             try {
-                allValid = await validate({ changedFields, origin: 'direct' });
+                allValid = await validate({ changedFields });
             } finally {
                 this.reactionSystem.triggerReactionsForFields([...changedFields]);
             }
@@ -438,9 +438,6 @@ export class ModelManager<
         if (dataChanged) {
             this.modelData[fieldKey] = value;
             this.dataSnapshot = null;
-            if (options.origin === 'direct') {
-                this.reactionSystem.invalidateActionsForField(field);
-            }
         }
         if (hadDirty) {
             delete this.dirtyData[field];

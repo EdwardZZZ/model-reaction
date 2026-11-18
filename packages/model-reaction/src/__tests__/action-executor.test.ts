@@ -14,7 +14,7 @@ function deferred<T = void>() {
 
 const drain = () => new Promise<void>((resolve) => setImmediate(resolve));
 
-describe('action computation barriers', () => {
+describe('actions after computation settles', () => {
     const cleanups: Array<() => void> = [];
     function own<T extends { dispose: () => void }>(model: T): T {
         cleanups.push(model.dispose);
@@ -70,7 +70,7 @@ describe('action computation barriers', () => {
     );
 
     test.each([0, 5])(
-        'keeps in-flight value commits but cancels actions when a later computation skips (debounce: %s)',
+        'keeps an earlier valid write and its action when a later computation skips (debounce: %s)',
         async (debounceReactions) => {
             const earlier = jest.fn();
             const gate = deferred<boolean>();
@@ -109,12 +109,12 @@ describe('action computation barriers', () => {
             gate.resolve(true);
             await model.settled();
             expect(model.data.target).toBe(1);
-            expect(earlier).not.toHaveBeenCalled();
+            expect(earlier).toHaveBeenCalledTimes(1);
         }
     );
 
     test.each(['skip', 'throw', 'promise', 'invalid'] as const)(
-        'does not restore a replaced candidate when its successor is %s',
+        'keeps a queued action when a later computation is %s',
         async (outcome) => {
             const barrier = deferred<boolean>();
             const started = deferred();
@@ -167,34 +167,34 @@ describe('action computation barriers', () => {
             barrier.resolve(true);
             await slow;
             await model.settled();
-            expect(action).not.toHaveBeenCalled();
+            expect(action).toHaveBeenCalledTimes(1);
             expect(model.data.target).toBe(1);
         }
     );
 
-    test.each([{}, { action: [] }])('invalidates older groups when the new job has no actions: %p', async (config) => {
+    test.each([{}, { action: [] }])('keeps queued functions when a later job has no actions: %p', async (config) => {
         const tasks = new PendingTasks();
         const onError = jest.fn();
-        const executor = new ActionExecutor(['target'], tasks, onError);
+        const executor = new ActionExecutor(tasks, onError);
         const end = tasks.begin();
         const action = jest.fn();
         executor.register({
             field: 'target',
             reaction: { fields: [], computed: () => 1, action: [action] },
-        }, executor.invalidate('target'));
+        });
         executor.register({
             field: 'target',
             reaction: { fields: [], computed: () => 2, ...config },
-        }, executor.invalidate('target'));
+        });
         end();
         await tasks.settled();
-        expect(action).not.toHaveBeenCalled();
+        expect(action).toHaveBeenCalledTimes(1);
         expect(onError).not.toHaveBeenCalled();
         executor.dispose();
         tasks.dispose();
     });
 
-    test('waits for downstream computation before the next item after an unrelated write', async () => {
+    test('calls the next action without waiting for an earlier action writeback', async () => {
         const gate = deferred<boolean>();
         const computing = deferred();
         const firstDone = deferred();
@@ -244,16 +244,16 @@ describe('action computation barriers', () => {
         await computing.promise;
         await firstDone.promise;
         await drain();
-        expect(observed).toEqual([[2, 0]]);
+        expect(observed).toEqual([[0, 0], [2, 0]]);
         gate.resolve(true);
         await model.settled();
         expect(observed).toEqual([
+            [0, 0],
             [2, 0],
-            [2, 4],
         ]);
     });
 
-    test('starts a new group while an invalidated old item is still running', async () => {
+    test('calls the same function again in a later flush while its earlier Promise is running', async () => {
         const oldGate = deferred();
         const newStarted = deferred();
         const completed: number[] = [];
@@ -287,7 +287,7 @@ describe('action computation barriers', () => {
         await newStarted.promise;
         await drain();
         expect(model.data.target).toBe(2);
-        expect(completed).toEqual([2]);
+        expect(completed).toEqual([1, 2]);
         let idle = false;
         const settled = model.settled().then(() => {
             idle = true;
@@ -296,11 +296,11 @@ describe('action computation barriers', () => {
         expect(idle).toBe(false);
         oldGate.resolve();
         await settled;
-        expect(completed).toEqual([2]);
+        expect(completed).toEqual([1, 2]);
     });
 
     test.each(['setField', 'setFields', 'validateAll'] as const)(
-        'cancels remaining items after a direct %s commit',
+        'does not cancel action calls after a direct %s commit',
         async (operation) => {
             const gate = deferred();
             const started = deferred();
@@ -351,12 +351,12 @@ describe('action computation barriers', () => {
             if (validation) expect(await validation).toBe(true);
             await model.settled();
             expect(model.data.target).toBe(7);
-            expect(next).not.toHaveBeenCalled();
+            expect(next).toHaveBeenCalledTimes(1);
         }
     );
 
     test.each(['equal', 'invalid'] as const)(
-        'retains remaining items after an %s direct write',
+        'does not repeat action calls after an %s direct write',
         async (operation) => {
             const gate = deferred();
             const started = deferred();
@@ -394,7 +394,41 @@ describe('action computation barriers', () => {
         }
     );
 
-    test('starts ready groups in schema order and awaits each group independently', async () => {
+    test('keeps a queued action after a direct host write and reads the latest committed value', async () => {
+        const gate = deferred<boolean>();
+        const started = deferred();
+        const observed: number[] = [];
+        const model = own(createModel({
+            source: { type: 'number' },
+            slow: {
+                type: 'number',
+                validator: [{
+                    type: 'gate', message: '',
+                    validate: () => { started.resolve(); return gate.promise; },
+                }],
+            },
+            target: {
+                type: 'number', default: 0,
+                reaction: {
+                    fields: ['source'], computed: ({ source }) => source,
+                    action: [() => { observed.push(model.data.target); }],
+                },
+            },
+        }));
+        const slow = model.setField('slow', 1);
+        await started.promise;
+        await model.setField('source', 1);
+        await drain();
+        expect(model.data.target).toBe(1);
+        expect(observed).toEqual([]);
+        await model.setField('target', 7);
+        gate.resolve(true);
+        await slow;
+        await model.settled();
+        expect(observed).toEqual([7]);
+    });
+
+    test('calls actions in registration order without waiting for their Promises', async () => {
         const gate = deferred();
         const order: string[] = [];
         const model = own(
@@ -438,13 +472,13 @@ describe('action computation barriers', () => {
         );
         await model.setFields({ y: 1, x: 1 });
         await drain();
-        expect(order).toEqual(['first:0', 'second:0', 'second:1']);
+        expect(order).toEqual(['second:0', 'second:1', 'first:0', 'first:1']);
         gate.resolve();
         await model.settled();
-        expect(order).toEqual(['first:0', 'second:0', 'second:1', 'first:1']);
+        expect(order).toEqual(['second:0', 'second:1', 'first:0', 'first:1']);
     });
 
-    test('pauses other sealed candidates when a preceding group starts computation', async () => {
+    test('calls the whole ready batch even when an earlier action starts computation', async () => {
         const gate = deferred<boolean>();
         const computing = deferred();
         const observations: number[] = [];
@@ -500,14 +534,14 @@ describe('action computation barriers', () => {
         await model.setField('trigger', 1);
         await computing.promise;
         await drain();
-        expect(observations).toEqual([]);
+        expect(observations).toEqual([0]);
         gate.resolve(true);
         await model.settled();
-        expect(observations).toEqual([4]);
+        expect(observations).toEqual([0]);
     });
 
     test.each([false, true])(
-        'isolates group errors and stops its remaining items (async: %s)',
+        'reports action errors without stopping other functions (async: %s)',
         async (asyncError) => {
             const rest = jest.fn();
             const other = jest.fn();
@@ -540,7 +574,7 @@ describe('action computation barriers', () => {
             model.on('reaction:error', error);
             await model.setField('source', 1);
             await model.settled();
-            expect(rest).not.toHaveBeenCalled();
+            expect(rest).toHaveBeenCalledTimes(1);
             expect(other).toHaveBeenCalledTimes(1);
             expect(error).toHaveBeenCalledTimes(1);
             expect(model.validationErrors.first).toEqual([
@@ -549,7 +583,7 @@ describe('action computation barriers', () => {
         }
     );
 
-    test('records an old action rejection after a new version succeeds without cancelling it', async () => {
+    test('records an earlier action rejection after a newer computation succeeds', async () => {
         const old = deferred();
         const started = deferred();
         const completed: number[] = [];
@@ -585,7 +619,7 @@ describe('action computation barriers', () => {
         await drain();
         expect(model.data.target).toBe(4);
         expect(model.validationErrors.target).toEqual([]);
-        expect(completed).toEqual([4]);
+        expect(completed).toEqual([2, 4]);
         old.reject(new Error('old failure'));
         await model.settled();
         expect(model.data.target).toBe(4);
@@ -593,10 +627,10 @@ describe('action computation barriers', () => {
             { field: 'target', rule: 'reaction_error', message: 'old failure' },
         ]);
         expect(errors).toHaveBeenCalledTimes(1);
-        expect(completed).toEqual([4]);
+        expect(completed).toEqual([2, 4]);
     });
 
-    test('observes rejection after dispose and releases settled without starting remaining items', async () => {
+    test('observes rejection after dispose and releases settled while actions are running', async () => {
         const gate = deferred();
         const started = deferred();
         const rest = jest.fn();
@@ -629,7 +663,7 @@ describe('action computation barriers', () => {
         await settled;
         gate.reject(new Error('disposed'));
         await drain();
-        expect(rest).not.toHaveBeenCalled();
+        expect(rest).toHaveBeenCalledTimes(1);
         expect(errors).not.toHaveBeenCalled();
         expect(model.data).toEqual({});
         expect(model.validationErrors).toEqual({});
@@ -667,7 +701,7 @@ describe('action computation barriers', () => {
         expect(action.mock.calls).toEqual([[], []]);
     });
 
-    test('keeps a late valid write without restoring its superseded action', async () => {
+    test('queues an action for a late valid write even after a later computation skips', async () => {
         const gate = deferred<boolean>();
         const validating = deferred();
         const action = jest.fn();
@@ -702,7 +736,7 @@ describe('action computation barriers', () => {
         gate.resolve(true);
         await model.settled();
         expect(model.data.target).toBe(1);
-        expect(action).not.toHaveBeenCalled();
+        expect(action).toHaveBeenCalledTimes(1);
     });
 
     test.each([false, true])(
@@ -742,11 +776,11 @@ describe('action computation barriers', () => {
             });
             await drain();
             expect(idle).toBe(false);
-            expect(rest).not.toHaveBeenCalled();
+            expect(rest).toHaveBeenCalledTimes(1);
             if (reject) gate.reject(new Error('thenable failure'));
             else gate.resolve();
             await settled;
-            expect(rest).toHaveBeenCalledTimes(reject ? 0 : 1);
+            expect(rest).toHaveBeenCalledTimes(1);
             expect(errors).toHaveBeenCalledTimes(reject ? 1 : 0);
         }
     );
@@ -774,7 +808,7 @@ describe('action computation barriers', () => {
         expect(action).toHaveBeenCalledTimes(1);
     });
 
-    test('keeps captured snapshot values stable while later items read a newer batch', async () => {
+    test('keeps captured snapshot values stable while a running action observes later updates', async () => {
         const gate = deferred();
         const started = deferred();
         const observations: number[][] = [];
@@ -819,8 +853,8 @@ describe('action computation barriers', () => {
         gate.resolve();
         await model.settled();
         expect(observations).toEqual([
+            [1, 2],
             [1, 2, 2, 4],
-            [2, 4],
         ]);
     });
 
@@ -907,18 +941,16 @@ describe('ActionExecutor function deduplication', () => {
     const cleanups: Array<() => void> = [];
     function setup() {
         const tasks = new PendingTasks();
-        const executor = new ActionExecutor(['first', 'second'], tasks, jest.fn());
+        const onError = jest.fn();
+        const executor = new ActionExecutor(tasks, onError);
         cleanups.push(() => {
             executor.dispose();
             tasks.dispose();
         });
         const register = (field: string, action: ReactionAction[]) => {
-            executor.register(
-                { field, reaction: { fields: [], computed: () => 1, action } },
-                executor.invalidate(field)
-            );
+            executor.register({ field, reaction: { fields: [], computed: () => 1, action } });
         };
-        return { tasks, register };
+        return { tasks, register, executor, onError };
     }
     afterEach(() => {
         cleanups.splice(0).forEach((dispose) => dispose());
@@ -941,6 +973,42 @@ describe('ActionExecutor function deduplication', () => {
     test.each([
         ['first', 'second'],
         ['second', 'first'],
+    ])('attributes a shared action failure to the last registration from %s then %s', async (earlier, later) => {
+        const { tasks, register, onError } = setup();
+        const error = new Error('shared failure');
+        const shared = jest.fn(() => { throw error; });
+        register(earlier, [shared]);
+        let idle = false;
+        const settled = tasks.settled().then(() => { idle = true; });
+        register(later, [shared]);
+        expect(idle).toBe(false);
+        await settled;
+        expect(shared).toHaveBeenCalledTimes(1);
+        expect(onError).toHaveBeenCalledTimes(1);
+        expect(onError).toHaveBeenCalledWith(later, error);
+    });
+
+    test('treats distinct wrappers as distinct actions', async () => {
+        const { tasks, register } = setup();
+        const shared = jest.fn();
+        register('first', [() => shared(), () => shared()]);
+        await tasks.settled();
+        expect(shared).toHaveBeenCalledTimes(2);
+    });
+
+    test('deduplicates independently within each model queue', async () => {
+        const first = setup();
+        const second = setup();
+        const shared = jest.fn();
+        first.register('first', [shared, shared]);
+        second.register('second', [shared, shared]);
+        await Promise.all([first.tasks.settled(), second.tasks.settled()]);
+        expect(shared).toHaveBeenCalledTimes(2);
+    });
+
+    test.each([
+        ['first', 'second'],
+        ['second', 'first'],
     ])('keeps the last registration from %s then %s, regardless of schema order', async (earlier, later) => {
         const { tasks, register } = setup();
         const end = tasks.begin();
@@ -955,8 +1023,8 @@ describe('ActionExecutor function deduplication', () => {
         const settled = tasks.settled().then(() => { idle = true; });
         await drain();
         expect(earlierRest).toHaveBeenCalledTimes(1);
-        expect(shared).not.toHaveBeenCalled();
-        expect(laterRest).not.toHaveBeenCalled();
+        expect(shared).toHaveBeenCalledTimes(1);
+        expect(laterRest).toHaveBeenCalledTimes(1);
         expect(idle).toBe(false);
         gate.resolve();
         await settled;
@@ -966,33 +1034,59 @@ describe('ActionExecutor function deduplication', () => {
 });
 
 describe('ActionExecutor task lifecycle', () => {
-    test('rechecks computation after an idle notification and cancels a waiting group immediately', async () => {
+    test('discards queued functions and releases their tasks on disposal', async () => {
+        const tasks = new PendingTasks();
+        const executor = new ActionExecutor(tasks, jest.fn());
+        const action = jest.fn();
+        const job = { field: 'target', reaction: { fields: [], computed: () => 1, action: [action] } };
+        executor.register(job);
+        const settled = tasks.settled();
+        executor.dispose();
+        executor.dispose();
+        executor.register(job);
+        await settled;
+        await tasks.settled();
+        expect(action).not.toHaveBeenCalled();
+        tasks.dispose();
+    });
+
+    test('skips remaining ready calls when an action disposes the executor synchronously', async () => {
+        const tasks = new PendingTasks();
+        const executor = new ActionExecutor(tasks, jest.fn());
+        const rest = jest.fn();
+        executor.register({
+            field: 'target',
+            reaction: { fields: [], computed: () => 1, action: [() => executor.dispose(), rest] },
+        });
+        await tasks.settled();
+        expect(rest).not.toHaveBeenCalled();
+        tasks.dispose();
+    });
+
+    test('rechecks computation after an idle notification before flushing queued functions', async () => {
         const tasks = new PendingTasks();
         const action = jest.fn();
-        const executor = new ActionExecutor(['target'], tasks, jest.fn());
+        const executor = new ActionExecutor(tasks, jest.fn());
         const end = tasks.begin();
-        const version = executor.invalidate('target');
         executor.register(
-            { field: 'target', reaction: { fields: [], computed: () => 1, action: [action] } },
-            version
+            { field: 'target', reaction: { fields: [], computed: () => 1, action: [action] } }
         );
         end();
         const newCompute = tasks.begin();
         await drain();
         expect(action).not.toHaveBeenCalled();
-        executor.invalidate('target');
         newCompute();
         await tasks.settled();
-        expect(action).not.toHaveBeenCalled();
+        expect(action).toHaveBeenCalledTimes(1);
         executor.dispose();
         tasks.dispose();
     });
 
-    test.each(['cancel', 'replace'])('drops superseded data before the next group starts (%s)', async (operation) => {
+    test('keeps reentrant registrations for a subsequent flush', async () => {
         const tasks = new PendingTasks();
         const second = jest.fn();
         const onError = jest.fn();
-        const executor = new ActionExecutor(['first', 'second', 'third'], tasks, onError);
+        const executor = new ActionExecutor(tasks, onError);
         const end = tasks.begin();
         executor.register(
             {
@@ -1002,24 +1096,20 @@ describe('ActionExecutor task lifecycle', () => {
                     computed: () => 1,
                     action: [
                         () => {
-                            if (operation === 'cancel') executor.invalidate('second');
-                            else executor.register(
-                                { field: 'third', reaction: { fields: [], computed: () => 1, action: [second] } },
-                                executor.invalidate('third')
+                            executor.register(
+                                { field: 'third', reaction: { fields: [], computed: () => 1, action: [second] } }
                             );
                         },
                     ],
                 },
-            },
-            executor.invalidate('first')
+            }
         );
         executor.register(
-            { field: 'second', reaction: { fields: [], computed: () => 1, action: [second] } },
-            executor.invalidate('second')
+            { field: 'second', reaction: { fields: [], computed: () => 1, action: [second] } }
         );
         end();
         await tasks.settled();
-        expect(second).toHaveBeenCalledTimes(operation === 'cancel' ? 0 : 1);
+        expect(second).toHaveBeenCalledTimes(2);
         expect(onError).not.toHaveBeenCalled();
         executor.dispose();
         tasks.dispose();

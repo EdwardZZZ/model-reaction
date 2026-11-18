@@ -62,7 +62,6 @@ export class ReactionSystem {
         this.callbacks = callbacks;
         this.pendingTasks = pendingTasks;
         this.actionExecutor = new ActionExecutor(
-            Object.keys(schema),
             pendingTasks,
             (field, error) => this.handleReactionError(field, error)
         );
@@ -134,7 +133,6 @@ export class ReactionSystem {
         // Register the replacement before releasing the old task so settled()
         // never observes a false idle state during debounce rescheduling.
         const endTask = this.pendingTasks.begin();
-        const actionVersion = this.actionExecutor.invalidate(job.field);
         if (debounceTime > 0) {
             const scheduled = this.reactionTimeouts.get(job.field);
             if (scheduled) {
@@ -145,28 +143,26 @@ export class ReactionSystem {
                 endTask,
                 timeoutId: setTimeout(() => {
                     this.reactionTimeouts.delete(job.field);
-                    this.runReaction(job, reactionStack, actionVersion, endTask);
+                    this.runReaction(job, reactionStack, endTask);
                 }, debounceTime),
             };
             this.reactionTimeouts.set(job.field, pending);
         } else {
-            this.runReaction(job, reactionStack, actionVersion, endTask);
+            this.runReaction(job, reactionStack, endTask);
         }
     }
 
     private runReaction(
         job: ReactionJob,
         reactionStack: string[],
-        actionVersion: number,
         endTask: () => void
     ): void {
-        void this.processReaction(job, reactionStack, actionVersion).finally(endTask);
+        void this.processReaction(job, reactionStack).finally(endTask);
     }
 
     private async processReaction(
         job: ReactionJob,
-        reactionStack: string[],
-        actionVersion: number
+        reactionStack: string[]
     ): Promise<void> {
         if (this.disposed) return;
         const { field, reaction } = job;
@@ -199,20 +195,15 @@ export class ReactionSystem {
             }
             if (this.disposed) return;
             const committed = await this.callbacks.setValue(field, computedValue, {
-                origin: 'reaction',
                 reactionStack,
                 initializeReactions: this.initializingFields.has(field),
             });
             if (this.disposed) return;
             if (committed) this.initializingFields.delete(field);
-            if (committed) this.actionExecutor.register(job, actionVersion);
+            if (committed) this.actionExecutor.register(job);
         } catch (error) {
             this.handleReactionError(field, error);
         }
-    }
-
-    public invalidateActionsForField(field: string): void {
-        if (!this.disposed) this.actionExecutor.invalidate(field);
     }
 
     private handleReactionError(field: string, error: unknown): void {

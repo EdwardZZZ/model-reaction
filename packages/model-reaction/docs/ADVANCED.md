@@ -173,7 +173,7 @@ const asyncModel = createModel({
 ## Waiting for Async Operations
 
 Awaiting `setField` waits for that field's validation and commit. Cascading
-reactions and action groups may still be running, including without debounce.
+reactions and actions may still be running, including without debounce.
 Use `settled()` outside actions:
 
 ```typescript
@@ -251,8 +251,8 @@ forms; cross-model coordination belongs in application code.
 Extract reusable checks into named rules and put orchestration in domain
 functions. Keep `computed` synchronous and pure, declare every input in
 `reaction.fields`, and use separate fields for independent computed results.
-Async work and side effects belong in action groups; see the
-[action contract](API.md#action-groups).
+Async work and side effects belong in actions; see the
+[action contract](API.md#action-queue).
 
 Use an explicit domain interface for shared contracts and schema inference for
 small local models. `FieldSchema.type` is metadata, not runtime validation:

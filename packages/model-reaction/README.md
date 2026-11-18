@@ -136,14 +136,14 @@ a string or `SKIP_REACTION`; see [docs/API.md](docs/API.md#reactions) for the
 rules and exceptions.
 
 `action` is an optional array of no-argument functions that read the model
-through a closure. After the calculation chain settles, only the latest
-scheduled reaction for each field can start its group, if its computation commits.
-Items run in array order and wait for calculation to settle before each call;
-returned Promises are included in `settled()`. Initialization and unchanged
-computed values can still trigger a group. Direct changes to the host field
-cancel its remaining items without triggering a new group. Actions and
-validators must not await the same model's `settled()` or `validateAll()`.
-See the [action contract and migration](docs/API.md#action-groups) before upgrading
+through a closure. Successful computations queue functions in a model-wide Map:
+the last registration of the same reference replaces the earlier one and moves
+to the end. After the calculation chain settles, all queued functions are called
+in order without waiting for earlier results. Returned Promises are included in
+`settled()`. Initialization and equal computed values can also queue actions;
+later skips, failures, and direct host writes do not cancel queued functions.
+Actions and validators must not await the same model's `settled()` or `validateAll()`.
+See the [action contract and migration](docs/API.md#action-queue) before upgrading
 from single-function actions.
 
 ### Dirty Data

@@ -172,7 +172,7 @@ const asyncModel = createModel({
 ## 等待异步操作
 
 `await setField` 等待该字段的校验与提交，即使未使用防抖，下游 reaction 与 action
-组仍可能在执行。请在 action 外使用 `settled()`：
+仍可能在执行。请在 action 外使用 `settled()`：
 
 ```typescript
 interface Schema {
@@ -244,7 +244,7 @@ Schema 推导反映运行时值：默认值会绕过校验，因此与 `type` �
 
 把复用校验提取为具名规则，把编排放进业务函数。`computed` 保持同步、纯计算，
 所有输入都在 `reaction.fields` 中声明；独立计算结果拆成不同字段。
-异步工作和副作用放进 action 组，执行规则见 [action 契约](API_CN.md#action-组)。
+异步工作和副作用放进 action，执行规则见 [action 契约](API_CN.md#action-队列)。
 
 共享领域契约使用显式接口，小型局部模型可以使用 Schema 推导。
 `FieldSchema.type` 是元数据，不是运行时校验；非类型化输入仍需 validator。

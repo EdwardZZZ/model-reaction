@@ -39,13 +39,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and the shorter `setField` / `setFields` wait remain unchanged. See
   [validation](docs/API.md#validation) and its migration notes.
 - **Breaking:** `reaction.action` is now an array of no-argument functions
-  reading the model through a closure. Only the host's latest eligible group
-  starts after calculation settles; each item checks calculation again.
-  Direct host changes cancel unstarted items, while started Promises remain
-  tracked. See the [action migration](docs/API.md#action-groups).
+  reading the model through a closure. Successful computations queue actions
+  for a flush after calculation settles. Returned Promises remain tracked.
+  See the [action migration](docs/API.md#action-queue).
 - **Breaking (behavior):** pending action items now merge by function reference
-  within each model, retaining the last registered occurrence. Group scheduling
-  and already started calls are unchanged; distinct wrappers remain independent.
+  within each model, retaining the last registered occurrence and its error
+  host, in arrival order. Host-version cancellation, schema sorting, and
+  sequential array execution are removed. Every function in a flush is called
+  without waiting for earlier results; errors do not stop other functions.
+  Later skips, failures, and direct host writes retain queued functions.
+  Already started calls and distinct wrappers remain independent.
 - **Breaking:** each field now accepts one `reaction`; arrays (including empty
   arrays) fail at construction before initialization. Unwrap single entries;
   refactor multiple calculations by business result instead of merging them
@@ -60,9 +63,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **React migration:** `DraftField` adds required `writeError: Error | null`;
   `showError` now includes local write exceptions. Display
   `writeError?.message ?? meta.error`, and update manually constructed bindings.
-- Action candidates and active groups now share one collection; each host has
-  one pending debounced computation. Per-item calculation barriers, version
-  cancellation, and tracking of already started Promises are preserved.
+- Action scheduling uses one Map of pending functions; each host still has
+  one pending debounced computation. Pending functions and returned Promises
+  are tracked without maintaining execution groups or action versions.
 - Structural field equality, both selector Hook contracts, async validation
   timeout, and reaction debounce remain unchanged. These unreleased breaking
   changes require a major release, not a patch release.
