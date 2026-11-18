@@ -62,9 +62,12 @@ Its output follows the validation/commit path; invalid output enters dirty
 data and cannot start actions. `SKIP_REACTION` skips that computation's write
 and actions.
 
-`action` is an optional array of no-argument functions reading the model
-through a closure. Successful computations queue functions by reference; the
-last registration replaces the earlier pending record and moves to the end.
+`action` is an optional array of functions receiving `{ field, value }`: the
+owning field and its latest committed value read immediately before each call.
+No-argument functions remain valid; read other fields through a model closure.
+Successful computations queue functions by reference; the last registration
+replaces the earlier pending record, supplies its context field, and moves
+to the end.
 After calculation settles, the whole queue is called without waiting between
 items. Returned Promises remain tracked. Never await the same model's
 `settled()` or `validateAll()` inside an action. Details:

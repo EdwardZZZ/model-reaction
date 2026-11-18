@@ -62,6 +62,7 @@ export class ReactionSystem {
         this.pendingTasks = pendingTasks;
         this.actionExecutor = new ActionExecutor(
             pendingTasks,
+            callbacks.getValue,
             (field, error) => this.handleReactionError(field, error)
         );
         this.collectReactions();

@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Action context:** each `reaction.action` receives `{ field, value }`, with
+  the owning field from the last pending registration and its latest committed
+  value read immediately before the call. `ReactionAction<T>` types the value;
+  existing no-argument callbacks remain valid. See [action queue](docs/API.md#action-queue).
 - **`SKIP_REACTION` sentinel:** return it from `reaction.computed` to skip
   validation, commit, field events, downstream reactions, and `action` for the
   current reaction.
@@ -65,9 +69,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   not await either global waiting method on the same model. Public signatures
   and the shorter `setField` / `setFields` wait remain unchanged. See
   [validation](docs/API.md#validation) and its migration notes.
-- **Breaking:** `reaction.action` is now an array of no-argument functions
-  reading the model through a closure. Successful computations queue actions
-  for a flush after calculation settles. Returned Promises remain tracked.
+- **Breaking:** `reaction.action` is now an array of functions receiving
+  `{ field, value }` and reading other fields through a model closure. Successful
+  computations queue actions for a flush after calculation settles.
+  Returned Promises remain tracked.
   See the [action migration](docs/API.md#action-queue).
 - **Breaking (behavior):** pending action items now merge by function reference
   within each model, retaining the last registered occurrence and its error

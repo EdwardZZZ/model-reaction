@@ -151,8 +151,8 @@ total: {
 `computed` 必须同步执行且保持纯净：只读取 `fields` 中声明的依赖并返回目标字段的
 新值。返回 Promise 时会通过 `reaction:error` 上报，且结果不会提交。运行时无法
 检测发请求、写日志或修改外部状态等其他副作用，调用方必须避免这些行为。异步操作
-和其他副作用应放在 `action` 无参数函数数组中。每项返回的 PromiseLike 会纳入
-`settled()`；拒绝同样通过 `reaction:error` 上报。
+和其他副作用应放在接收 `{ field, value }` 的 `action` 函数数组中。
+每项返回的 PromiseLike 会纳入 `settled()`；拒绝同样通过 `reaction:error` 上报。
 
 需要有条件地终止当前 reaction 时，返回包入口导出的 `SKIP_REACTION`：
 
@@ -213,9 +213,9 @@ const label: Reaction = {
 import { createModel } from 'model-reaction';
 import type { ReactionAction } from 'model-reaction';
 
-const saveTotal: ReactionAction = async () => {
-  const { price, quantity, total } = model.data;
-  await saveAmount({ price, quantity, total }); // 业务提供的函数
+const saveTotal: ReactionAction<number> = async ({ value }) => {
+  const { price, quantity } = model.data;
+  await saveAmount({ price, quantity, total: value }); // 业务提供的函数
 };
 
 const model = createModel({
@@ -226,25 +226,42 @@ const model = createModel({
     reaction: {
       fields: ['price', 'quantity'],
       computed: ({ price, quantity }) => price * quantity,
-      action: [saveTotal, () => { console.log(model.data.total); }],
+      action: [saveTotal, ({ field, value }) => { console.log(field, value); }],
     },
   },
 });
 await model.settled();
 ```
 
-公开签名为 `type ReactionAction = () => void | PromiseLike<void>` 和
-`Reaction<T>.action?: ReactionAction[]`。`Reaction<T>` 保留 interface，T 只约束
-`computed`。action 不接收依赖投影、结果参数或注入的 `computed` 属性。
-闭包读取不会增加依赖，需要触发重跑的字段仍须声明在 `fields` 中。
+公开签名为：
+
+```ts
+type ReactionAction<T = any> = (context: {
+  field: string;
+  value: T;
+}) => void | PromiseLike<void>;
+// Reaction<T>.action?: ReactionAction<T>[]
+```
+
+`field` 是 action 所属的宿主字段。例如 `price → total`，`total.action` 收到
+`'total'`。`value` 在每次调用前读取该字段最新的已提交值，包含 transform 后的
+结果；登记时不保存值，因此 action 排队期间对宿主的直接写入会反映到参数中。
+每次调用捕获自己的值，后续写入不会自动更新该上下文。对象值保留模型中的引用，
+不能原地修改。
+
+`Reaction<T>` 保留 interface，T 同时约束 `computed` 与 action 的 `value`。
+不带泛型的 `ReactionAction` 不检查值类型。现有无参函数仍可使用，忽略上下文即可。
+其他字段通过 model 闭包读取；参数与闭包读取都不会增加依赖，需要触发重跑的字段
+仍须声明在 `fields` 中。
 
 计算值通过校验并提交后，函数进入模型共享的待执行队列。初始化成功及相等计算值
 也会登记 action。跳过、失败或过期的写入不登记；空数组无操作。直接写入不会取消
 队列中的函数，也不会触发该字段自身的 action；下游 reaction 仍可正常登记 action。
 
 队列按函数引用判定相同。后登记的函数覆盖前一条待执行记录并移到队尾，包括错误
-归属的宿主字段。登记顺序指验证并提交成功后的实际进入顺序，与 reaction 调度顺序
-或 schema 字段声明顺序无关。例如 `[save, log, save]` 先调用 `log`，再调用 `save`。
+归属及上下文中的宿主字段。登记顺序指验证并提交成功后的实际进入顺序，
+与 reaction 调度顺序或 schema 字段声明顺序无关。例如 `[save, log, save]`
+先调用 `log`，再调用 `save`。
 不同包装函数属于不同引用。去重仅作用于待执行队列；已经开始的函数可以再次入队，
 与上一次返回的 Promise 重叠执行。
 
@@ -477,8 +494,10 @@ const custom = formatValidationErrors(
   需要补齐。消息展示改为 `writeError?.message ?? meta.error`，`showError` 由 touched
   与任一错误来源共同决定，详见 [React 绑定](REACT_CN.md)。
 - 字段结构判等和两个 selector Hook 保持原有契约。
-- 将 `action: fn` 改为 `action: [fn]`，参数读取改为 model 闭包。直接调用者需要
-  遍历数组并无参数调用。action 等待计算落定，重复的待执行引用合并，
+- 将 `action: fn` 改为 `action: [fn]`。宿主字段名与最新已提交值从
+  `{ field, value }` 读取，其他字段通过 model 闭包读取。现有无参回调仍可使用；
+  直接调用者需要遍历数组并向每项传入 `{ field, value }`。
+  action 等待计算落定，重复的待执行引用合并，
   不再在每次中间计算提交后立即执行。宿主版本取消和数组串行执行已移除：
   较晚跳过、失败或直接修改宿主字段都保留已登记的函数。本批次函数不等待前项
   结果就会调用；有先后依赖的操作放在同一函数中显式串联。

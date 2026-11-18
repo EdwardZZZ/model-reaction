@@ -67,11 +67,14 @@ export interface ModelEventMap<T = Record<string, any>> {
 }
 
 /** Return tracked work; never await this model's settled/validateAll. See docs/API.md. */
-export type ReactionAction = () => void | PromiseLike<void>;
+export type ReactionAction<T = any> = (context: {
+    field: string;
+    value: T;
+}) => void | PromiseLike<void>;
 
 /**
- * @typeParam T Value type `computed` must return. The `any` default leaves a
- * bare `Reaction` unchecked, so it fits any field.
+ * @typeParam T Value type for `computed` and the action context. The `any`
+ * default leaves a bare `Reaction` unchecked, so it fits any field.
  */
 export interface Reaction<T = any> {
     /** Top-level model fields whose values are passed to `computed`. */
@@ -84,7 +87,7 @@ export interface Reaction<T = any> {
      */
     computed: (values: Record<string, any>) => T | typeof SKIP_REACTION;
     /** Side effects deduplicated by reference and called after computation settles; see docs/API.md. */
-    action?: ReactionAction[];
+    action?: ReactionAction<T>[];
 }
 
 /**

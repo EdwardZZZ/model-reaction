@@ -24,8 +24,8 @@ const productModel = createModel<Product>({
     reaction: {
       fields: ['price', 'quantity'],
       computed: (values) => values.price * values.quantity,
-      action: [() => {
-        console.log(`总价更新为: ${productModel.data.total}`);
+      action: [({ field, value }) => {
+        console.log(`${field} 更新为: ${value}`);
       }]
     }
   },
@@ -39,8 +39,8 @@ const productModel = createModel<Product>({
     reaction: {
       fields: ['total', 'discount'],
       computed: (values) => values.total * (1 - values.discount / 100),
-      action: [() => {
-        console.log(`折扣后总价: ${productModel.data.finalTotal}`);
+      action: [({ field, value }) => {
+        console.log(`${field} 更新为: ${value}`);
       }]
     }
   }

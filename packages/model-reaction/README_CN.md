@@ -129,9 +129,11 @@ const m = createModel({
 TypeScript 会按字段的 `type` 检查返回值，因此 `full` 只能返回字符串或
 `SKIP_REACTION`；具体规则与例外见 [docs/API_CN.md](docs/API_CN.md#反应)。
 
-`action` 是可选的无参数函数数组，通过闭包读取 model。成功计算将函数登记到模型
-共享的 Map，相同引用后进入的覆盖前一条记录并移到队尾。计算链落定后按顺序调用
-所有待执行函数，不等待前项结果；返回的 Promise 纳入 `settled()`。初始化及相等
+`action` 是可选的函数数组，接收 `{ field, value }`：宿主字段名与每次调用前读取的
+最新已提交值。现有无参函数仍可使用，其他字段通过 model 闭包读取。成功计算将函数
+登记到模型共享的 Map，相同引用后进入的覆盖前一条记录、决定上下文的 field，
+并移到队尾。计算链落定后按顺序调用所有待执行函数，不等待前项结果；
+返回的 Promise 纳入 `settled()`。初始化及相等
 计算值也能登记 action；较晚跳过、失败或直接修改宿主字段不取消已登记的函数。
 action 与 validator 内不能 await 同一模型的 `settled()` 或 `validateAll()`。
 从单函数 action 升级前，请阅读 [执行契约与迁移](docs/API_CN.md#action-队列)。

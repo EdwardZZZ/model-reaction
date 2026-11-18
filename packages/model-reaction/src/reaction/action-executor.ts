@@ -15,6 +15,7 @@ export class ActionExecutor {
 
     constructor(
         private readonly tasks: PendingTasks,
+        private readonly getValue: (field: string) => any,
         private readonly onError: (field: string, error: unknown) => void
     ) {
         this.unsubscribe = tasks.onComputeIdle(() => this.scheduleFlush());
@@ -51,7 +52,7 @@ export class ActionExecutor {
 
     private async run(action: ReactionAction, pending: PendingAction): Promise<void> {
         try {
-            await action();
+            await action({ field: pending.field, value: this.getValue(pending.field) });
         } catch (error) {
             if (!this.disposed) this.onError(pending.field, error);
         } finally {

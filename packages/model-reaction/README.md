@@ -140,11 +140,14 @@ TypeScript checks the result against the field's `type`, so `full` must return
 a string or `SKIP_REACTION`; see [docs/API.md](docs/API.md#reactions) for the
 rules and exceptions.
 
-`action` is an optional array of no-argument functions that read the model
-through a closure. Successful computations queue functions in a model-wide Map:
-the last registration of the same reference replaces the earlier one and moves
-to the end. After the calculation chain settles, all queued functions are called
-in order without waiting for earlier results. Returned Promises are included in
+`action` is an optional array of functions receiving `{ field, value }`: the
+owning field name and its latest committed value read immediately before each
+call. Existing no-argument functions remain valid; other fields can be read
+through a model closure. Successful computations queue functions in a model-wide Map:
+the last registration of the same reference replaces the earlier one, determines
+the context's field, and moves to the end. After the calculation chain settles,
+all queued functions are called in order without waiting for earlier results.
+Returned Promises are included in
 `settled()`. Initialization and equal computed values can also queue actions;
 later skips, failures, and direct host writes do not cancel queued functions.
 Actions and validators must not await the same model's `settled()` or `validateAll()`.

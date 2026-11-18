@@ -181,9 +181,9 @@ dependencies declared in `fields` and returns the target field's next value.
 Returning a Promise is reported through `reaction:error`, and no result is
 committed. Other side effects, such as requests, logging, or external-state
 mutations, cannot be detected at runtime and must be avoided by the caller. Put
-asynchronous work and other side effects in `action`, an array of no-argument
-functions. Each returned PromiseLike is tracked by `settled()`, and a
-rejection is reported through `reaction:error`.
+asynchronous work and other side effects in `action`, an array of functions
+receiving `{ field, value }`. Each returned PromiseLike is tracked by
+`settled()`, and a rejection is reported through `reaction:error`.
 
 Return the package-level `SKIP_REACTION` export to conditionally stop the
 current reaction:
@@ -250,9 +250,9 @@ updates; `settled()` still waits for its returned Promise.
 import { createModel } from 'model-reaction';
 import type { ReactionAction } from 'model-reaction';
 
-const saveTotal: ReactionAction = async () => {
-  const { price, quantity, total } = model.data;
-  await saveAmount({ price, quantity, total }); // application-provided function
+const saveTotal: ReactionAction<number> = async ({ value }) => {
+  const { price, quantity } = model.data;
+  await saveAmount({ price, quantity, total: value }); // application-provided function
 };
 
 const model = createModel({
@@ -263,18 +263,36 @@ const model = createModel({
     reaction: {
       fields: ['price', 'quantity'],
       computed: ({ price, quantity }) => price * quantity,
-      action: [saveTotal, () => { console.log(model.data.total); }],
+      action: [saveTotal, ({ field, value }) => { console.log(field, value); }],
     },
   },
 });
 await model.settled();
 ```
 
-The public signature is `type ReactionAction = () => void | PromiseLike<void>`
-and `Reaction<T>.action?: ReactionAction[]`. `Reaction<T>` remains an interface;
-its `T` only constrains `computed`. Actions receive no dependency projection,
-result argument, or injected `computed` property. Their reads do not add
-dependencies: declare trigger fields in `fields`.
+The public signatures are:
+
+```ts
+type ReactionAction<T = any> = (context: {
+  field: string;
+  value: T;
+}) => void | PromiseLike<void>;
+// Reaction<T>.action?: ReactionAction<T>[]
+```
+
+`field` is the field that owns the action: for `price → total`, `total.action`
+receives `'total'`. `value` is read immediately before each call from that
+field's latest committed state, including transforms. It is not saved at
+registration, so a direct host write while the action is queued is reflected
+in the argument. Each call captures its own value; later writes do not update
+that context. Object values retain their model reference and must not be
+mutated in place.
+
+`Reaction<T>` remains an interface; its `T` constrains both `computed` and the
+action's `value`. A bare `ReactionAction` leaves the value unchecked. Existing
+no-argument functions remain valid and can ignore the context. Read other
+fields through a model closure; neither context nor closure reads add
+dependencies. Declare trigger fields in `fields`.
 
 After a computed value validates and commits, its functions enter a queue shared
 by the model. Successful initialization and equal computed values also queue
@@ -283,9 +301,9 @@ Direct writes do not cancel queued functions or start actions for that field;
 their downstream reactions can queue actions as usual.
 
 The queue uses function reference identity. A later registration replaces the
-earlier pending record and moves it to the end, including the host field used
-for error reporting. Registration order means arrival after successful
-validation and commit, not reaction scheduling or schema field order.
+earlier pending record and moves it to the end, including the host field passed
+in the context and used for error reporting. Registration order means arrival
+after successful validation and commit, not reaction scheduling or schema field order.
 For example, `[save, log, save]` calls `log` then `save`. Distinct wrappers are
 distinct functions. Deduplication applies only while queued: an already started
 function can be queued again and overlap its earlier returned Promise.
@@ -547,9 +565,11 @@ These changes are breaking and require updating consumers:
   `showError` is now gated by `touched` and either error source. See
   [React bindings](REACT.md).
 - Structural field equality and both selector Hooks remain unchanged.
-- Replace `action: fn` with `action: [fn]` and migrate parameter reads to model
-  closures. Direct callers must iterate the array and invoke items without
-  arguments. Actions wait for calculation to settle; repeated pending references
+- Replace `action: fn` with `action: [fn]`. Read the owning field and its latest
+  committed value from `{ field, value }`, and other fields through model
+  closures. Existing no-argument callbacks remain valid. Direct callers must
+  iterate the array and supply `{ field, value }` to each item. Actions wait for
+  calculation to settle; repeated pending references
   merge instead of running after every intermediate successful computation.
   Host-version cancellation and sequential array execution have been removed:
   later skips, failures, or direct host writes leave queued functions intact.

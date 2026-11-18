@@ -2,6 +2,11 @@ import resolve from '@rollup/plugin-node-resolve';
 import commonjs from '@rollup/plugin-commonjs';
 import typescript from '@rollup/plugin-typescript';
 import terser from '@rollup/plugin-terser';
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { gzipSync } from 'node:zlib';
+
+const bundleSizes = new Map();
 
 const sharedPlugins = (emitDeclarations = false) => [
   resolve({ browser: true, preferBuiltins: false }),
@@ -14,6 +19,19 @@ const sharedPlugins = (emitDeclarations = false) => [
       ...(emitDeclarations ? { declarationDir: 'dist/types' } : {}),
     },
   }),
+  {
+    name: 'bundle-size',
+    async writeBundle(output, bundle) {
+      for (const chunk of Object.values(bundle)) {
+        if (chunk.type !== 'chunk') continue;
+        const file = output.file ?? join(output.dir ?? '.', chunk.fileName);
+        const content = await readFile(file);
+        const size = (content.length / 1000).toFixed(2);
+        const gzipSize = (gzipSync(content).length / 1000).toFixed(2);
+        bundleSizes.set(file, `${file}  ${size} kB │ gzip: ${gzipSize} kB`);
+      }
+    },
+  },
 ];
 
 export default [
@@ -66,6 +84,20 @@ export default [
       { file: 'dist/devtools.mjs', format: 'esm', sourcemap: true },
       { file: 'dist/devtools.cjs.js', format: 'cjs', sourcemap: true },
     ],
-    plugins: sharedPlugins(),
+    plugins: [
+      ...sharedPlugins(),
+      {
+        name: 'bundle-size-report',
+        closeBundle() {
+          console.log('\nBundle sizes:');
+          for (const file of [...bundleSizes.keys()].sort()) {
+            if (file !== 'dist/index.js') console.log(bundleSizes.get(file));
+          }
+          const coreSize = bundleSizes.get('dist/index.js');
+          if (coreSize) console.log(`Core UMD (minified): ${coreSize}`);
+          bundleSizes.clear();
+        },
+      },
+    ],
   },
 ];

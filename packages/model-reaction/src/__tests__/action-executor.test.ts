@@ -65,7 +65,7 @@ describe('actions after computation settles', () => {
             await model.settled();
             expect(observed).toEqual([[1, 2, 3, 6]]);
             expect(action).toHaveBeenCalledTimes(1);
-            expect(action).toHaveBeenCalledWith();
+            expect(action).toHaveBeenCalledWith({ field: 'total', value: 6 });
         }
     );
 
@@ -175,7 +175,7 @@ describe('actions after computation settles', () => {
     test.each([undefined, []])('keeps queued functions when a later registration has no actions: %p', async (actions) => {
         const tasks = new PendingTasks();
         const onError = jest.fn();
-        const executor = new ActionExecutor(tasks, onError);
+        const executor = new ActionExecutor(tasks, jest.fn(), onError);
         const end = tasks.begin();
         const action = jest.fn();
         executor.register('target', [action]);
@@ -391,7 +391,7 @@ describe('actions after computation settles', () => {
     test('keeps a queued action after a direct host write and reads the latest committed value', async () => {
         const gate = deferred<boolean>();
         const started = deferred();
-        const observed: number[] = [];
+        const observed: Array<{ field: string; value: number }> = [];
         const model = own(createModel({
             source: { type: 'number' },
             slow: {
@@ -405,7 +405,7 @@ describe('actions after computation settles', () => {
                 type: 'number', default: 0,
                 reaction: {
                     fields: ['source'], computed: ({ source }) => source,
-                    action: [() => { observed.push(model.data.target); }],
+                    action: [(context) => { observed.push(context); }],
                 },
             },
         }));
@@ -419,7 +419,7 @@ describe('actions after computation settles', () => {
         gate.resolve(true);
         await slow;
         await model.settled();
-        expect(observed).toEqual([7]);
+        expect(observed).toEqual([{ field: 'target', value: 7 }]);
     });
 
     test('calls actions in registration order without waiting for their Promises', async () => {
@@ -665,8 +665,8 @@ describe('actions after computation settles', () => {
 
     test('reads transformed committed values on initialization and equal computations', async () => {
         const values: number[][] = [];
-        const action = jest.fn(() => {
-            values.push([model.data.target, model.data.computed]);
+        const action = jest.fn(({ value }: { field: string; value: number }) => {
+            values.push([value, model.data.computed]);
         });
         const model = own(
             createModel({
@@ -692,7 +692,10 @@ describe('actions after computation settles', () => {
             [20, 99],
             [20, 99],
         ]);
-        expect(action.mock.calls).toEqual([[], []]);
+        expect(action.mock.calls).toEqual([
+            [{ field: 'target', value: 20 }],
+            [{ field: 'target', value: 20 }],
+        ]);
     });
 
     test('queues an action for a late valid write even after a later computation skips', async () => {
@@ -800,6 +803,7 @@ describe('actions after computation settles', () => {
         await model.settled();
         expect(values).toEqual([[4, 4]]);
         expect(action).toHaveBeenCalledTimes(1);
+        expect(action).toHaveBeenCalledWith({ field: 'second', value: 4 });
     });
 
     test('keeps captured snapshot values stable while a running action observes later updates', async () => {
@@ -933,10 +937,11 @@ describe('actions after computation settles', () => {
 
 describe('ActionExecutor function deduplication', () => {
     const cleanups: Array<() => void> = [];
-    function setup() {
+    function setup(values: Record<string, unknown> = {}) {
         const tasks = new PendingTasks();
         const onError = jest.fn();
-        const executor = new ActionExecutor(tasks, onError);
+        const getValue = jest.fn((field: string) => values[field]);
+        const executor = new ActionExecutor(tasks, getValue, onError);
         cleanups.push(() => {
             executor.dispose();
             tasks.dispose();
@@ -944,10 +949,23 @@ describe('ActionExecutor function deduplication', () => {
         const register = (field: string, action: ReactionAction[]) => {
             executor.register(field, action);
         };
-        return { tasks, register, executor, onError };
+        return { tasks, register, executor, onError, getValue };
     }
     afterEach(() => {
         cleanups.splice(0).forEach((dispose) => dispose());
+    });
+
+    test('reads the current host value immediately before each action call', async () => {
+        const values = { target: 1 };
+        const { tasks, register, getValue } = setup(values);
+        const first = jest.fn(() => { values.target = 2; });
+        const second = jest.fn();
+        register('target', [first, second]);
+        expect(getValue).not.toHaveBeenCalled();
+        await tasks.settled();
+        expect(first).toHaveBeenCalledWith({ field: 'target', value: 1 });
+        expect(second).toHaveBeenCalledWith({ field: 'target', value: 2 });
+        expect(getValue).toHaveBeenCalledTimes(2);
     });
 
     test('keeps only the last array position of a function', async () => {
@@ -968,7 +986,8 @@ describe('ActionExecutor function deduplication', () => {
         ['first', 'second'],
         ['second', 'first'],
     ])('attributes a shared action failure to the last registration from %s then %s', async (earlier, later) => {
-        const { tasks, register, onError } = setup();
+        const values: Record<string, number> = { first: 1, second: 2 };
+        const { tasks, register, onError } = setup(values);
         const error = new Error('shared failure');
         const shared = jest.fn(() => { throw error; });
         register(earlier, [shared]);
@@ -978,6 +997,7 @@ describe('ActionExecutor function deduplication', () => {
         expect(idle).toBe(false);
         await settled;
         expect(shared).toHaveBeenCalledTimes(1);
+        expect(shared).toHaveBeenCalledWith({ field: later, value: values[later] });
         expect(onError).toHaveBeenCalledTimes(1);
         expect(onError).toHaveBeenCalledWith(later, error);
     });
@@ -1004,7 +1024,8 @@ describe('ActionExecutor function deduplication', () => {
         ['first', 'second'],
         ['second', 'first'],
     ])('keeps the last registration from %s then %s, regardless of schema order', async (earlier, later) => {
-        const { tasks, register } = setup();
+        const values: Record<string, number> = { first: 1, second: 2 };
+        const { tasks, register } = setup(values);
         const end = tasks.begin();
         const gate = deferred();
         const shared = jest.fn();
@@ -1018,6 +1039,7 @@ describe('ActionExecutor function deduplication', () => {
         await drain();
         expect(earlierRest).toHaveBeenCalledTimes(1);
         expect(shared).toHaveBeenCalledTimes(1);
+        expect(shared).toHaveBeenCalledWith({ field: later, value: values[later] });
         expect(laterRest).toHaveBeenCalledTimes(1);
         expect(idle).toBe(false);
         gate.resolve();
@@ -1030,7 +1052,7 @@ describe('ActionExecutor function deduplication', () => {
 describe('ActionExecutor task lifecycle', () => {
     test('discards queued functions and releases their tasks on disposal', async () => {
         const tasks = new PendingTasks();
-        const executor = new ActionExecutor(tasks, jest.fn());
+        const executor = new ActionExecutor(tasks, jest.fn(), jest.fn());
         const action = jest.fn();
         executor.register('target', [action]);
         const settled = tasks.settled();
@@ -1045,7 +1067,7 @@ describe('ActionExecutor task lifecycle', () => {
 
     test('skips remaining ready calls when an action disposes the executor synchronously', async () => {
         const tasks = new PendingTasks();
-        const executor = new ActionExecutor(tasks, jest.fn());
+        const executor = new ActionExecutor(tasks, jest.fn(), jest.fn());
         const rest = jest.fn();
         executor.register('target', [() => executor.dispose(), rest]);
         await tasks.settled();
@@ -1056,7 +1078,7 @@ describe('ActionExecutor task lifecycle', () => {
     test('rechecks computation after an idle notification before flushing queued functions', async () => {
         const tasks = new PendingTasks();
         const action = jest.fn();
-        const executor = new ActionExecutor(tasks, jest.fn());
+        const executor = new ActionExecutor(tasks, jest.fn(), jest.fn());
         const end = tasks.begin();
         executor.register('target', [action]);
         end();
@@ -1074,7 +1096,7 @@ describe('ActionExecutor task lifecycle', () => {
         const tasks = new PendingTasks();
         const second = jest.fn();
         const onError = jest.fn();
-        const executor = new ActionExecutor(tasks, onError);
+        const executor = new ActionExecutor(tasks, jest.fn(), onError);
         const end = tasks.begin();
         executor.register('first', [() => {
             executor.register('third', [second]);
@@ -1083,6 +1105,8 @@ describe('ActionExecutor task lifecycle', () => {
         end();
         await tasks.settled();
         expect(second).toHaveBeenCalledTimes(2);
+        expect(second).toHaveBeenNthCalledWith(1, { field: 'second', value: undefined });
+        expect(second).toHaveBeenNthCalledWith(2, { field: 'third', value: undefined });
         expect(onError).not.toHaveBeenCalled();
         executor.dispose();
         tasks.dispose();

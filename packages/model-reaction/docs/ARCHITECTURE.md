@@ -113,11 +113,14 @@ migration examples remain in [API.md](API.md#action-queue).
 
 1. After a computed value validates and commits, register each function in
    `Map<ReactionAction, { field, endTask }>`. Delete and reinsert matching keys:
-   the last arrival supplies the host for errors and moves to the end.
+   the last arrival supplies the host for action context and errors and moves
+   to the end.
    Preserve the pending record's task on replacement; each unique function
    acquires one action task covering its wait and returned Promise.
 2. Compute idle schedules a microtask flush. Recheck compute idle when that
    microtask runs, take a snapshot, and clear the Map before calling user code.
+   Immediately before each call, read the host's committed value through the
+   model callback and pass `{ field, value }`; do not store values in the queue.
    Call all ready functions in registration order without waiting between them
    or rechecking calculation. Reentrant registrations belong to a later flush.
 3. Each call observes its own PromiseLike and releases its task in `finally`.

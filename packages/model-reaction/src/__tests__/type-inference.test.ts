@@ -30,10 +30,14 @@ describe('createModel type inference', () => {
         expect(devtoolsSignature).toBe(createDevtoolsModel);
     });
 
-    test('preserves Reaction interface extension and typed no-argument action arrays', async () => {
+    test('preserves Reaction interface extension and no-argument actions alongside typed contexts', async () => {
         interface NamedReaction extends Reaction<number> { label: string }
         const calls: number[] = [];
-        const action: ReactionAction = () => { calls.push(model.data.target); };
+        const action: ReactionAction<number> = ({ field, value }) => {
+            const name: string = field;
+            expect(name).toBe('target');
+            calls.push(value);
+        };
         const reaction: NamedReaction = {
             label: 'double', fields: ['source'], computed: ({ source }) => source * 2,
             action: [action, async () => { await model.setField('note', 'saved'); }],
@@ -46,15 +50,19 @@ describe('createModel type inference', () => {
         const invalidDeclarations = () => {
             // @ts-expect-error single action functions are no longer accepted
             const single: Reaction<number> = { fields: [], computed: () => 1, action };
-            // @ts-expect-error action receives no dependency projection
-            const parameter: ReactionAction = (values: Record<string, any>) => { void values; };
+            // @ts-expect-error action receives an object with field and value
+            const parameter: ReactionAction<number> = (value: number) => { void value; };
+            // @ts-expect-error a number action cannot be used for a string reaction
+            const wrongValue: Reaction<string> = { fields: [], computed: () => '', action: [action] };
             // @ts-expect-error boolean write results are not side-effect return values
             const write: ReactionAction = () => model.setField('note', 'saved');
-            // @ts-expect-error action requires no arguments
-            action(model.data);
+            // @ts-expect-error callers must supply the action context
+            action();
+            // @ts-expect-error direct calls must match the action value type
+            action({ field: 'target', value: '2' });
             // @ts-expect-error computed remains required
             const incomplete: Reaction<number> = { fields: [], action: [] };
-            void [single, parameter, write, incomplete];
+            void [single, parameter, wrongValue, write, incomplete];
         };
         void invalidDeclarations;
         await model.settled();
@@ -117,6 +125,49 @@ describe('createModel type inference', () => {
         ['root', createModel],
         ['DevTools', createDevtoolsModel],
     ] as const)('%s entry', (_, factory) => {
+        test('infers action context values from the target field type', async () => {
+            const contexts: Array<{ field: string; value: number | string }> = [];
+            const model = factory({
+                source: { type: 'number', default: 2 },
+                total: {
+                    type: 'number',
+                    default: 0,
+                    reaction: {
+                        fields: ['source'],
+                        computed: ({ source }) => source * 2,
+                        action: [({ field, value }) => {
+                            const count: number = value;
+                            // @ts-expect-error value is a number, not an unchecked any
+                            const text: string = value;
+                            void text;
+                            contexts.push({ field, value: count });
+                        }],
+                    },
+                },
+                label: {
+                    type: 'string',
+                    default: '',
+                    reaction: {
+                        fields: ['total'],
+                        computed: ({ total }) => `$${total}`,
+                        action: [({ field, value }) => {
+                            const text: string = value;
+                            // @ts-expect-error value is a string, not an unchecked any
+                            const count: number = value;
+                            void count;
+                            contexts.push({ field, value: text });
+                        }],
+                    },
+                },
+            });
+            await model.settled();
+            expect(contexts).toEqual([
+                { field: 'total', value: 4 },
+                { field: 'label', value: '$4' },
+            ]);
+            model.dispose();
+        });
+
         test('preserves object, array, enum and optional field inference', () => {
             const model = factory({
                 detail: { type: 'object', default: { name: 'Ada' } },

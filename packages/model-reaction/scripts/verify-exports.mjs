@@ -99,8 +99,8 @@ async function verifyActionArray(createModel, label) {
         computed: ({ source }) => source * 2,
         action: [
           async (...args) => {
-            assert.deepEqual(args, [], `${label} calls action without arguments`);
-            observed.push(model.data.target);
+            assert.deepEqual(args, [{ field: 'target', value: model.data.target }], `${label} passes action context`);
+            observed.push(args[0].value);
           },
           () => { observed.push(model.data.target); },
         ],

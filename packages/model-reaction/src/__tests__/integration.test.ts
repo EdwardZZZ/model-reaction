@@ -523,9 +523,9 @@ describe('Integration Tests — Full Documentation Scenarios', () => {
     // 10. Reaction System — action callback
     // =========================================================================
     describe('Reaction System: action callback', () => {
-        test('should call action without arguments and read committed model values', async () => {
-            const actionSpy = jest.fn(() => {
-                observed.push(model.data.fullName);
+        test('should pass the owning field and committed value to action', async () => {
+            const actionSpy = jest.fn(({ value }: { field: string; value: string }) => {
+                observed.push(value);
             });
             const observed: string[] = [];
 
@@ -554,7 +554,7 @@ describe('Integration Tests — Full Documentation Scenarios', () => {
             await new Promise(r => setTimeout(r, 10));
 
             expect(actionSpy).toHaveBeenCalled();
-            expect(actionSpy).toHaveBeenCalledWith();
+            expect(actionSpy).toHaveBeenLastCalledWith({ field: 'fullName', value: 'Jane Doe' });
             expect(observed[observed.length - 1]).toBe('Jane Doe');
 
             model.dispose();
