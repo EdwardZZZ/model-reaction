@@ -13,6 +13,7 @@ import {
     PANEL_SOURCE,
     type AgentMessage,
     type InstanceState,
+    type SerializedValue,
 } from '../protocol';
 import type { PanelPort } from '../panel-port';
 import { serializeSnapshot } from '../serialize';
@@ -267,6 +268,46 @@ describe('Panel', () => {
         });
         expect(container.textContent).toContain('#0');
         expect(container.textContent).toContain('first');
+    });
+
+    test.each<{
+        label: string;
+        previous?: SerializedValue;
+        earlier: boolean;
+        expected: string;
+    }>([
+        { label: 'initial zero', previous: { t: 'primitive', v: 0 }, earlier: false, expected: '0' },
+        { label: 'recorded value over history', previous: { t: 'primitive', v: 'Recorded' }, earlier: true, expected: 'Recorded' },
+        { label: 'explicit undefined', previous: { t: 'undefined' }, earlier: true, expected: 'undefined' },
+        { label: 'legacy history fallback', earlier: true, expected: 'Earlier' },
+        { label: 'legacy missing history', earlier: false, expected: 'no earlier value' },
+    ])('shows the timeline previous value for $label', ({ previous, earlier, expected }) => {
+        const { connect, emit } = makeFakeConnect();
+        const { container, getByRole } = render(<Panel connect={connect} />);
+        act(() => {
+            emit({
+                source: AGENT_SOURCE, kind: 'init',
+                instances: [instance(1, {
+                    timeline: [
+                        ...(earlier ? [{
+                            seq: 0, field: 'first',
+                            value: { t: 'primitive' as const, v: 'Earlier' }, timestamp: 1,
+                        }] : []),
+                        {
+                            seq: 1, field: 'first', value: { t: 'primitive', v: 'Newest' },
+                            ...(previous === undefined ? {} : { previous }), timestamp: 2,
+                        },
+                    ],
+                })],
+            });
+        });
+        fireEvent.click(getByRole('button', { name: 'Timeline' }));
+        fireEvent.click(container.querySelector('.mrd-timeline-item')!);
+        const sections = container.querySelectorAll('.mrd-diff-section');
+        expect(sections[0]!.textContent).toContain(expected);
+        expect(sections[1]!.textContent).toContain('Newest');
+        expect(Array.from(container.querySelectorAll('.mrd-diff-label'), (node) => node.textContent))
+            .toEqual(['previous', 'this change']);
     });
 
     test('clears the selected timeline and keeps recording with no stale detail selection', () => {

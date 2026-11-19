@@ -57,8 +57,7 @@ tab in the browser DevTools, with three views:
    Each field reserves height only for actions drawn inside it; shared actions
    do not leave empty rows in their declaring field modules.
 3. **Timeline** — a reverse-chronological list of committed field changes.
-   Selecting an entry shows the field's value at that point next to its
-   previous value.
+   Selecting an entry shows the field's values before and after the commit.
 
 ## How it works
 
@@ -166,13 +165,16 @@ Refresh the inspected page and reopen DevTools to restore that context.
   retained history. It is disabled when the timeline is empty. Model data and
   other models' histories are unaffected; new changes continue recording with
   increasing sequence numbers. Cleared entries stay cleared after reconnection.
+- Each timeline entry stores the field's value before its commit, so **previous**
+  remains available for the first change, after **Clear**, and when earlier
+  entries are evicted.
 - Rejected input, validation completion, dirty clearing, and reaction errors
   refresh the data tree automatically. Synchronous notifications share one
   queued snapshot; only committed field changes enter the timeline.
 - Each snapshot shares a budget across `data`, `dirtyData`, and `errors`:
   2,000 nodes and a conservative 256 KiB UTF-8 JSON cap. Each timeline value
-  has its own budget. Defaults also cap depth at 6, entries per container or
-  record at 100, and string prefixes at 10,000 characters.
+  (before and after the commit) has its own budget. Defaults also cap depth at 6,
+  entries per container or record at 100, and string prefixes at 10,000 characters.
 - Traversal stops when a budget is exhausted, with truncation markers and a
   snapshot banner when values, fields, or errors were omitted or clipped.
   Shared objects in sibling branches remain readable; true cycles are marked.

@@ -47,6 +47,7 @@ const HOOK_KEY = '__MODEL_REACTION_DEVTOOLS_HOOK__';
 interface TrackedInstance {
     instance: HookModelInstance;
     timeline: ChangeEntry[];
+    values: Map<string, unknown>;
     unsubscribe: () => void;
     seq: number;
     snapshotQueued: boolean;
@@ -101,6 +102,7 @@ export function installAgent(
             const entry: TrackedInstance = {
                 instance,
                 timeline: [],
+                values: new Map(Object.entries(instance.getSnapshot().data)),
                 unsubscribe: () => {},
                 seq: 0,
                 snapshotQueued: false,
@@ -110,8 +112,10 @@ export function installAgent(
                     seq: entry.seq++,
                     field: change.field,
                     value: serializeValue(change.value),
+                    previous: serializeValue(entry.values.get(change.field)),
                     timestamp: change.timestamp,
                 };
+                entry.values.set(change.field, change.value);
                 // Ring buffer: drop the oldest entry past the cap.
                 entry.timeline.push(record);
                 if (entry.timeline.length > timelineLimit) {

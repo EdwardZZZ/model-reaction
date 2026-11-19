@@ -173,6 +173,27 @@ describe('page agent', () => {
         });
     });
 
+    test('serializes the previous object at commit time so historical values remain stable', async () => {
+        const received = collectAgentMessages();
+        dispose = installAgent(window);
+        const inst = makeFakeInstance(9);
+        const before = { count: 1 };
+        inst.emitChange('firstName', before);
+        getHook().register(inst);
+        inst.emitChange('firstName', { count: 2 });
+        before.count = 99;
+        await flush();
+        await flush();
+
+        const change = received.find(
+            (m): m is Extract<AgentMessage, { kind: 'change' }> => m.kind === 'change'
+        )!;
+        expect(JSON.parse(JSON.stringify(change.change)).previous).toEqual({
+            t: 'object',
+            entries: [['count', { t: 'primitive', v: 1 }]],
+        });
+    });
+
     test('refreshes rejected input without adding timeline entries and removes both subscriptions', async () => {
         const received = collectAgentMessages();
         dispose = installAgent(window);

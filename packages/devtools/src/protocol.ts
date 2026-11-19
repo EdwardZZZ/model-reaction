@@ -77,6 +77,8 @@ export interface ChangeEntry {
     seq: number;
     field: string;
     value: SerializedValue;
+    /** Value before this commit; absent in records from older agents. */
+    previous?: SerializedValue;
     timestamp: number;
 }
 

@@ -1,8 +1,6 @@
 /**
  * Change-timeline view: a reverse-chronological list of committed field
- * changes. Selecting an entry shows the field's value at that point next to its
- * previous value (the prior change to the same field), so you can see what each
- * commit did.
+ * changes. Selecting an entry shows the values before and after its commit.
  *
  * This is deliberately **read-only**: replaying a value back into the model
  * (true time-travel) is out of scope for now because it would re-trigger
@@ -27,7 +25,9 @@ export function TimelineView({ instance }: TimelineViewProps): ReactElement {
     const ordered = [...timeline].sort((a, b) => b.seq - a.seq);
     const selected =
         selectedSeq === null ? null : timeline.find((c) => c.seq === selectedSeq) ?? null;
-    const previous = selected ? findPrevious(timeline, selected) : null;
+    const previous = selected
+        ? selected.previous ?? findPrevious(timeline, selected)?.value
+        : undefined;
 
     return (
         <div className="mrd-timeline">
@@ -46,7 +46,7 @@ export function TimelineView({ instance }: TimelineViewProps): ReactElement {
                         }}
                     >
                         <span className="mrd-timeline-seq">#{change.seq}</span>
-                        <span className="mrd-timeline-field">{change.field}</span>
+                        <span className="mrd-timeline-field" title={change.field}>{change.field}</span>
                         <span className="mrd-timeline-time">{formatTime(change.timestamp)}</span>
                     </li>
                 ))}
@@ -59,15 +59,15 @@ export function TimelineView({ instance }: TimelineViewProps): ReactElement {
                             {selected.field} <span className="mrd-badge">#{selected.seq}</span>
                         </h4>
                         <div className="mrd-diff">
-                            <div className="mrd-diff-col">
+                            <div className="mrd-diff-section">
                                 <div className="mrd-diff-label">previous</div>
                                 {previous ? (
-                                    <ValueTree value={previous.value} />
+                                    <ValueTree value={previous} />
                                 ) : (
                                     <div className="mrd-empty">no earlier value</div>
                                 )}
                             </div>
-                            <div className="mrd-diff-col">
+                            <div className="mrd-diff-section">
                                 <div className="mrd-diff-label">this change</div>
                                 <ValueTree value={selected.value} />
                             </div>

@@ -12,6 +12,7 @@ import { createModel } from 'model-reaction/devtools';
 import { ValidationRules } from 'model-reaction/validation';
 import { installAgent } from '../page-agent';
 import {
+    PANEL_SOURCE,
     isAgentMessage,
     type AgentMessage,
 } from '../protocol';
@@ -85,6 +86,7 @@ describe('library ↔ page-agent end-to-end', () => {
                 m.kind === 'change' && m.change.field === 'firstName'
         );
         expect(change!.change.value).toEqual({ t: 'primitive', v: 'Ada' });
+        expect(change!.change.previous).toEqual({ t: 'primitive', v: '' });
 
         // 4. The reaction's derived write is observed too (fullName recomputed).
         const reactionChange = received.find(
@@ -92,7 +94,63 @@ describe('library ↔ page-agent end-to-end', () => {
                 m.kind === 'change' && m.change.field === 'fullName'
         );
         expect(reactionChange!.change.value).toEqual({ t: 'primitive', v: 'Ada' });
+        expect(reactionChange!.change.previous).toEqual({ t: 'primitive', v: '' });
 
+        model.dispose();
+    });
+
+    test('preserves previous values from defaults, after clear, and after earlier entries are evicted', async () => {
+        const received = collect();
+        dispose = installAgent(window, 1);
+        const model = createModel({
+            count: { type: 'number', default: 0 },
+            label: { type: 'string', default: '' },
+        });
+        await flush();
+        const added = received.find(
+            (m): m is Extract<AgentMessage, { kind: 'instance-added' }> =>
+                m.kind === 'instance-added'
+        )!;
+        const id = added.instance.id;
+
+        await model.setField('count', 1);
+        await model.settled();
+        await flush();
+        const first = received.find(
+            (m): m is Extract<AgentMessage, { kind: 'change' }> => m.kind === 'change'
+        )!;
+        expect(first.change.previous).toEqual({ t: 'primitive', v: 0 });
+
+        window.postMessage({ source: PANEL_SOURCE, kind: 'clear-timeline', id }, '*');
+        await flush();
+        await flush();
+        expect(received.some((m) => m.kind === 'timeline-cleared' && m.id === id)).toBe(true);
+        await model.setField('count', 2);
+        await model.settled();
+        await flush();
+        const changes = received.filter(
+            (m): m is Extract<AgentMessage, { kind: 'change' }> => m.kind === 'change'
+        );
+        const afterClear = changes[changes.length - 1]!;
+        expect(afterClear.change.previous).toEqual({ t: 'primitive', v: 1 });
+
+        await model.setField('label', 'evict count');
+        await model.settled();
+        await model.setField('count', 3);
+        await model.settled();
+        window.postMessage({ source: PANEL_SOURCE, kind: 'get-init' }, '*');
+        await flush();
+        await flush();
+        const init = received.find(
+            (m): m is Extract<AgentMessage, { kind: 'init' }> => m.kind === 'init'
+        )!;
+        expect(init.instances[0]!.timeline).toEqual([
+            expect.objectContaining({
+                field: 'count',
+                value: { t: 'primitive', v: 3 },
+                previous: { t: 'primitive', v: 2 },
+            }),
+        ]);
         model.dispose();
     });
 
