@@ -7,11 +7,12 @@
  * so the panel UI and {@link panelReducer} stay pure and testable.
  */
 import {
-    PANEL_SOURCE,
     isAgentMessage,
     type AgentMessage,
     type PanelMessage,
 } from './protocol';
+
+const RECONNECT_DELAY_MS = 250;
 
 export interface PanelPort {
     /** Send a request to the page agent. */
@@ -22,25 +23,68 @@ export interface PanelPort {
 
 /**
  * Open the panel port for the currently inspected tab and forward incoming
- * {@link AgentMessage}s to `onMessage`. Immediately requests the full init
- * state so a panel opened after the app booted still populates.
+ * {@link AgentMessage}s to `onMessage`. The background requests init once both
+ * sides connect. Connection lifecycle: model-reaction/docs/DEVTOOLS.md.
  */
 export function createPanelPort(onMessage: (msg: AgentMessage) => void): PanelPort {
     const tabId = chrome.devtools.inspectedWindow.tabId;
-    const port = chrome.runtime.connect({ name: `model-reaction-panel-${tabId}` });
+    let port: ChromeRuntimePort | undefined;
+    let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+    let closed = false;
 
-    port.onMessage.addListener((msg: unknown) => {
-        if (isAgentMessage(msg)) onMessage(msg);
-    });
+    const receive = (msg: unknown, source: ChromeRuntimePort): void => {
+        if (!closed && source === port && isAgentMessage(msg)) onMessage(msg);
+    };
 
-    const send = (message: PanelMessage): void => port.postMessage(message);
+    function scheduleReconnect(): void {
+        if (closed || reconnectTimer !== undefined) return;
+        reconnectTimer = setTimeout(() => {
+            reconnectTimer = undefined;
+            connect();
+        }, RECONNECT_DELAY_MS);
+    }
 
-    // Pull current state on connect (covers models created before the panel
-    // opened).
-    send({ source: PANEL_SOURCE, kind: 'get-init' });
+    function disconnected(source: ChromeRuntimePort): void {
+        void chrome.runtime.lastError;
+        if (source !== port) return;
+        source.onMessage.removeListener(receive);
+        source.onDisconnect.removeListener(disconnected);
+        port = undefined;
+        scheduleReconnect();
+    }
+
+    function connect(): void {
+        if (closed) return;
+        try {
+            port = chrome.runtime.connect({ name: `model-reaction-panel-${tabId}` });
+            port.onMessage.addListener(receive);
+            port.onDisconnect.addListener(disconnected);
+        } catch {
+            scheduleReconnect();
+        }
+    }
+
+    connect();
 
     return {
-        send,
-        disconnect: () => port.disconnect(),
+        send(message): void {
+            const current = port;
+            if (!current || closed) return;
+            try {
+                current.postMessage(message);
+            } catch {
+                disconnected(current);
+            }
+        },
+        disconnect(): void {
+            closed = true;
+            clearTimeout(reconnectTimer);
+            const current = port;
+            port = undefined;
+            if (!current) return;
+            current.onMessage.removeListener(receive);
+            current.onDisconnect.removeListener(disconnected);
+            current.disconnect();
+        },
     };
 }

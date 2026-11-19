@@ -1,19 +1,8 @@
-/**
- * Dependency-graph view: renders the reaction dependency DAG as an SVG. Each
- * node is a field; each arrow points from a dependency to the field its
- * reaction computes ("`from` feeds `to`"). Selecting a node highlights its
- * incident edges so the relationships are easy to trace.
- *
- * Layout is delegated to the pure {@link layoutGraph}; this component only
- * paints it, so all the tricky positioning logic stays unit-testable.
- */
+/** Paint computation and action relationships; see model-reaction/docs/DEVTOOLS.md. */
 import { useMemo, useState, type ReactElement } from 'react';
 import type { InstanceState } from '../protocol';
-import {
-    DEFAULT_LAYOUT_OPTIONS,
-    layoutGraph,
-    type LaidOutNode,
-} from '../graph-layout';
+import { DEFAULT_LAYOUT_OPTIONS, type LaidOutNode } from '../graph-layout';
+import { ACTION_STEP, layoutActionGraph, type ActionNode } from '../action-graph-layout';
 
 interface DependencyGraphViewProps {
     instance: InstanceState;
@@ -21,22 +10,23 @@ interface DependencyGraphViewProps {
 
 const PAD = 16;
 const HEADER_HEIGHT = DEFAULT_LAYOUT_OPTIONS.nodeHeight;
-const ACTION_STEP = 38;
+
+function actionTitle(action: ActionNode): string {
+    return `${action.label}\n${action.declarations.map(
+        ({ field, reactionIndex, actionIndex }) => `${field} · r${reactionIndex} · action[${actionIndex}]`
+    ).join('\n')}`;
+}
 
 export function DependencyGraphView({ instance }: DependencyGraphViewProps): ReactElement {
-    const actionCount = Math.max(0, ...Object.values(instance.fields).map(
-        (info) => info.actions?.length ?? 0
-    ));
-    const nodeWidth = actionCount ? 240 : DEFAULT_LAYOUT_OPTIONS.nodeWidth;
-    const nodeHeight = HEADER_HEIGHT + (actionCount ? actionCount * ACTION_STEP + 12 : 0);
-    const layout = useMemo(() => layoutGraph(instance.graph, {
-        ...DEFAULT_LAYOUT_OPTIONS,
-        nodeWidth,
-        nodeHeight,
-    }), [instance.graph, nodeWidth, nodeHeight]);
-    const [active, setActive] = useState<string | null>(null);
+    const hasActions = Object.values(instance.fields).some((info) => info.actions?.length);
+    const layout = useMemo(
+        () => layoutActionGraph(instance.graph, instance.fields),
+        [instance.graph, instance.fields]
+    );
+    const { nodeWidth } = layout;
+    const [active, setActive] = useState<{ kind: 'field' | 'action'; id: string } | null>(null);
 
-    if (instance.graph.edges.length === 0 && actionCount === 0) {
+    if (instance.graph.edges.length === 0 && !hasActions) {
         return (
             <div className="mrd-empty mrd-graph-empty">
                 No reactions declared — every field is independent.
@@ -45,7 +35,7 @@ export function DependencyGraphView({ instance }: DependencyGraphViewProps): Rea
     }
 
     const pos = new Map<string, LaidOutNode>();
-    layout.nodes.forEach((n) => pos.set(n.id, n));
+    layout.fields.nodes.forEach((n) => pos.set(n.id, n));
 
     const svgWidth = layout.width + PAD * 2;
     const svgHeight = layout.height + PAD * 2;
@@ -67,44 +57,70 @@ export function DependencyGraphView({ instance }: DependencyGraphViewProps): Rea
                     </marker>
                 </defs>
 
-                {layout.edges.map((e, i) => {
+                {layout.fields.edges.map((e, i) => {
                     const from = pos.get(e.from);
                     const to = pos.get(e.to);
                     if (!from || !to) return null;
-                    const x1 = from.x + nodeWidth / 2 + PAD;
-                    const y1 = from.y + nodeHeight + PAD;
-                    const x2 = to.x + nodeWidth / 2 + PAD;
-                    const y2 = to.y + PAD;
+                    const x1 = from.x + nodeWidth + PAD;
+                    const y1 = from.y + HEADER_HEIGHT / 2 + PAD;
+                    const x2 = to.x + PAD;
+                    const y2 = to.y + HEADER_HEIGHT / 2 + PAD;
+                    const bendX = x2 - DEFAULT_LAYOUT_OPTIONS.hGap / 2;
                     const highlighted =
-                        active !== null && (e.from === active || e.to === active);
+                        active?.kind === 'field' && (e.from === active.id || e.to === active.id);
                     return (
-                        <line
+                        <path
                             key={i}
-                            x1={x1}
-                            y1={y1}
-                            x2={x2}
-                            y2={y2}
+                            d={`M ${x1} ${y1} H ${bendX} V ${y2} H ${x2}`}
                             className={`mrd-edge${highlighted ? ' mrd-edge-active' : ''}`}
                             markerEnd="url(#mrd-arrow)"
                         />
                     );
                 })}
 
-                {layout.nodes.map((n) => {
+                {layout.sharedActions.flatMap((action) => action.fields.map((field) => {
+                    const from = pos.get(field);
+                    if (!from) return null;
+                    const x1 = from.x + nodeWidth + PAD;
+                    const y1 = from.y + HEADER_HEIGHT / 2 + PAD;
+                    const x2 = action.x + PAD;
+                    const y2 = action.y + action.height / 2 + PAD;
+                    const bendX = x2 - DEFAULT_LAYOUT_OPTIONS.hGap / 2;
+                    const highlighted = active?.kind === 'action'
+                        ? active.id === action.id
+                        : active?.id === field;
+                    return (
+                        <path
+                            key={`${action.id}:${field}`}
+                            d={`M ${x1} ${y1} H ${bendX} V ${y2} H ${x2}`}
+                            className={`mrd-edge mrd-action-edge${highlighted ? ' mrd-edge-active' : ''}`}
+                            data-from-field={field}
+                            data-to-action={action.id}
+                            markerEnd="url(#mrd-arrow)"
+                        />
+                    );
+                }))}
+
+                {layout.fields.nodes.map((n) => {
                     const info = instance.fields[n.id];
-                    const isActive = active === n.id;
+                    const actions = layout.fieldActions.get(n.id) ?? [];
+                    const isActive = active?.kind === 'field' && active.id === n.id
+                        || active?.kind === 'action' && layout.sharedActions.some(
+                            (action) => action.id === active.id && action.fields.includes(n.id)
+                        );
                     return (
                         <g
                             key={n.id}
+                            data-field-id={n.id}
                             transform={`translate(${n.x + PAD}, ${n.y + PAD})`}
                             className={`mrd-node${isActive ? ' mrd-node-active' : ''}`}
-                            onMouseEnter={() => setActive(n.id)}
+                            onMouseEnter={() => setActive({ kind: 'field', id: n.id })}
                             onMouseLeave={() => setActive(null)}
                         >
-                            {Boolean(info?.actions?.length) && (
+                            {actions.length > 0 && (
                                 <rect
                                     width={nodeWidth}
-                                    height={HEADER_HEIGHT + info!.actions!.length * ACTION_STEP + 12}
+                                    height={n.height}
                                     rx={6}
                                     className="mrd-field-module"
                                 />
@@ -116,34 +132,60 @@ export function DependencyGraphView({ instance }: DependencyGraphViewProps): Rea
                             {info && info.reactionDeps.length > 0 && (
                                 <title>{`${n.id} ← ${info.reactionDeps.join(', ')}`}</title>
                             )}
-                            {info?.actions?.map((action, index) => {
+                            {actions.map((action, index) => {
                                 const y = HEADER_HEIGHT + index * ACTION_STEP + 10;
                                 return (
                                     <g
-                                        key={`${action.reactionIndex}:${action.actionIndex}`}
+                                        key={action.id}
                                         className="mrd-action"
-                                        data-action-id={JSON.stringify([n.id, action.reactionIndex, action.actionIndex])}
+                                        data-action-id={action.id}
                                     >
                                         <path
                                             d={`M 12 ${HEADER_HEIGHT} V ${y + 12} H 30`}
                                             className="mrd-edge mrd-action-edge"
+                                            data-from-field={n.id}
+                                            data-to-action={action.id}
                                             markerEnd="url(#mrd-arrow)"
                                         />
                                         <rect x={32} y={y} width={nodeWidth - 42} height={26} rx={4} />
                                         <text x={nodeWidth / 2 + 11} y={y + 13} className="mrd-node-label">
-                                            {`r${action.reactionIndex} · action[${action.actionIndex}]`}
+                                            {action.label}
                                         </text>
-                                        <title>{action.name || 'anonymous action'}</title>
+                                        <title>{actionTitle(action)}</title>
                                     </g>
                                 );
                             })}
                         </g>
                     );
                 })}
+                {layout.sharedActions.map((action) => {
+                    const isActive = active?.kind === 'action'
+                        ? active.id === action.id
+                        : active !== null && action.fields.includes(active.id);
+                    return (
+                        <g
+                            key={action.id}
+                            transform={`translate(${action.x + PAD}, ${action.y + PAD})`}
+                            className={`mrd-node mrd-action mrd-shared-action${isActive ? ' mrd-node-active' : ''}`}
+                            data-action-id={action.id}
+                            onMouseEnter={() => setActive({ kind: 'action', id: action.id })}
+                            onMouseLeave={() => setActive(null)}
+                        >
+                            <rect width={action.width} height={action.height} rx={6} />
+                            <text x={action.width / 2} y={15} className="mrd-node-label">
+                                {action.label}
+                            </text>
+                            <text x={action.width / 2} y={32} className="mrd-node-label mrd-action-kind">
+                                shared · {action.fields.length} fields
+                            </text>
+                            <title>{actionTitle(action)}</title>
+                        </g>
+                    );
+                })}
             </svg>
             <p className="mrd-graph-hint">
-                Solid arrows show computation dependencies; dashed arrows show actions within a field.
-                Actions run in array order after computation settles.
+                Solid arrows show computation dependencies; dashed arrows connect fields to actions.
+                A shared node represents the same function reference. Actions run after computation settles.
             </p>
         </div>
     );

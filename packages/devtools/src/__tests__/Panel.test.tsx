@@ -102,20 +102,95 @@ describe('Panel', () => {
         const state = instance(1);
         state.fields.full!.actions = [
             { reactionIndex: 0, actionIndex: 0, name: 'save' },
-            { reactionIndex: 0, actionIndex: 1, name: 'save' },
+            { reactionIndex: 0, actionIndex: 1, name: '' },
+            { reactionIndex: 0, actionIndex: 2, name: 'save' },
         ];
         const { container } = render(<DependencyGraphView instance={state} />);
         const actions = container.querySelectorAll('.mrd-action');
-        expect(actions).toHaveLength(2);
+        expect(actions).toHaveLength(3);
         expect(Array.from(actions).map((node) => node.getAttribute('data-action-id'))).toEqual([
-            '["full",0,0]', '["full",0,1]',
+            '["full",0,0]', '["full",0,1]', '["full",0,2]',
         ]);
         expect(container.querySelectorAll('.mrd-field-module')).toHaveLength(1);
-        expect(container.querySelectorAll('.mrd-action-edge')).toHaveLength(2);
+        expect(container.querySelectorAll('.mrd-action-edge')).toHaveLength(3);
         expect(container.querySelectorAll('.mrd-node')).toHaveLength(3);
         expect(container.querySelectorAll('svg > .mrd-edge')).toHaveLength(2);
-        expect(container.textContent).toContain('action[0]');
-        expect(container.textContent).toContain('action[1]');
+        expect(Array.from(actions, (node) => node.querySelector('text')!.textContent))
+            .toEqual(['save', 'r0 · action[1]', 'save']);
+        const positions = Array.from(container.querySelectorAll('svg > .mrd-node'), (node) =>
+            node.getAttribute('transform')!.match(/[\d.]+/g)!.map(Number)
+        );
+        expect(positions[0]![0]).toBe(positions[1]![0]);
+        expect(positions[2]![0]).toBeGreaterThan(positions[0]![0]!);
+        expect(positions[0]![1]).toBeLessThan(positions[1]![1]!);
+        expect(positions[1]![1]).toBeLessThan(positions[2]![1]!);
+        const edges = Array.from(container.querySelectorAll('svg > .mrd-edge'));
+        edges.forEach((edge, index) => {
+            const [x1, y1, bendX, y2, x2] =
+                edge.getAttribute('d')!.match(/[\d.]+/g)!.map(Number);
+            expect(x1).toBe(positions[index]![0]! + 240);
+            expect(y1).toBe(positions[index]![1]! + 18);
+            expect(x2).toBe(positions[2]![0]);
+            expect(bendX).toBeGreaterThan(x1!);
+            expect(bendX).toBeLessThan(x2!);
+            expect(y1).toBeLessThan(y2!);
+            expect(y2).toBe(positions[2]![1]! + 18);
+            expect(edge.getAttribute('marker-end')).toBe('url(#mrd-arrow)');
+        });
+    });
+
+    test('shows one shared action after JSON transport and highlights both declaring fields', () => {
+        const state = instance(1);
+        state.fields.full!.actions = [
+            { reactionIndex: 0, actionIndex: 0, name: 'countNameAction', functionId: 0 },
+            { reactionIndex: 0, actionIndex: 1, name: 'captureFullName', functionId: 1 },
+        ];
+        state.fields.greeting = {
+            type: 'string', hasDefault: true, validatorCount: 0, reactionDeps: ['full'],
+            actions: [
+                { reactionIndex: 0, actionIndex: 0, name: 'captureFullName', functionId: 1 },
+                { reactionIndex: 0, actionIndex: 1, name: 'captureGreeting', functionId: 2 },
+            ],
+        };
+        state.graph.nodes.push('greeting');
+        state.graph.edges.push({ from: 'full', to: 'greeting' });
+        const { container } = render(<DependencyGraphView instance={JSON.parse(JSON.stringify(state))} />);
+        expect(container.querySelectorAll('.mrd-action')).toHaveLength(3);
+        expect(container.querySelectorAll('.mrd-field-module')).toHaveLength(2);
+        expect(container.querySelectorAll('.mrd-action-edge')).toHaveLength(4);
+        const shared = container.querySelector('.mrd-shared-action')!;
+        expect(shared.querySelector('.mrd-node-label')!.textContent).toBe('captureFullName');
+        expect(shared.textContent).toContain('shared · 2 fields');
+        expect(shared.querySelector('title')!.textContent).toContain('full · r0 · action[1]');
+        expect(shared.querySelector('title')!.textContent).toContain('greeting · r0 · action[0]');
+        const incoming = container.querySelectorAll(`[data-to-action="${shared.getAttribute('data-action-id')}"]`);
+        expect(Array.from(incoming, (edge) => edge.getAttribute('data-from-field'))).toEqual(['full', 'greeting']);
+        expect(container.querySelectorAll('svg > .mrd-edge:not(.mrd-action-edge)')).toHaveLength(3);
+
+        fireEvent.mouseEnter(shared);
+        expect(container.querySelectorAll('.mrd-action-edge.mrd-edge-active')).toHaveLength(2);
+        expect(container.querySelector('[data-field-id="full"]')!.classList.contains('mrd-node-active')).toBe(true);
+        expect(container.querySelector('[data-field-id="greeting"]')!.classList.contains('mrd-node-active')).toBe(true);
+        fireEvent.mouseLeave(shared);
+        expect(container.querySelectorAll('.mrd-edge-active')).toHaveLength(0);
+        fireEvent.mouseEnter(container.querySelector('[data-field-id="full"]')!);
+        expect(container.querySelectorAll('svg > .mrd-action-edge.mrd-edge-active')).toHaveLength(1);
+        expect(shared.classList.contains('mrd-node-active')).toBe(true);
+    });
+
+    test('keeps same-name functions distinct and shows a repeated local reference once', () => {
+        const state = instance(1);
+        state.fields.full!.actions = [
+            { reactionIndex: 0, actionIndex: 0, name: 'save', functionId: 0 },
+            { reactionIndex: 0, actionIndex: 1, name: 'save', functionId: 1 },
+            { reactionIndex: 0, actionIndex: 2, name: 'save', functionId: 0 },
+        ];
+        const { container } = render(<DependencyGraphView instance={state} />);
+        expect(container.querySelectorAll('.mrd-action')).toHaveLength(2);
+        expect(container.querySelectorAll('.mrd-shared-action')).toHaveLength(0);
+        expect(container.querySelectorAll('.mrd-action-edge')).toHaveLength(2);
+        expect(container.querySelector('[data-action-id="function:0"] title')!.textContent)
+            .toContain('full · r0 · action[2]');
     });
 
     test('shows the empty state when no model is present', () => {

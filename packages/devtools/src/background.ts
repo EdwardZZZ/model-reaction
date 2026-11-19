@@ -10,6 +10,7 @@
  * so it can be torn down and respawned by the browser at will (both sides
  * reconnect).
  */
+import { PANEL_SOURCE } from './protocol';
 
 const CONTENT_PORT = 'model-reaction-devtools';
 const PANEL_PORT_PREFIX = 'model-reaction-panel-';
@@ -47,11 +48,12 @@ function registerContentPort(port: Port): void {
 
     port.onMessage.addListener((msg) => {
         // Agent → panel.
-        panelPorts.get(tabId)?.postMessage(msg);
+        if (contentPorts.get(tabId) === port) panelPorts.get(tabId)?.postMessage(msg);
     });
     port.onDisconnect.addListener(() => {
         if (contentPorts.get(tabId) === port) contentPorts.delete(tabId);
     });
+    requestInit(tabId);
 }
 
 function registerPanelPort(tabId: number, port: Port): void {
@@ -59,9 +61,17 @@ function registerPanelPort(tabId: number, port: Port): void {
 
     port.onMessage.addListener((msg) => {
         // Panel → agent.
-        contentPorts.get(tabId)?.postMessage(msg);
+        if (panelPorts.get(tabId) === port) contentPorts.get(tabId)?.postMessage(msg);
     });
     port.onDisconnect.addListener(() => {
         if (panelPorts.get(tabId) === port) panelPorts.delete(tabId);
     });
+    requestInit(tabId);
+}
+
+function requestInit(tabId: number): void {
+    const content = contentPorts.get(tabId);
+    if (content && panelPorts.has(tabId)) {
+        content.postMessage({ source: PANEL_SOURCE, kind: 'get-init' });
+    }
 }

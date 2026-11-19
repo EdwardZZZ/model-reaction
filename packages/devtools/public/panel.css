@@ -236,6 +236,7 @@ body {
 }
 
 .mrd-edge {
+  fill: none;
   stroke: var(--mrd-muted);
   stroke-width: 1.5;
 }
@@ -257,6 +258,15 @@ body {
 .mrd-action-edge {
   fill: none;
   stroke-dasharray: 4 3;
+}
+
+.mrd-shared-action rect {
+  stroke-dasharray: 4 3;
+}
+
+.mrd-action-kind {
+  fill: var(--mrd-muted);
+  font-size: 10px;
 }
 
 .mrd-graph-hint {

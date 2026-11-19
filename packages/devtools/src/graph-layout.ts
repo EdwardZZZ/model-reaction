@@ -1,15 +1,6 @@
 /**
- * Compute a layered layout for the reaction dependency graph.
- *
- * The graph is a DAG (the library rejects cyclic reactions at runtime), so we
- * assign each node to a "layer" = its longest path from any root (a node with
- * no incoming edges). Nodes in the same layer are spread horizontally. This is
- * a small, deterministic Sugiyama-style layering — enough for the field counts
- * a typical model has, and pure so it can be unit-tested without a DOM.
- *
- * Cycles, if they somehow appear, are broken defensively: any node not yet
- * assigned after the relaxation passes is parked in the last layer, so the
- * function always terminates and never loops forever.
+ * Stack fields vertically, ordered by dependency layer and then schema order.
+ * Indent dependent fields to the right. See model-reaction/docs/DEVTOOLS.md.
  */
 import type { DependencyGraph } from './protocol';
 
@@ -17,6 +8,7 @@ export interface LaidOutNode {
     id: string;
     x: number;
     y: number;
+    height: number;
     layer: number;
 }
 
@@ -35,6 +27,7 @@ export interface GraphLayout {
 export interface LayoutOptions {
     nodeWidth: number;
     nodeHeight: number;
+    nodeHeights?: ReadonlyMap<string, number>;
     hGap: number;
     vGap: number;
 }
@@ -43,7 +36,7 @@ export const DEFAULT_LAYOUT_OPTIONS: LayoutOptions = {
     nodeWidth: 120,
     nodeHeight: 36,
     hGap: 32,
-    vGap: 48,
+    vGap: 20,
 };
 
 export function layoutGraph(
@@ -60,56 +53,41 @@ export function layoutGraph(
         byLayer.get(l)!.push(id);
     });
 
-    const { nodeWidth, nodeHeight, hGap, vGap } = options;
+    const { nodeWidth, nodeHeight, nodeHeights, hGap, vGap } = options;
     const nodes: LaidOutNode[] = [];
-    let maxWidth = 0;
     const layers = [...byLayer.keys()].sort((a, b) => a - b);
+    let nextY = 0;
+    let width = 0;
 
     layers.forEach((l) => {
         const ids = byLayer.get(l)!;
-        const rowWidth = ids.length * nodeWidth + (ids.length - 1) * hGap;
-        maxWidth = Math.max(maxWidth, rowWidth);
-        ids.forEach((id, i) => {
+        ids.forEach((id) => {
+            const height = nodeHeights?.get(id) ?? nodeHeight;
+            const x = l * (nodeWidth + hGap);
             nodes.push({
                 id,
-                x: i * (nodeWidth + hGap),
-                y: l * (nodeHeight + vGap),
+                x,
+                y: nextY,
+                height,
                 layer: l,
             });
+            nextY += height + vGap;
+            width = Math.max(width, x + nodeWidth);
         });
     });
 
-    // Center each row within the widest row.
-    const rowWidths = new Map<number, number>();
-    layers.forEach((l) => {
-        const ids = byLayer.get(l)!;
-        rowWidths.set(l, ids.length * nodeWidth + (ids.length - 1) * hGap);
-    });
-    nodes.forEach((n) => {
-        const offset = (maxWidth - (rowWidths.get(n.layer) ?? 0)) / 2;
-        n.x += offset;
-    });
-
-    const height =
-        layers.length * nodeHeight + Math.max(0, layers.length - 1) * vGap;
+    const height = nodes.length > 0 ? nextY - vGap : 0;
 
     return {
         nodes,
         edges: graph.edges.map((e) => ({ from: e.from, to: e.to })),
-        width: maxWidth,
+        width,
         height,
     };
 }
 
 /** Longest-path layer assignment with a defensive cap against cycles. */
 function assignLayers(graph: DependencyGraph): Map<string, number> {
-    const incoming = new Map<string, string[]>();
-    graph.nodes.forEach((n) => incoming.set(n, []));
-    graph.edges.forEach((e) => {
-        if (!incoming.has(e.to)) incoming.set(e.to, []);
-        incoming.get(e.to)!.push(e.from);
-    });
-
     const layer = new Map<string, number>();
     graph.nodes.forEach((n) => layer.set(n, 0));
 

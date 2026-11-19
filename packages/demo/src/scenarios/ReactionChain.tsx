@@ -1,15 +1,6 @@
-import { createModel } from 'model-reaction/devtools';
-import { ValidationRules } from 'model-reaction/validation';
 import { ModelProvider, useModel, useModelField } from 'model-reaction/react';
 import { TextField } from '../TextField';
-import { useOwnedModel } from '../useOwnedModel';
-
-interface NameForm {
-    firstName: string;
-    lastName: string;
-    fullName: string;
-    greeting: string;
-}
+import { nameModel, type NameForm } from './reaction-chain-model';
 
 /**
  * Reaction chain scenario: firstName/lastName → fullName → greeting.
@@ -17,42 +8,8 @@ interface NameForm {
  * fullName, and fullName feeding greeting.
  */
 export function ReactionChain() {
-    const model = useOwnedModel<NameForm>(() =>
-        createModel<NameForm>({
-            firstName: {
-                type: 'string',
-                default: 'Ada',
-                validator: [ValidationRules.required.withMessage('First name required')],
-            },
-            lastName: {
-                type: 'string',
-                default: 'Lovelace',
-                validator: [ValidationRules.required.withMessage('Last name required')],
-            },
-            fullName: {
-                type: 'string',
-                default: '',
-                reaction: {
-                    fields: ['firstName', 'lastName'],
-                    computed: ({ firstName, lastName }) =>
-                        `${firstName} ${lastName}`.trim(),
-                },
-            },
-            greeting: {
-                type: 'string',
-                default: '',
-                reaction: {
-                    fields: ['fullName'],
-                    computed: ({ fullName }) =>
-                        fullName ? `Hello, ${fullName}!` : 'Hello, stranger!',
-                },
-            },
-        })
-    );
-
-    if (!model) return null;
     return (
-        <ModelProvider model={model}>
+        <ModelProvider model={nameModel}>
             <ReactionChainView />
         </ModelProvider>
     );
@@ -62,6 +19,9 @@ function ReactionChainView() {
     const model = useModel<NameForm>();
     const fullName = useModelField(model, 'fullName');
     const greeting = useModelField(model, 'greeting');
+    const nameActionRuns = useModelField(model, 'nameActionRuns');
+    const capturedFullName = useModelField(model, 'capturedFullName');
+    const capturedGreeting = useModelField(model, 'capturedGreeting');
 
     return (
         <section className="scenario">
@@ -70,7 +30,8 @@ function ReactionChainView() {
                 <code>firstName</code>, <code>lastName</code> →{' '}
                 <code>fullName</code> → <code>greeting</code>. Edit a name and
                 watch two derivation layers cascade in the DevTools dependency
-                graph.
+                graph. This model is shared across the app, so switching scenarios
+                preserves its state.
             </p>
             <div className="row">
                 <TextField<NameForm> field="firstName" label="First name" />
@@ -79,6 +40,22 @@ function ReactionChainView() {
             <div className="derived">
                 <div><span className="derived-label">fullName</span> {fullName || '—'}</div>
                 <div><span className="derived-label">greeting</span> {greeting || '—'}</div>
+            </div>
+            <p className="scenario-desc">
+                <code>fullName</code> runs <code>countNameAction</code> and{' '}
+                <code>captureFullName</code>; <code>greeting</code> runs{' '}
+                <code>captureFullName</code> and <code>captureGreeting</code>.
+                Both fields share the same <code>captureFullName</code> function,
+                which reads the committed full name and is deduplicated while queued.
+                Dependencies shows one shared <code>captureFullName</code> node
+                connected to both fields by dashed arrows. Inspect the actions in
+                Dependencies and the writebacks below in Data Tree / Timeline.
+                Actions also run during initialization.
+            </p>
+            <div className="derived" role="region" aria-label="Action results">
+                <div><span className="derived-label">nameActionRuns</span> {nameActionRuns}</div>
+                <div><span className="derived-label">capturedFullName</span> {capturedFullName || '—'}</div>
+                <div><span className="derived-label">capturedGreeting</span> {capturedGreeting || '—'}</div>
             </div>
         </section>
     );

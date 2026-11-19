@@ -35,11 +35,25 @@ tab in the browser DevTools, with three views:
    - `errors` — current validation errors, per field
 2. **Dependencies** — the reaction dependency graph. Solid arrows point
    **from a dependency to the field its reaction computes** (read it as
-   "`from` feeds `to`"). Declared actions appear inside their host field module,
-   connected by dashed arrows and labelled by reaction and action indices.
+   "`from` feeds `to`"). Actions used by one field appear inside its module,
+   connected by dashed arrows. The same function reference renders as one action
+   node. When multiple fields share it, the node appears to the right of the field
+   modules with a `shared · N fields` label and incoming dashed arrows from each
+   declaring field. Same-name functions with different references remain separate.
+   Named actions show their function names;
+   anonymous actions keep the `r0 · action[index]` label.
    These arrows show ownership and execution after calculation settles, not
    closure read/write dependencies or a requirement that the host value changes.
-   Array indices express execution order. Hovering a field highlights its edges.
+   Indices express declaration positions; the tooltip lists every declaration.
+   Hovering a field highlights its edges; hovering a shared action highlights all
+   its declaring fields and incoming dashed arrows.
+   Fields remain ordered vertically by dependency layer, preserving schema order
+   and alignment within a layer. Each additional dependency level moves one column
+   to the right. Computation arrows connect the source field's right edge to the
+   target field's left edge. Field counts grow the diagram vertically, while
+   dependency depth increases its width. Shared actions occupy a separate column.
+   Each field reserves height only for actions drawn inside it; shared actions
+   do not leave empty rows in their declaring field modules.
 3. **Timeline** — a reverse-chronological list of committed field changes.
    Selecting an entry shows the field's value at that point next to its
    previous value.
@@ -120,6 +134,15 @@ into `packages/devtools/dist/`, alongside the copied static assets
 > The panel pulls the current state on open, so models created before you
 > opened the panel still appear.
 
+The background requests the full `init` state once the panel and content-relay
+ports are paired, regardless of connection order. The content relay reconnects
+after a disconnect; the panel retries every 250 ms until closed. Closing the
+panel cancels reconnects. Either side reconnecting resynchronizes the current
+instances, snapshots, and timeline retained by the page agent, recovering state
+updates missed during the disconnect. The background worker does not store or
+replay messages. If reloading or updating the extension invalidates the page's
+extension context, refresh the inspected page and reopen DevTools.
+
 ## Using the panel
 
 - If a page hosts **more than one** model, an instance picker appears in the
@@ -179,10 +202,14 @@ action closure reads/writes or live execution state.
 Field metadata is built once per registered model; the graph projects those
 same dependency lists. Subsequent reads reuse both structures.
 The field-metadata loop also adds optional `actions` metadata:
-`{ reactionIndex, actionIndex, name }[]`, omitted when empty. Function references
-are not merged. These declarations do not expose candidates, versions,
-barriers, or execution status. Actions are drawn inside fields and never added
-as computation nodes or edges.
+`{ reactionIndex, actionIndex, name, functionId }[]`, omitted when empty.
+`functionId` is assigned by function reference within each registered model and
+survives JSON transport. The panel merges declarations with the same ID into one
+action node, including repeated references within one field. Older metadata
+without an ID keeps each declaration separate rather than guessing by name.
+These declarations do not expose candidates, versions, barriers, or execution
+status. Action nodes and dashed arrows are a separate view layer; they never
+change the computation graph's nodes or edges.
 
 ## Zero overhead when absent
 

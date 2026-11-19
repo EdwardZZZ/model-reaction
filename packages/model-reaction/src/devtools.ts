@@ -5,6 +5,7 @@ import type {
     Model,
     ModelOptions,
     ModelReturn,
+    ReactionAction,
     ValidationError,
 } from './types';
 import { ModelEvents } from './types';
@@ -17,7 +18,7 @@ interface DevtoolsFieldInfo {
     hasDefault: boolean;
     validatorCount: number;
     reactionDeps: string[];
-    actions?: Array<{ reactionIndex: number; actionIndex: number; name: string }>;
+    actions?: Array<{ reactionIndex: number; actionIndex: number; name: string; functionId: number }>;
 }
 
 interface DevtoolsDependencyEdge {
@@ -92,6 +93,7 @@ function attachToDevtools(
 
 function buildFieldInfo(schema: Model): Record<string, DevtoolsFieldInfo> {
     const out: Record<string, DevtoolsFieldInfo> = Object.create(null);
+    const functionIds = new Map<ReactionAction, number>();
     const deps = new Map<string, Set<string>>();
     eachReactionEdge(schema, (computedField, dependencyField) => {
         if (!deps.has(computedField)) deps.set(computedField, new Set());
@@ -106,11 +108,15 @@ function buildFieldInfo(schema: Model): Record<string, DevtoolsFieldInfo> {
             reactionDeps: [...(deps.get(name) ?? [])],
         };
         if (field.reaction?.action?.length) {
-            out[name]!.actions = field.reaction.action.map((action, actionIndex) => ({
-                reactionIndex: 0,
-                actionIndex,
-                name: action.name,
-            }));
+            out[name]!.actions = field.reaction.action.map((action, actionIndex) => {
+                if (!functionIds.has(action)) functionIds.set(action, functionIds.size);
+                return {
+                    reactionIndex: 0,
+                    actionIndex,
+                    name: action.name,
+                    functionId: functionIds.get(action)!,
+                };
+            });
         }
     }
     return { ...out };

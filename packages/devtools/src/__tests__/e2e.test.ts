@@ -143,6 +143,32 @@ describe('library ↔ page-agent end-to-end', () => {
         model.dispose();
     });
 
+    test('shared function identity survives the real agent and JSON messaging', async () => {
+        const received = collect();
+        dispose = installAgent(window);
+        function captureFullName() {}
+        const sameName = { captureFullName() {} }.captureFullName;
+        const model = createModel({
+            source: { type: 'string', default: 'Ada' },
+            fullName: { type: 'string', reaction: {
+                fields: ['source'], computed: ({ source }) => source, action: [captureFullName, sameName],
+            } },
+            greeting: { type: 'string', reaction: {
+                fields: ['fullName'], computed: ({ fullName }) => `Hello, ${fullName}!`, action: [captureFullName],
+            } },
+        });
+        await flush();
+        const added = received.find(
+            (message): message is Extract<AgentMessage, { kind: 'instance-added' }> =>
+                message.kind === 'instance-added'
+        )!;
+        const fields = JSON.parse(JSON.stringify(added.instance)).fields;
+        expect(typeof fields.fullName.actions[0].functionId).toBe('number');
+        expect(fields.fullName.actions[0].functionId).toBe(fields.greeting.actions[0].functionId);
+        expect(fields.fullName.actions[0].functionId).not.toBe(fields.fullName.actions[1].functionId);
+        model.dispose();
+    });
+
     test('dispose unregisters the instance', async () => {
         const received = collect();
         dispose = installAgent(window);

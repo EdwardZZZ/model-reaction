@@ -25,7 +25,7 @@ interface DevtoolsModelInstance {
         hasDefault: boolean;
         validatorCount: number;
         reactionDeps: string[];
-        actions?: Array<{ reactionIndex: number; actionIndex: number; name: string }>;
+        actions?: Array<{ reactionIndex: number; actionIndex: number; name: string; functionId: number }>;
     }>;
     getDependencyGraph(): {
         nodes: string[];
@@ -268,14 +268,37 @@ describe('model-reaction/devtools createModel', () => {
             const instance = instances[0]!;
             const fields = instance.getFields();
             expect(fields.target?.actions).toEqual([
-                { reactionIndex: 0, actionIndex: 0, name: 'save' },
-                { reactionIndex: 0, actionIndex: 1, name: 'save' },
-                { reactionIndex: 0, actionIndex: 2, name: '' },
+                { reactionIndex: 0, actionIndex: 0, name: 'save', functionId: 0 },
+                { reactionIndex: 0, actionIndex: 1, name: 'save', functionId: 0 },
+                { reactionIndex: 0, actionIndex: 2, name: '', functionId: 1 },
             ]);
             expect(fields.source?.actions).toBeUndefined();
             expect(instance.getDependencyGraph()).toEqual({
                 nodes: ['source', 'target'], edges: [{ from: 'source', to: 'target' }],
             });
+            model.dispose();
+        });
+
+        test('identifies shared references across fields without merging same-name functions', () => {
+            function save() {}
+            const anotherSave = { save() {} }.save;
+            const instances = installHook();
+            const model = createModel({
+                source: { type: 'number' },
+                first: { type: 'number', reaction: {
+                    fields: ['source'], computed: () => 1, action: [save, anotherSave],
+                } },
+                second: { type: 'number', reaction: {
+                    fields: ['first'], computed: () => 2, action: [save],
+                } },
+            });
+            const fields = instances[0]!.getFields();
+            const first = fields.first!.actions!;
+            const second = fields.second!.actions!;
+            expect(first[0]!.name).toBe(first[1]!.name);
+            expect(first[0]!.functionId).toBe(second[0]!.functionId);
+            expect(first[0]!.functionId).not.toBe(first[1]!.functionId);
+            expect(JSON.parse(JSON.stringify(fields))).toEqual(fields);
             model.dispose();
         });
 
