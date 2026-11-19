@@ -8,17 +8,18 @@
  * The `connect` prop is injected so tests can drive the panel with a fake
  * transport instead of the real `chrome.runtime` port.
  */
-import { useEffect, useReducer, useState, type ReactElement } from 'react';
+import { useEffect, useReducer, useRef, useState, type ReactElement } from 'react';
 import {
     initialPanelState,
     panelReducer,
     type PanelAction,
     type PanelState,
 } from '../panel-state';
-import type { AgentMessage } from '../protocol';
+import { PANEL_SOURCE, type AgentMessage } from '../protocol';
 import type { PanelPort } from '../panel-port';
 import { DataTreeView } from './DataTreeView';
 import { DependencyGraphView } from './DependencyGraphView';
+import { InstancePicker } from './InstancePicker';
 import { TimelineView } from './TimelineView';
 
 type Tab = 'data' | 'graph' | 'timeline';
@@ -41,10 +42,15 @@ export function Panel({ connect }: PanelProps): ReactElement {
         initialPanelState
     );
     const [tab, setTab] = useState<Tab>('data');
+    const transport = useRef<PanelPort | null>(null);
 
     useEffect(() => {
         const port = connect((msg) => dispatch(msg));
-        return () => port.disconnect();
+        transport.current = port;
+        return () => {
+            transport.current = null;
+            port.disconnect();
+        };
     }, [connect]);
 
     const instances = [...state.instances.values()];
@@ -55,12 +61,15 @@ export function Panel({ connect }: PanelProps): ReactElement {
         <div className="mrd-panel">
             <header className="mrd-header">
                 <span className="mrd-title">Model Reaction</span>
-                <InstancePicker
-                    instances={instances.map((i) => i.id)}
-                    selectedId={selectedId}
-                    onSelect={(id) => dispatch({ kind: 'select', id })}
-                />
+                {instances.length > 1 && (
+                    <span className="mrd-model-count">{instances.length} models</span>
+                )}
             </header>
+            <InstancePicker
+                instances={instances}
+                selectedId={selectedId}
+                onSelect={(id) => dispatch({ kind: 'select', id })}
+            />
 
             {selected ? (
                 <>
@@ -74,11 +83,26 @@ export function Panel({ connect }: PanelProps): ReactElement {
                                 {t.label}
                             </button>
                         ))}
+                        {tab === 'timeline' && (
+                            <button
+                                type="button"
+                                className="mrd-timeline-clear"
+                                disabled={selected.timeline.length === 0}
+                                title="Clear this model's recorded changes"
+                                onClick={() => transport.current?.send({
+                                    source: PANEL_SOURCE,
+                                    kind: 'clear-timeline',
+                                    id: selected.id,
+                                })}
+                            >
+                                Clear
+                            </button>
+                        )}
                     </nav>
                     <main className="mrd-content">
                         {tab === 'data' && <DataTreeView instance={selected} />}
                         {tab === 'graph' && <DependencyGraphView instance={selected} />}
-                        {tab === 'timeline' && <TimelineView instance={selected} />}
+                        {tab === 'timeline' && <TimelineView key={selected.id} instance={selected} />}
                     </main>
                 </>
             ) : (
@@ -89,32 +113,5 @@ export function Panel({ connect }: PanelProps): ReactElement {
                 </div>
             )}
         </div>
-    );
-}
-
-function InstancePicker({
-    instances,
-    selectedId,
-    onSelect,
-}: {
-    instances: number[];
-    selectedId: number | null;
-    onSelect: (id: number) => void;
-}): ReactElement | null {
-    if (instances.length <= 1) return null;
-    return (
-        <label className="mrd-instance-picker">
-            model
-            <select
-                value={selectedId ?? ''}
-                onChange={(e) => onSelect(Number(e.target.value))}
-            >
-                {instances.map((id) => (
-                    <option key={id} value={id}>
-                        #{id}
-                    </option>
-                ))}
-            </select>
-        </label>
     );
 }

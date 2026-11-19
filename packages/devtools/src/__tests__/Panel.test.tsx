@@ -10,6 +10,7 @@ import { Panel } from '../panel/Panel';
 import { DependencyGraphView } from '../panel/DependencyGraphView';
 import {
     AGENT_SOURCE,
+    PANEL_SOURCE,
     type AgentMessage,
     type InstanceState,
 } from '../protocol';
@@ -68,13 +69,13 @@ describe('Panel', () => {
         act(() => {
             emit({ source: AGENT_SOURCE, kind: 'init', instances: [instance(1), instance(2), instance(3)] });
         });
-        fireEvent.change(getByRole('combobox'), { target: { value: '2' } });
-        expect((getByRole('combobox') as HTMLSelectElement).value).toBe('2');
+        fireEvent.click(getByRole('button', { name: 'Model #2' }));
+        expect(getByRole('button', { name: 'Model #2' }).getAttribute('aria-pressed')).toBe('true');
         expect(port.send).not.toHaveBeenCalled();
         act(() => { emit({ source: AGENT_SOURCE, kind: 'instance-removed', id: 2 }); });
-        expect((getByRole('combobox') as HTMLSelectElement).value).toBe('1');
+        expect(getByRole('button', { name: 'Model #1' }).getAttribute('aria-pressed')).toBe('true');
         expect(container.textContent).toContain('Ada Lovelace');
-        fireEvent.change(getByRole('combobox'), { target: { value: '3' } });
+        fireEvent.click(getByRole('button', { name: 'Model #3' }));
         act(() => { emit({ source: AGENT_SOURCE, kind: 'init', instances: [instance(4)] }); });
         expect(container.textContent).toContain('Ada Lovelace');
         expect(container.textContent).not.toContain('No model detected');
@@ -268,6 +269,39 @@ describe('Panel', () => {
         expect(container.textContent).toContain('first');
     });
 
+    test('clears the selected timeline and keeps recording with no stale detail selection', () => {
+        const { connect, emit, port } = makeFakeConnect();
+        const { container, getByRole } = render(<Panel connect={connect} />);
+        const change = { seq: 0, field: 'first', value: { t: 'primitive' as const, v: 'Grace' }, timestamp: 1 };
+        act(() => {
+            emit({
+                source: AGENT_SOURCE, kind: 'init',
+                instances: [instance(1, { timeline: [change] }), instance(2, { timeline: [change] })],
+            });
+        });
+        fireEvent.click(getByRole('button', { name: 'Timeline' }));
+        fireEvent.click(container.querySelector('.mrd-timeline-item')!);
+        expect(container.querySelector('.mrd-timeline-detail h4')).not.toBeNull();
+        fireEvent.click(getByRole('button', { name: 'Model #2' }));
+        expect(container.querySelector('.mrd-timeline-detail h4')).toBeNull();
+        fireEvent.click(container.querySelector('.mrd-timeline-item')!);
+        fireEvent.click(getByRole('button', { name: 'Clear' }));
+        expect(port.send).toHaveBeenCalledWith({ source: PANEL_SOURCE, kind: 'clear-timeline', id: 2 });
+        act(() => { emit({ source: AGENT_SOURCE, kind: 'timeline-cleared', id: 2 }); });
+        expect(container.querySelector('.mrd-timeline-item')).toBeNull();
+        expect(container.querySelector('.mrd-timeline-detail')).toBeNull();
+        expect((getByRole('button', { name: 'Clear' }) as HTMLButtonElement).disabled).toBe(true);
+        fireEvent.click(getByRole('button', { name: 'Model #1' }));
+        expect(container.querySelectorAll('.mrd-timeline-item')).toHaveLength(1);
+        fireEvent.click(getByRole('button', { name: 'Model #2' }));
+        act(() => {
+            emit({ source: AGENT_SOURCE, kind: 'change', id: 2, change: { ...change, seq: 1 } });
+        });
+        expect(container.querySelectorAll('.mrd-timeline-item')).toHaveLength(1);
+        expect(container.querySelector('.mrd-timeline-detail h4')).toBeNull();
+        expect((getByRole('button', { name: 'Clear' }) as HTMLButtonElement).disabled).toBe(false);
+    });
+
     test('disconnects the transport on unmount', () => {
         const { connect, port } = makeFakeConnect();
         const { unmount } = render(<Panel connect={connect} />);
@@ -275,16 +309,39 @@ describe('Panel', () => {
         expect(port.disconnect).toHaveBeenCalledTimes(1);
     });
 
-    test('shows an instance picker when multiple models exist', () => {
+    test('switches models directly while keeping the selected view', () => {
         const { connect, emit } = makeFakeConnect();
-        const { container } = render(<Panel connect={connect} />);
+        const { container, getByRole } = render(<Panel connect={connect} />);
+        const second = instance(2, {
+            fields: {
+                qty: { type: 'number', hasDefault: true, validatorCount: 0, reactionDeps: [] },
+                price: { type: 'number', hasDefault: true, validatorCount: 0, reactionDeps: [] },
+                total: { type: 'number', hasDefault: true, validatorCount: 0, reactionDeps: ['qty', 'price'] },
+                currency: { type: 'string', hasDefault: true, validatorCount: 0, reactionDeps: [] },
+            },
+            graph: {
+                nodes: ['qty', 'price', 'total', 'currency'],
+                edges: [{ from: 'qty', to: 'total' }, { from: 'price', to: 'total' }],
+            },
+        });
         act(() => {
             emit({
                 source: AGENT_SOURCE,
                 kind: 'init',
-                instances: [instance(1), instance(2)],
+                instances: [instance(1), second],
             });
         });
-        expect(container.querySelector('.mrd-instance-picker')).not.toBeNull();
+        const secondButton = getByRole('button', { name: 'Model #2' });
+        expect(secondButton.textContent).toContain('qty, price, total, +1');
+        expect(secondButton.title).toContain('currency');
+        fireEvent.click(getByRole('button', { name: 'Dependencies' }));
+        fireEvent.click(secondButton);
+        expect(Array.from(container.querySelectorAll('.mrd-node-label'), (node) => node.textContent))
+            .toEqual(['qty', 'price', 'currency', 'total']);
+        expect(secondButton.getAttribute('aria-pressed')).toBe('true');
+        expect(getByRole('button', { name: 'Model #1' }).getAttribute('aria-pressed')).toBe('false');
+        act(() => { emit({ source: AGENT_SOURCE, kind: 'instance-removed', id: 1 }); });
+        expect(container.querySelector('.mrd-instance-picker')).toBeNull();
+        expect(container.querySelector('svg')).not.toBeNull();
     });
 });

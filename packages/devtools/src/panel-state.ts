@@ -81,6 +81,13 @@ export function panelReducer(
             });
             return { ...state, instances };
         }
+        case 'timeline-cleared': {
+            const existing = state.instances.get(message.id);
+            if (!existing) return state;
+            const instances = new Map(state.instances);
+            instances.set(message.id, { ...existing, timeline: [] });
+            return { ...state, instances };
+        }
         case 'change': {
             const existing = state.instances.get(message.id);
             if (!existing) return state;

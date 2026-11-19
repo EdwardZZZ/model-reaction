@@ -32,6 +32,7 @@ function transportHarness() {
     const chromeMock = {
         devtools: { inspectedWindow: { tabId: 7 } },
         runtime: {
+            id: 'model-reaction-devtools' as string | undefined,
             onConnect: event<[ChromeRuntimePort]>(),
             connect: jest.fn(({ name }: { name: string }) => {
                 function endpoint(): TestPort {
@@ -122,6 +123,7 @@ function transportHarness() {
     return {
         chromeMock, connections, received, flush, openPanel, openContent, latest, restartWorker,
         get state() { return state; },
+        get messageListenerCount() { return windowListeners.size; },
         close(): void {
             panels.forEach((panel) => panel.disconnect());
             disposeAgent();
@@ -206,13 +208,146 @@ describe('DevTools transport recovery', () => {
         expect(old.client.sent).toEqual([]);
     });
 
+    test('clears only the requested timeline and retains the clear across reconnects', async () => {
+        const panel = pair();
+        const other = createModel({ value: { type: 'number', default: 10 } });
+        try {
+            await model.setField('value', 2);
+            await other.setField('value', 11);
+            harness.flush();
+            const [id, otherId] = [...harness.state.instances.keys()];
+            expect(harness.state.instances.get(id!)!.timeline).toHaveLength(1);
+            panel.send({ source: PANEL_SOURCE, kind: 'clear-timeline', id: id! });
+            harness.flush();
+            expect(harness.state.instances.get(id!)!.timeline).toEqual([]);
+            expect(harness.state.instances.get(otherId!)!.timeline).toHaveLength(1);
+            expect(model.getField('value')).toBe(2);
+            expect(value()).toEqual({ t: 'primitive', v: 2 });
+            harness.restartWorker();
+            reconnect();
+            expect(harness.state.instances.get(id!)!.timeline).toEqual([]);
+            expect(harness.state.instances.get(otherId!)!.timeline).toHaveLength(1);
+            await model.setField('value', 3);
+            harness.flush();
+            expect(harness.state.instances.get(id!)!.timeline).toEqual([
+                expect.objectContaining({ seq: 1, value: { t: 'primitive', v: 3 } }),
+            ]);
+            panel.send(initRequest);
+            harness.flush();
+            expect(harness.state.instances.get(id!)!.timeline).toHaveLength(1);
+        } finally {
+            other.dispose();
+        }
+    });
+
     test('resynchronizes when only the content relay reconnects', () => {
         pair();
         harness.latest(contentName).client.disconnect();
         harness.flush();
+        reconnect();
         expect(harness.received.filter((message) => message.kind === 'init')).toHaveLength(2);
         expect(value()).toEqual({ t: 'primitive', v: 1 });
         expect(harness.connections.filter(({ client }) => client.name === panelName)).toHaveLength(1);
+    });
+
+    test('retries a transient failure while connecting the content relay initially', () => {
+        harness.chromeMock.runtime.connect
+            .mockImplementationOnce(() => { throw new Error('Worker unavailable'); });
+        expect(() => harness.openContent()).not.toThrow();
+        harness.openPanel();
+        harness.flush();
+        expect(harness.state.instances.size).toBe(0);
+        reconnect();
+        expect(value()).toEqual({ t: 'primitive', v: 1 });
+        expect(jest.getTimerCount()).toBe(0);
+    });
+
+    test('recovers missed writes after a content reconnect attempt fails', async () => {
+        pair();
+        const old = harness.latest(contentName);
+        harness.chromeMock.runtime.connect
+            .mockImplementationOnce(() => { throw new Error('Worker unavailable'); });
+        old.client.disconnect();
+        expect(() => harness.flush()).not.toThrow();
+        await model.setField('value', 2);
+        harness.flush();
+        reconnect();
+        reconnect();
+        expect(value()).toEqual({ t: 'primitive', v: 2 });
+        expect(harness.latest(contentName)).not.toBe(old);
+        expect(jest.getTimerCount()).toBe(0);
+    });
+
+    test('recovers when content sends before its disconnect callback is delivered', async () => {
+        pair();
+        const old = harness.latest(contentName);
+        old.client.connected = old.server.connected = false;
+        await model.setField('value', 2);
+        expect(() => harness.flush()).not.toThrow();
+        reconnect();
+        expect(value()).toEqual({ t: 'primitive', v: 2 });
+        expect(harness.latest(contentName)).not.toBe(old);
+        expect(jest.getTimerCount()).toBe(0);
+    });
+
+    test.each(['panel', 'content'])('recovers when the background forwards to a closed %s port', async (target) => {
+        const panel = pair();
+        if (target === 'content') {
+            panel.send(initRequest);
+            harness.latest(contentName).client.disconnect();
+        } else {
+            await model.setField('value', 2);
+            harness.flush();
+            harness.latest(panelName).client.disconnect();
+            const content = harness.latest(contentName).server;
+            expect(() => content.onMessage.emit(
+                harness.received[harness.received.length - 1], content,
+            )).not.toThrow();
+        }
+        expect(() => harness.flush()).not.toThrow();
+        reconnect();
+        expect(value()).toEqual({ t: 'primitive', v: target === 'content' ? 1 : 2 });
+    });
+
+    test('recovers when the content port closes before the background requests init', () => {
+        harness.openContent();
+        harness.flush();
+        harness.openPanel();
+        harness.latest(contentName).client.disconnect();
+        expect(() => harness.flush()).not.toThrow();
+        reconnect();
+        expect(value()).toEqual({ t: 'primitive', v: 1 });
+    });
+
+    test('stops content retries when reloading the extension invalidates its context', async () => {
+        const agentListeners = harness.messageListenerCount;
+        pair();
+        harness.chromeMock.runtime.id = undefined;
+        harness.latest(contentName).client.connected = false;
+        harness.latest(contentName).server.connected = false;
+        harness.chromeMock.runtime.connect.mockImplementation(() => {
+            throw new Error('Extension context invalidated');
+        });
+        await model.setField('value', 2);
+        expect(() => harness.flush()).not.toThrow();
+        jest.advanceTimersByTime(1000);
+        expect(() => harness.flush()).not.toThrow();
+        expect(jest.getTimerCount()).toBe(0);
+        expect(harness.messageListenerCount).toBe(agentListeners);
+        expect(harness.chromeMock.runtime.connect).toHaveBeenCalledTimes(2);
+    });
+
+    test('cleans up when the extension context becomes invalid during the retry delay', () => {
+        const agentListeners = harness.messageListenerCount;
+        pair();
+        harness.latest(contentName).client.disconnect();
+        harness.flush();
+        expect(jest.getTimerCount()).toBe(1);
+        harness.chromeMock.runtime.id = undefined;
+        reconnect();
+        expect(jest.getTimerCount()).toBe(0);
+        expect(harness.messageListenerCount).toBe(agentListeners);
+        expect(harness.chromeMock.runtime.connect).toHaveBeenCalledTimes(2);
     });
 
     test('recovers the live snapshot and retained timeline after repeated worker restarts', async () => {

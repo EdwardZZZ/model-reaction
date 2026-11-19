@@ -48,9 +48,10 @@ function registerContentPort(port: Port): void {
 
     port.onMessage.addListener((msg) => {
         // Agent → panel.
-        if (contentPorts.get(tabId) === port) panelPorts.get(tabId)?.postMessage(msg);
+        if (contentPorts.get(tabId) === port) send(panelPorts, tabId, msg);
     });
     port.onDisconnect.addListener(() => {
+        void chrome.runtime.lastError;
         if (contentPorts.get(tabId) === port) contentPorts.delete(tabId);
     });
     requestInit(tabId);
@@ -61,17 +62,32 @@ function registerPanelPort(tabId: number, port: Port): void {
 
     port.onMessage.addListener((msg) => {
         // Panel → agent.
-        if (panelPorts.get(tabId) === port) contentPorts.get(tabId)?.postMessage(msg);
+        if (panelPorts.get(tabId) === port) send(contentPorts, tabId, msg);
     });
     port.onDisconnect.addListener(() => {
+        void chrome.runtime.lastError;
         if (panelPorts.get(tabId) === port) panelPorts.delete(tabId);
     });
     requestInit(tabId);
 }
 
 function requestInit(tabId: number): void {
-    const content = contentPorts.get(tabId);
-    if (content && panelPorts.has(tabId)) {
-        content.postMessage({ source: PANEL_SOURCE, kind: 'get-init' });
+    if (panelPorts.has(tabId)) {
+        send(contentPorts, tabId, { source: PANEL_SOURCE, kind: 'get-init' });
+    }
+}
+
+function send(ports: Map<number, Port>, tabId: number, message: unknown): void {
+    const port = ports.get(tabId);
+    if (!port) return;
+    try {
+        port.postMessage(message);
+    } catch {
+        if (ports.get(tabId) === port) ports.delete(tabId);
+        try {
+            port.disconnect();
+        } catch {
+            // The browser may have already released the port.
+        }
     }
 }

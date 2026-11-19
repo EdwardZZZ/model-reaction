@@ -20,6 +20,7 @@ interface ChromeRuntimePort {
 }
 
 interface ChromeRuntime {
+    id?: string;
     connect(connectInfo?: { name?: string }): ChromeRuntimePort;
     onConnect: {
         addListener(cb: (port: ChromeRuntimePort) => void): void;

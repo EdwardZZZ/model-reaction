@@ -12,32 +12,82 @@
 import { isAgentMessage, isPanelMessage } from './protocol';
 
 const PORT_NAME = 'model-reaction-devtools';
+const RECONNECT_DELAY_MS = 250;
 
-function connect(): void {
-    const port = chrome.runtime.connect({ name: PORT_NAME });
+let port: ChromeRuntimePort | undefined;
+let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
 
-    // Page (agent) → background/panel.
-    const onWindowMessage = (event: MessageEvent): void => {
-        const msg: unknown = event.data;
-        if (isAgentMessage(msg)) {
-            port.postMessage(msg);
-        }
-    };
-    window.addEventListener('message', onWindowMessage);
-
-    // Background/panel → page (agent).
-    port.onMessage.addListener((msg: unknown) => {
-        if (isPanelMessage(msg)) {
-            window.postMessage(msg, '*');
-        }
-    });
-
-    // If the background worker is torn down (MV3 idle), reconnect so the panel
-    // keeps receiving updates.
-    port.onDisconnect.addListener(() => {
-        window.removeEventListener('message', onWindowMessage);
-        connect();
-    });
+function releasePort(current: ChromeRuntimePort): void {
+    current.onMessage.removeListener(receive);
+    current.onDisconnect.removeListener(disconnected);
+    try {
+        current.disconnect();
+    } catch {
+        // The extension context may already be invalid.
+    }
 }
 
+function stop(): void {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = undefined;
+    window.removeEventListener('message', onWindowMessage);
+    const current = port;
+    port = undefined;
+    if (current) releasePort(current);
+}
+
+function scheduleReconnect(): void {
+    if (!chrome.runtime.id) {
+        stop();
+        return;
+    }
+    if (reconnectTimer !== undefined) return;
+    reconnectTimer = setTimeout(() => {
+        reconnectTimer = undefined;
+        connect();
+    }, RECONNECT_DELAY_MS);
+}
+
+function disconnected(source: ChromeRuntimePort): void {
+    void chrome.runtime.lastError;
+    if (source !== port) return;
+    port = undefined;
+    releasePort(source);
+    scheduleReconnect();
+}
+
+function receive(msg: unknown, source: ChromeRuntimePort): void {
+    if (source === port && isPanelMessage(msg)) window.postMessage(msg, '*');
+}
+
+function onWindowMessage(event: MessageEvent): void {
+    const msg: unknown = event.data;
+    const current = port;
+    if (!current || !isAgentMessage(msg)) return;
+    try {
+        current.postMessage(msg);
+    } catch {
+        disconnected(current);
+    }
+}
+
+// Connection lifecycle: model-reaction/docs/DEVTOOLS.md.
+function connect(): void {
+    if (!chrome.runtime.id) {
+        stop();
+        return;
+    }
+    try {
+        port = chrome.runtime.connect({ name: PORT_NAME });
+        port.onMessage.addListener(receive);
+        port.onDisconnect.addListener(disconnected);
+    } catch {
+        const current = port;
+        port = undefined;
+        if (current) releasePort(current);
+        scheduleReconnect();
+    }
+}
+
+window.addEventListener('message', onWindowMessage);
 connect();

@@ -99,6 +99,7 @@ export type AgentMessage =
     | { source: typeof AGENT_SOURCE; kind: 'instance-added'; instance: InstanceState }
     | { source: typeof AGENT_SOURCE; kind: 'instance-removed'; id: number }
     | { source: typeof AGENT_SOURCE; kind: 'snapshot'; id: number; snapshot: Snapshot }
+    | { source: typeof AGENT_SOURCE; kind: 'timeline-cleared'; id: number }
     | { source: typeof AGENT_SOURCE; kind: 'change'; id: number; change: ChangeEntry };
 
 // -----------------------------------------------------------------------------
@@ -109,7 +110,9 @@ export type PanelMessage =
     /** Ask the agent to (re)send the full `init` state. */
     | { source: typeof PANEL_SOURCE; kind: 'get-init' }
     /** Force a fresh snapshot for one instance. */
-    | { source: typeof PANEL_SOURCE; kind: 'get-snapshot'; id: number };
+    | { source: typeof PANEL_SOURCE; kind: 'get-snapshot'; id: number }
+    /** Clear the retained change history for one instance. */
+    | { source: typeof PANEL_SOURCE; kind: 'clear-timeline'; id: number };
 
 /** Narrowing guards used by the relay and panel. */
 export function isAgentMessage(msg: unknown): msg is AgentMessage {

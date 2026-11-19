@@ -10,7 +10,7 @@
  *   2. Track every registered model instance, subscribe to its changes, and
  *      keep a bounded change timeline (ring buffer) per instance.
  *   3. Bridge to the content relay via `window.postMessage`, and answer panel
- *      requests (`get-init`, `get-snapshot`).
+ *      requests (`get-init`, `get-snapshot`, `clear-timeline`).
  *
  * It deliberately holds only what it needs (the live `DevtoolsModelInstance`
  * closures plus a capped timeline) so a long-lived page with a chatty model
@@ -182,7 +182,11 @@ function handlePanelMessage(
         return;
     }
     const entry = tracked.get(msg.id);
-    if (entry) {
+    if (!entry) return;
+    if (msg.kind === 'clear-timeline') {
+        entry.timeline = [];
+        post({ source: AGENT_SOURCE, kind: 'timeline-cleared', id: msg.id });
+    } else if (msg.kind === 'get-snapshot') {
         post({
             source: AGENT_SOURCE,
             kind: 'snapshot',

@@ -24,12 +24,12 @@ devtools/
     ├── serialize.ts       # bounded value/snapshot serialization (cycles + total budgets)
     ├── page-agent.ts      # MAIN-world hook impl + timeline ring buffer
     ├── page-agent.entry.ts
-    ├── content.ts         # ISOLATED-world relay
-    ├── background.ts      # MV3 service worker (routes by tab)
+    ├── content.ts         # ISOLATED-world relay + connection recovery
+    ├── background.ts      # MV3 service worker (routes by tab, releases failed ports)
     ├── devtools.ts        # registers the panel
     ├── panel-state.ts     # pure reducer folding AgentMessages → PanelState
     ├── panel-port.ts      # chrome.runtime transport for the panel
-    └── panel/             # React UI (Panel, ValueTree, DataTreeView, …)
+    └── panel/             # React UI (Panel, InstancePicker, ValueTree, …)
 ```
 
 ## Build

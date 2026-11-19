@@ -47,6 +47,8 @@ tab in the browser DevTools, with three views:
    Indices express declaration positions; the tooltip lists every declaration.
    Hovering a field highlights its edges; hovering a shared action highlights all
    its declaring fields and incoming dashed arrows.
+   Field blocks use blue backgrounds; action nodes use purple backgrounds,
+   including on hover, whether drawn inside a field or shared across fields.
    Fields remain ordered vertically by dependency layer, preserving schema order
    and alignment within a layer. Each additional dependency level moves one column
    to the right. Computation arrows connect the source field's right edge to the
@@ -135,24 +137,35 @@ into `packages/devtools/dist/`, alongside the copied static assets
 > opened the panel still appear.
 
 The background requests the full `init` state once the panel and content-relay
-ports are paired, regardless of connection order. The content relay reconnects
-after a disconnect; the panel retries every 250 ms until closed. Closing the
-panel cancels reconnects. Either side reconnecting resynchronizes the current
-instances, snapshots, and timeline retained by the page agent, recovering state
-updates missed during the disconnect. The background worker does not store or
-replay messages. If reloading or updating the extension invalidates the page's
-extension context, refresh the inspected page and reopen DevTools.
+ports are paired, regardless of connection order. Both sides retry every 250 ms
+after disconnects or transient connection failures. Sending to a closed port
+also triggers recovery, even before its disconnect callback arrives; the
+background releases ports whose sends fail. Closing the panel cancels its
+reconnects. Either side reconnecting resynchronizes the current instances,
+snapshots, and timeline retained by the page agent, recovering state updates
+missed during the disconnect. The background worker does not store or replay
+messages. If reloading or updating the extension invalidates the page's
+extension context, the content relay stops retrying and removes its listeners.
+Refresh the inspected page and reopen DevTools to restore that context.
 
 ## Using the panel
 
-- If a page hosts **more than one** model, an instance picker appears in the
-  panel header; pick which one to inspect. Selection belongs to the panel; when
+- If a page hosts **more than one** model, a row of model buttons appears below
+  the panel header. Each shows its instance number, field count, and a preview
+  of the first three schema field names; hover to see all field names.
+  Click a button to switch directly; the selected model is highlighted and
+  the current view stays open. The row scrolls horizontally when needed and
+  disappears when only one model remains. Selection belongs to the panel; when
   the selected instance disappears, it falls back to a remaining instance.
 - `NaN`, `Infinity`, `-Infinity`, and `-0` use an explicit number marker through
   JSON transport, so the tree preserves their display rather than showing null
   or zero. Ordinary finite numbers keep their primitive representation.
 - The **Timeline** is capped by a ring buffer (default 100 entries per
   instance) so a long-lived, chatty page cannot grow memory without bound.
+  **Clear** on the right of the Timeline tab row clears the current model's
+  retained history. It is disabled when the timeline is empty. Model data and
+  other models' histories are unaffected; new changes continue recording with
+  increasing sequence numbers. Cleared entries stay cleared after reconnection.
 - Rejected input, validation completion, dirty clearing, and reaction errors
   refresh the data tree automatically. Synchronous notifications share one
   queued snapshot; only committed field changes enter the timeline.
