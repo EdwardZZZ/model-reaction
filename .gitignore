@@ -17,3 +17,6 @@ ai-plugin-lock.json
 # Generated docs
 specs/doc_export/
 review-reports/
+
+# Local evaluation runs
+evaluations/ai-integration/runs/

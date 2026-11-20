@@ -61,6 +61,11 @@ const model = createModel({ label: textField() });
 // model.data.label: string | null
 ```
 
+对于包含 enum、对象和数组的多个片段，`satisfies` 不会自动收窄枚举默认值；
+默认值宽化为 string 时也会扩大读值类型。可编译的
+[Schema 组合 Recipe](../examples/SCHEMA_COMPOSITION_CN.md)演示如何保留枚举字面量、
+可变数组元素和无默认值字段，同时配置运行时校验。
+
 显式 `createModel<T>(schema)` 返回 `ModelReturn<T>`。`Model<T>` 检查字段 key 完整、
 定义合法，但**不会**把每项的标签、默认值或 transform 与 `T[K]` 关联起来检查。
 调用方承诺默认值、转换后的输入与计算结果符合 T；如果字段可能在赋值前读取，

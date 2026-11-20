@@ -59,7 +59,8 @@
     "example:complex": "tsx --tsconfig tsconfig.examples.json examples/complex-form.ts",
     "example:dirty": "tsx --tsconfig tsconfig.examples.json examples/dirty-data-conditional.ts",
     "example:multi-record": "tsx --tsconfig tsconfig.examples.json examples/multi-record-deep-deps.ts",
-    "examples": "npm run example:basic && npm run example:reaction && npm run example:async && npm run example:event && npm run example:complex && npm run example:dirty && npm run example:multi-record && npm run example:react"
+    "example:schema": "tsx --tsconfig tsconfig.examples.json examples/schema-composition/runner.ts",
+    "examples": "npm run example:basic && npm run example:reaction && npm run example:async && npm run example:event && npm run example:complex && npm run example:dirty && npm run example:multi-record && npm run example:schema && npm run example:react"
   },
   "keywords": [
     "model",

@@ -50,6 +50,10 @@ pnpm --filter model-reaction-demo run dev     # demo dev server
 
 Library contribution rules and required checks: [AGENTS.md](packages/model-reaction/AGENTS.md).
 
+AI consumer-integration evaluation tasks and acceptance criteria:
+[English](evaluations/ai-integration/README.md) |
+[中文](evaluations/ai-integration/README_CN.md).
+
 ## License
 
 ISC — see [packages/model-reaction/LICENSE](packages/model-reaction/LICENSE).

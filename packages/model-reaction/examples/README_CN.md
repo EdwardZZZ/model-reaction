@@ -15,6 +15,7 @@
 | [复杂表单](complex-form.ts) | 跨字段规则与错误 | `pnpm --filter model-reaction run example:complex` |
 | [脏数据](dirty-data-conditional.ts) | 被拒输入与条件规则 | `pnpm --filter model-reaction run example:dirty` |
 | [深层依赖链](multi-record-deep-deps.ts) | 100 条记录、五层计算 | `pnpm --filter model-reaction run example:multi-record` |
+| [Schema 组合](schema-composition/runner.ts) | 精确枚举、独立默认值、顶层替换；[Recipe](SCHEMA_COMPOSITION_CN.md) | `pnpm --filter model-reaction run example:schema` |
 | [React 绑定](react-bindings.tsx) | 字段、selector、draft 与所有权 | `pnpm --filter model-reaction run example:react` |
 
 React 命令执行独立的 [SSR runner](react-bindings-runner.tsx)；导入组件文件不会运行它。

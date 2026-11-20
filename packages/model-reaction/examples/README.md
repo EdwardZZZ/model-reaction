@@ -15,6 +15,7 @@ Run each command from the repository root.
 | [Complex form](complex-form.ts) | Cross-field rules and errors | `pnpm --filter model-reaction run example:complex` |
 | [Dirty data](dirty-data-conditional.ts) | Rejected input and conditional rules | `pnpm --filter model-reaction run example:dirty` |
 | [Deep dependency chain](multi-record-deep-deps.ts) | Five layers across 100 records | `pnpm --filter model-reaction run example:multi-record` |
+| [Schema composition](schema-composition/runner.ts) | Exact enums, independent defaults, replacements; [recipe](SCHEMA_COMPOSITION.md) | `pnpm --filter model-reaction run example:schema` |
 | [React bindings](react-bindings.tsx) | Fields, selectors, draft, and ownership | `pnpm --filter model-reaction run example:react` |
 
 The React command executes [its SSR runner](react-bindings-runner.tsx).

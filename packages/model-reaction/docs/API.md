@@ -67,6 +67,12 @@ const model = createModel({ label: textField() });
 // model.data.label: string | null
 ```
 
+For fragments containing enums, objects and arrays, `satisfies` does not
+automatically narrow enum defaults; a default widened to string also widens the
+read type. The compiled [schema composition recipe](../examples/SCHEMA_COMPOSITION.md)
+preserves enum literals, mutable array elements and fields without defaults,
+with explicit runtime validation.
+
 An explicit `createModel<T>(schema)` returns `ModelReturn<T>`. `Model<T>` checks
 that the field keys exist and definitions are valid; it does **not** relate
 each definition's tag, default, or transform to `T[K]`. The caller promises that

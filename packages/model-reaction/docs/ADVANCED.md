@@ -248,6 +248,11 @@ schema. Field names must be unique across fragments: object spread replaces an
 earlier definition silently. Separate models are useful for independently owned
 forms; cross-model coordination belongs in application code.
 
+For fully inferred types, use the runnable
+[schema composition recipe](../examples/SCHEMA_COMPOSITION.md): fragment factories
+create independent defaults, enum values/defaults retain literals, and domain
+update functions replace top-level fields.
+
 Extract reusable checks into named rules and put orchestration in domain
 functions. Keep `computed` synchronous and pure, declare every input in
 `reaction.fields`, and use separate fields for independent computed results.

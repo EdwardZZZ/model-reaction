@@ -80,6 +80,7 @@ Use `useDraftField` for text inputs and show
 The owner creates and disposes the model; components unsubscribe in cleanup.
 Do not use a route-independent singleton for independently owned editors.
 Complete recipes: [React bindings](docs/REACT.md) and [examples](examples/README.md).
+For inferred schema modules, start with the checked [schema composition recipe](examples/SCHEMA_COMPOSITION.md).
 
 ## 4. Source Boundaries
 
