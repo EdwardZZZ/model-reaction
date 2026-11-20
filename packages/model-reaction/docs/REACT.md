@@ -238,6 +238,14 @@ when updating the draft. If local validations are still in flight, outside
 updates are reconciled when those calls finish. Older calls cannot overwrite a
 newer edit or a new model/field session.
 
+Field bindings support numeric schema keys such as `useDraftField(model, 0)`;
+event filtering uses their string representation. Reentrant edits from a
+`field:change` listener preserve their own text too. `setDraft` updates local
+text and starts the model write immediately; its completion listener registers
+in a microtask after the current dispatch, before the new write resumes from
+validation. This avoids claiming the previous write's completion and keeps
+`validating` and immediate `model.settled()` calls tied to the started write.
+
 `setDraft` returns `void` and handles setter rejections and errors in their
 cleanup chain. Failed text remains visible; only the latest edit in the active
 session may publish `writeError`. New edits and model/field switches clear it.

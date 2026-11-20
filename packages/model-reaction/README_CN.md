@@ -92,6 +92,11 @@ console.log(ok, user.data); // true { name: 'John', age: 30 }
 `setField()` 或 `setFields()` 整体替换；原地修改不会被观察，也不会触发校验或
 reactions。
 
+推导读值同时包含默认值与 computed 结果类型。复用 Schema 片段时使用 `satisfies`；
+显式 `createModel<T>` 是调用方对值类型的承诺，见
+[数据类型推导](docs/API_CN.md#数据类型推导)。`data` 为所有已声明字段保留自有 key，
+未赋值时为 `undefined`。支持数字字段 key，事件中的字段名使用字符串。
+
 每字段只接受一个 `reaction`。字段内校验按规则顺序执行，首错即停。
 未知写入 key 先发送 `field:not-found` 再 reject，整批不开始处理。
 `setField` 和 `setFields` 的验证器读取经过 transform 的候选快照，包含字段自身的新值。

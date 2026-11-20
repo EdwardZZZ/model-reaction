@@ -2,7 +2,7 @@
 import * as React from 'react';
 import { useState } from 'react';
 import { act, render, renderHook } from '@testing-library/react';
-import { createModel } from '../index';
+import { createModel, ModelEvents } from '../index';
 import { ValidationRules } from '../validation';
 import { useDraftField, useModelFields } from '../react';
 import type { ModelReturn } from '../types';
@@ -12,6 +12,41 @@ import type { ModelReturn } from '../types';
 // ---------------------------------------------------------------------------
 
 describe('useDraftField', () => {
+    it.each(['price', 0] as const)(
+        'preserves reentrant numeric edits for field %s',
+        async (field) => {
+            const model = createModel({
+                price: { type: 'number', default: 0, transform: Number },
+                0: { type: 'number', default: 0, transform: Number },
+            });
+            const { result, unmount } = renderHook(
+                () => useDraftField(model, field),
+                { wrapper: React.StrictMode }
+            );
+            const unsubscribe = model.on(ModelEvents.FIELD_CHANGE, (event) => {
+                if (event.field === String(field) && event.value === 2) {
+                    result.current.setDraft('3.50');
+                }
+            });
+            try {
+                await act(async () => {
+                    result.current.setDraft('2.');
+                    await model.settled();
+                });
+                expect(model.getField(field)).toBe(3.5);
+                expect(result.current.committed).toBe(3.5);
+                expect(result.current.draft).toBe('3.50');
+                expect(result.current.meta.validating).toBe(false);
+                await act(async () => { await model.setField(field, 42); });
+                expect(result.current.draft).toBe('42');
+            } finally {
+                unsubscribe();
+                unmount();
+                model.dispose();
+            }
+        }
+    );
+
     interface Signup {
         username: string;
         priceCents: number;

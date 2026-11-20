@@ -4,9 +4,12 @@ import {
     ModelError,
     ModelEventMap,
     ModelEvents,
+    ModelFieldKey,
+    ModelFieldName,
     ModelOptions,
     ModelReturn,
     ValidationError,
+    ValidationErrors,
 } from '../types';
 import { validateField } from '../validation/validate-field';
 import { cloneDefault } from './clone-default';
@@ -37,9 +40,7 @@ export class ModelManager<
     /** Last value provided for a field whose validation failed. */
     private dirtyData: Partial<T> = Object.create(null);
     private dataSnapshot: Readonly<T> | null = null;
-    private errorsSnapshot:
-        | Readonly<Record<string, readonly ValidationError[]>>
-        | null = null;
+    private errorsSnapshot: ValidationErrors | null = null;
     private dirtyDataSnapshot: Readonly<Partial<T>> | null = null;
 
     private readonly schema: Model<T>;
@@ -65,7 +66,7 @@ export class ModelManager<
             this.schema,
             options,
             {
-                getValue: (field) => this.getField(field as keyof T),
+                getValue: (field) => this.getField(field as ModelFieldKey<T>),
                 setValue: (field, value, opts) =>
                     this.updateField(field, value, opts),
                 setError: (field, error) => this.recordError(field, error),
@@ -86,8 +87,9 @@ export class ModelManager<
     private initializeDefaults(): void {
         const seededInputs: string[] = [];
         Object.entries(this.schema).forEach(([field, schema]) => {
+            // Own undefined values keep prototype-named fields safe in snapshots.
+            this.modelData[field as keyof T] = cloneDefault(schema.default) as T[keyof T];
             if (schema.default !== undefined) {
-                (this.modelData as any)[field] = cloneDefault(schema.default);
                 if (schema.reaction === undefined) {
                     seededInputs.push(field);
                 }
@@ -129,7 +131,7 @@ export class ModelManager<
      * one field can commit even when a sibling fails validation.
      */
 
-    setField = async <K extends keyof T>(
+    setField = async <K extends ModelFieldKey<T>>(
         field: K,
         value: T[K]
     ): Promise<boolean> => {
@@ -254,14 +256,14 @@ export class ModelManager<
         return this.dataSnapshot;
     }
 
-    get validationErrors(): Readonly<Record<string, readonly ValidationError[]>> {
+    get validationErrors(): ValidationErrors {
         if (this.errorsSnapshot === null) {
             this.errorsSnapshot = Object.freeze({ ...this.errors });
         }
         return this.errorsSnapshot;
     }
 
-    getField = <K extends keyof T>(field: K): T[K] => {
+    getField = <K extends ModelFieldKey<T>>(field: K): T[K] => {
         return this.modelData[field];
     };
 
@@ -273,7 +275,7 @@ export class ModelManager<
     };
 
     clearDirtyData = (): void => {
-        const fields = Object.keys(this.dirtyData) as Array<keyof T & string>;
+        const fields = Object.keys(this.dirtyData) as ModelFieldName<T>[];
         this.dirtyData = Object.create(null);
         this.dirtyDataSnapshot = null;
         if (fields.length > 0) {
@@ -376,7 +378,7 @@ export class ModelManager<
                 this.dirtyDataSnapshot = null;
             }
             this.eventEmitter.emit(ModelEvents.FIELD_VALIDATION_COMPLETE, {
-                field: field as keyof T & string,
+                field: field as ModelFieldName<T>,
                 isValid,
                 dirty: Object.prototype.hasOwnProperty.call(this.dirtyData, field),
             });
@@ -420,10 +422,10 @@ export class ModelManager<
             this.modelData[fieldKey] = value;
             this.dataSnapshot = null;
             changedFields?.add(field);
-            this.eventEmitter.emit(ModelEvents.FIELD_CHANGE, {
+            this.eventEmitter.emit<typeof ModelEvents.FIELD_CHANGE>(ModelEvents.FIELD_CHANGE, {
                 field,
                 value,
-            });
+            } as ModelEventMap<T>[typeof ModelEvents.FIELD_CHANGE]);
         }
         if (!changedFields && (dataChanged || initializeReactions)) {
             this.reactionSystem.triggerReactionsForFields(

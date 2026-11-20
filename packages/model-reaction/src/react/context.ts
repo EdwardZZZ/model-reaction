@@ -5,7 +5,7 @@ import {
     type ReactElement,
     type ReactNode,
 } from 'react';
-import type { ModelReturn } from '../types';
+import type { ModelFieldKey, ModelReturn } from '../types';
 import {
     useModelFieldState,
     type FieldMeta,
@@ -64,7 +64,7 @@ export interface FieldRenderProps<V> {
 /** Props for `<Field>`. */
 export interface FieldProps<
     T extends Record<string, any>,
-    K extends keyof T,
+    K extends ModelFieldKey<T>,
 > {
     name: K;
     /** Optional override; defaults to the model from `<ModelProvider>`. */
@@ -92,7 +92,7 @@ export interface FieldProps<
  */
 export function Field<
     T extends Record<string, any>,
-    K extends keyof T,
+    K extends ModelFieldKey<T>,
 >(props: FieldProps<T, K>): ReactElement {
     const ctxModel = useContext(ModelContext) as ModelReturn<T> | null;
     const model = props.model ?? ctxModel;

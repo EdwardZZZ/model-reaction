@@ -1,5 +1,10 @@
 import assert from 'node:assert/strict';
+import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import ts from 'typescript';
 
 const require = createRequire(import.meta.url);
 const entries = [
@@ -121,4 +126,71 @@ await verifyActionArray(cjsRoot.createModel, 'CommonJS root');
 await verifyActionArray(esmDevtools.createModel, 'ESM DevTools');
 await verifyActionArray(cjsDevtools.createModel, 'CommonJS DevTools');
 
-console.log('Verified ESM and CommonJS package exports.');
+async function verifyDeclarations() {
+  const packageRoot = fileURLToPath(new URL('../', import.meta.url));
+  const temporary = await mkdtemp(path.join(tmpdir(), 'model-reaction-declarations-'));
+  try {
+    await mkdir(path.join(temporary, 'node_modules'));
+    await symlink(packageRoot, path.join(temporary, 'node_modules/model-reaction'), 'junction');
+    const contracts = (await readFile(
+      new URL('../src/__tests__/public-type-contracts.ts', import.meta.url), 'utf8',
+    )).replaceAll("'../index'", "'model-reaction'");
+    const entryContracts = `
+import { createModel as createDevtoolsModel } from 'model-reaction/devtools';
+import { formatValidationErrors } from 'model-reaction/validation';
+import { useDraftField, useModelField, useModelFields, useModelFieldState, Field } from 'model-reaction/react';
+import type { ModelFieldKey, ModelFieldName, ValidationErrors } from 'model-reaction';
+const devtools: typeof createModel = createDevtoolsModel;
+const root: typeof createDevtoolsModel = createModel;
+function verifyEntries() {
+  const model = createModel({ 0: { type: 'number', default: 1 } });
+  const key: ModelFieldKey<typeof model.data> = 0;
+  const name: ModelFieldName<typeof model.data> = '0';
+  const errors: ValidationErrors = model.validationErrors;
+  const field: number = useModelField(model, key);
+  const fields: { 0: number } = useModelFields(model, [key]);
+  const state: number = useModelFieldState(model, key)[0];
+  const draft: number = useDraftField(model, key).committed;
+  Field({ model, name: key, children: ({ value }) => { const v: number = value; return v; } });
+  formatValidationErrors(errors);
+  // @ts-expect-error React fields share the string/number key contract
+  useModelField(model, Symbol('field'));
+  void [devtools, root, name, field, fields, state, draft];
+}
+void verifyEntries;
+`;
+    for (const [label, module, moduleResolution, extension] of [
+      ['Bundler ESM', ts.ModuleKind.ESNext, ts.ModuleResolutionKind.Bundler, '.mts'],
+      ['NodeNext ESM', ts.ModuleKind.NodeNext, ts.ModuleResolutionKind.NodeNext, '.mts'],
+      ['NodeNext CommonJS', ts.ModuleKind.NodeNext, ts.ModuleResolutionKind.NodeNext, '.cts'],
+    ]) {
+      const source = path.join(temporary, `contracts${extension}`);
+      await writeFile(source, contracts + entryContracts);
+      const program = ts.createProgram([source], {
+        target: ts.ScriptTarget.ES2022,
+        module,
+        moduleResolution,
+        strict: true,
+        exactOptionalPropertyTypes: true,
+        noUncheckedIndexedAccess: true,
+        skipLibCheck: false,
+        types: [],
+        noEmit: true,
+      });
+      const diagnostics = ts.getPreEmitDiagnostics(program);
+      assert.equal(diagnostics.length, 0, `${label} declarations:\n${ts.formatDiagnosticsWithColorAndContext(
+        diagnostics,
+        {
+          getCanonicalFileName: (file) => file,
+          getCurrentDirectory: () => temporary,
+          getNewLine: () => '\n',
+        },
+      )}`);
+    }
+  } finally {
+    await rm(temporary, { recursive: true, force: true });
+  }
+}
+
+await verifyDeclarations();
+console.log('Verified runtime exports and exact declaration contracts in Bundler/NodeNext ESM/CommonJS.');

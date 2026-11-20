@@ -99,6 +99,12 @@ object, array, or mutable built-in field value such as `Date`, replace the whole
 value with `setField()` or `setFields()`: mutating it in place is not observed
 and does not run validation or reactions.
 
+Inferred reads include both default and computed result types. Use `satisfies`
+for reusable schema fragments; an explicit `createModel<T>` is the caller's
+value-type promise. See [data type inference](docs/API.md#data-type-inference).
+Every declared field is an own key of `data`, even before assignment
+(`undefined`). Numeric field keys are supported; event field names use strings.
+
 Each field accepts one `reaction`. Validation follows rule order and stops at
 the first error. Unknown write keys emit `field:not-found` and reject before
 the batch starts. `setField` and `setFields` validators read transformed

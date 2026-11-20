@@ -5,19 +5,19 @@ import {
     useSyncExternalStore,
 } from 'react';
 import { ModelEvents, ValidationError } from '../types';
-import type { ModelReturn } from '../types';
+import type { ModelFieldKey, ModelReturn } from '../types';
 
 /**
  * Subscribe a component to a single field. The component re-renders only
  * when that field's committed value changes.
  */
-export function useModelField<T extends Record<string, any>, K extends keyof T>(
+export function useModelField<T extends Record<string, any>, K extends ModelFieldKey<T>>(
     model: ModelReturn<T>,
     field: K
 ): T[K] {
     const subscribe = useCallback(
         (notify: () => void) => model.on(ModelEvents.FIELD_CHANGE, (event) => {
-            if (event.field === field) notify();
+            if (event.field === String(field)) notify();
         }),
         [model, field]
     );
@@ -67,7 +67,7 @@ export type FieldSetter<V> = (value: V) => Promise<boolean>;
  */
 export function useModelFieldState<
     T extends Record<string, any>,
-    K extends keyof T,
+    K extends ModelFieldKey<T>,
 >(
     model: ModelReturn<T>,
     field: K
@@ -77,7 +77,7 @@ export function useModelFieldState<
     const metaSubscribe = useCallback(
         (notify: () => void) => {
             const validationHandler = (e: { field?: string }): void => {
-                if (e.field === field) notify();
+                if (e.field === String(field)) notify();
             };
             const unsubscribeError = model.on(
                 ModelEvents.VALIDATION_ERROR,
@@ -94,7 +94,7 @@ export function useModelFieldState<
             const unsubscribeDirty = model.on(
                 ModelEvents.DIRTY_DATA_CLEARED,
                 (e) => {
-                    if (e.fields.includes(field as keyof T & string)) notify();
+                    if (e.fields.some((name) => name === String(field))) notify();
                 }
             );
             return () => {
@@ -115,7 +115,7 @@ export function useModelFieldState<
         return () => {
             const errorMap = model.validationErrors;
             const errors = Object.prototype.hasOwnProperty.call(errorMap, field)
-                ? errorMap[field as string]!
+                ? errorMap[String(field)]!
                 : EMPTY_ERRORS;
             const dirty = Object.prototype.hasOwnProperty.call(
                 model.getDirtyData(),

@@ -1,5 +1,5 @@
 /** Optional validation helpers, independent of the core model implementation. */
-import type { ValidationError } from '../types';
+import type { ValidationError, ValidationErrors } from '../types';
 
 export { ValidationRules, Rule } from './rules';
 
@@ -9,7 +9,7 @@ const defaultFormatter: ValidationErrorFormatter = (error) =>
     `${error.field}: ${error.message}`;
 
 export function formatValidationErrors(
-    errors: Readonly<Record<string, readonly ValidationError[]>>,
+    errors: ValidationErrors,
     formatter: ValidationErrorFormatter = defaultFormatter
 ): string {
     const allErrors = Object.values(errors).flat();

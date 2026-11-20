@@ -41,7 +41,15 @@ React 和 DevTools 也各自保持独立的发布入口。
 `devtools.ts` 的 hook 类型和辅助函数保持私有。测试通过全局 hook 捕获注册实例，
 不直接导入内部辅助函数。
 
-类型契约测试集中在 `__tests__/type-inference.test.ts`。
+`types.ts` 按 Schema/推导、错误/事件和实例 API 分区。字段标签共用一个值类型映射，
+推导读值还包含默认值与 computed 结果；适配层共用 `ValidationErrors` 和
+字符串/数字字段键类型。`Model<T>` 仍是调用方提供的数据类型承诺，详见
+[API_CN.md](API_CN.md#数据类型推导)。
+
+类型契约测试位于 `__tests__/type-inference.test.ts`，精确断言由
+`__tests__/public-type-contracts.ts` 提供。`verify:exports` 在临时目录中，
+通过 Bundler 与 NodeNext 的 ESM/CommonJS 消费方式，用同一组契约检查构建后的
+声明文件，结束后清理目录。
 `tsconfig.build.json` 排除整个测试目录，包括辅助文件；
 默认类型检查项目仍检查全部源码和测试。
 
@@ -78,8 +86,8 @@ setFields ┘     ├─ prepareFieldWrites：先解析整批 schema，再各执
 ## Reaction 调度
 
 宿主字段名是 reaction 在实例内的身份。构造时通过 `eachReactionEdge` 建立
-`Map<依赖字段, Set<宿主字段>>`；执行时从固定 Schema 读取宿主定义，不另存 job
-或 reaction 定义缓存。单次 pass 使用 `Map<宿主字段, 首次触发来源>`，保持
+`dependentsByField: Map<依赖字段, Set<宿主字段>>`；执行时从固定 Schema 读取宿主定义，不另存 job
+或 reaction 定义缓存。单次 pass 使用 `firstSourceByOwner: Map<宿主字段, 首次触发来源>`，保持
 变更字段遍历顺序与宿主首次出现顺序，并只将真实来源追加到 reaction stack。
 
 索引去重不改变 `reaction.fields` 声明；计算仍按原数组读取依赖，包括重复读取。
@@ -142,8 +150,13 @@ action 计数覆盖唯一待执行函数及已启动调用。reaction 不等待 
   批次先预检全部 key，再读取或转换输入；之后各字段独立验证和提交。
 - **安全字段字典**：字段只取 Schema 自有 key；存储与快照支持 `constructor`、
   `__proto__` 等字段名，不读取继承值、不触发原型 setter。
+  初始化时为全部已声明字段在无原型存储中建立自有属性，包括值为 `undefined`
+  的字段。展开为普通浅冻结数据/候选快照时保留这些 key；
+  只有默认值不为 `undefined` 的非派生字段才启动初始化 reactions。
 - **UI 边界**：编辑文本与写入异常由 draft 绑定负责，核心 dirty data 保存失败的
   模型值。React 与 DevTools 保持可选入口，不把 UI 策略加入核心状态。
+  `DraftSession` 留在 `react/draft-field.ts`；完成事件监听在微任务中注册，
+  早于本次写入的异步校验恢复，避免重入编辑认领前一次同步派发的完成事件。
 
 ## 依赖规则
 

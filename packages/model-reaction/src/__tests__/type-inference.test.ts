@@ -2,6 +2,7 @@ import { createModel, FieldSchema, Model, Reaction, ReactionAction, SKIP_REACTIO
 import { createModel as createDevtoolsModel } from '../devtools';
 import { ModelManager } from '../core/model-manager';
 import { ValidationRules } from '../validation';
+import { verifyPublicTypeContracts } from './public-type-contracts';
 
 // Both directions preserve the complete overload set, including generics.
 const devtoolsSignature: typeof createModel = createDevtoolsModel;
@@ -125,6 +126,10 @@ describe('createModel type inference', () => {
         ['root', createModel],
         ['DevTools', createDevtoolsModel],
     ] as const)('%s entry', (_, factory) => {
+        test('preserves exact public types without unchecked any', () => {
+            verifyPublicTypeContracts(factory);
+        });
+
         test('infers action context values from the target field type', async () => {
             const contexts: Array<{ field: string; value: number | string }> = [];
             const model = factory({

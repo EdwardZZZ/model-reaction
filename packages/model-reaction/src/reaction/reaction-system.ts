@@ -40,7 +40,7 @@ function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
 }
 
 export class ReactionSystem {
-    private reactionDeps = new Map<string, Set<string>>();
+    private dependentsByField = new Map<string, Set<string>>();
     private initializingFields = new Set<string>();
     private reactionTimeouts = new Map<string, ScheduledReaction>();
     private schema: Model;
@@ -71,10 +71,10 @@ export class ReactionSystem {
     private collectReactions(): void {
         // Shared dependency parsing with DevTools; see docs/ARCHITECTURE.md.
         eachReactionEdge(this.schema, (field, depField) => {
-            let dependents = this.reactionDeps.get(depField);
+            let dependents = this.dependentsByField.get(depField);
             if (!dependents) {
                 dependents = new Set<string>();
-                this.reactionDeps.set(depField, dependents);
+                this.dependentsByField.set(depField, dependents);
             }
             dependents.add(field);
         });
@@ -87,17 +87,17 @@ export class ReactionSystem {
     ): void {
         if (this.disposed) return;
         const debounceTime = this.options.debounceReactions ?? 0;
-        const fieldsToTrigger = new Map<string, string>();
+        const firstSourceByOwner = new Map<string, string>();
 
         for (const changedField of changedFields) {
-            for (const field of this.reactionDeps.get(changedField) ?? []) {
-                if (!fieldsToTrigger.has(field)) {
-                    fieldsToTrigger.set(field, changedField);
+            for (const field of this.dependentsByField.get(changedField) ?? []) {
+                if (!firstSourceByOwner.has(field)) {
+                    firstSourceByOwner.set(field, changedField);
                 }
             }
         }
 
-        fieldsToTrigger.forEach((changedField, field) => {
+        firstSourceByOwner.forEach((changedField, field) => {
             if (this.disposed) return;
             if (reactionStack.includes(field)) {
                 this.callbacks.reportError(ModelEvents.REACTION_ERROR, {
@@ -219,7 +219,7 @@ export class ReactionSystem {
             endTask();
         });
         this.reactionTimeouts.clear();
-        this.reactionDeps.clear();
+        this.dependentsByField.clear();
         this.initializingFields.clear();
         // The shared PendingTasks is owned and disposed by ModelManager.
     }

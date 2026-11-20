@@ -28,7 +28,7 @@ The factory function that creates a model instance.
 
 ```typescript
 createModel<T>(schema: Model<T>, options?: ModelOptions): ModelReturn<T>;
-createModel<S extends Record<string, FieldSchema>>(
+createModel<S extends Record<string, FieldSchema> & Record<symbol, never>>(
   schema: S,
   options?: ModelOptions
 ): ModelReturn<InferModelData<S>>;
@@ -39,6 +39,41 @@ representing one model field. Large schemas may be split into focused fragments
 and merged with object spread before being passed in. Object and array field
 values may still contain nested data, but the model tracks changes only at the
 top level.
+
+Fields are own enumerable string keys; numeric literal keys are supported and
+use JavaScript's string representation at runtime. For `{ 0: ... }`, call
+`setField(0, value)` and use `'0'` in reaction dependencies and event filters.
+Symbol fields are unsupported and rejected by the schema types.
+
+### Data type inference
+
+Without an explicit type argument, each field's read type combines its type
+tag, its default, and its declared `computed` results. Array/object defaults
+retain their element/property types; a different computed shape adds a union
+member. `SKIP_REACTION` is excluded. An absent default adds `undefined`, even
+for derived fields, because reads can occur before initialization settles.
+Schema unions distribute through these rules. `data`, `getField`, setters,
+selectors, and field events all use the resulting data type.
+
+An optional default retains its declared type rather than being treated as
+absent. Annotating a fragment as `FieldSchema<'string'>` widens its default to
+`unknown`, so the inferred read type becomes `unknown`. Prefer `satisfies` to
+check the fragment while preserving its actual default:
+
+```ts
+const textField = () =>
+  ({ type: 'string', default: null } satisfies FieldSchema<'string'>);
+const model = createModel({ label: textField() });
+// model.data.label: string | null
+```
+
+An explicit `createModel<T>(schema)` returns `ModelReturn<T>`. `Model<T>` checks
+that the field keys exist and definitions are valid; it does **not** relate
+each definition's tag, default, or transform to `T[K]`. The caller promises that
+defaults, transformed inputs, and computed results fit `T`, including
+`undefined` for fields that may be read before receiving a value. Prefer schema
+inference when that promise cannot be maintained. Untyped transforms and `any`
+computed results remain unchecked boundaries; this is not runtime validation.
 
 ### Schema lifetime
 
@@ -119,6 +154,12 @@ create dependencies or trigger recalculation.
 | `getField(field)` | Read the current value of one field. |
 | `get data` | Read a stable, shallow-frozen copy of the field map. Fields without defaults may be `undefined`. |
 | `get validationErrors` | Read frozen validation errors grouped by field. |
+
+`data` and `validationErrors` are getter-only properties. Every declared field
+is an enumerable own property of `data`, initially `undefined` when no default
+is supplied. This includes `constructor`, `__proto__`, and `toString`; direct-write
+candidate snapshots preserve the same field map. Snapshots keep the ordinary
+object prototype. Seeding `undefined` does not start initial reactions.
 
 Error snapshots preserve earlier results. Each field's frozen error array keeps
 its reference until that field's errors are cleared or replaced; updates to
@@ -232,10 +273,9 @@ const label: Reaction = {
 ```
 
 A function declared outside the schema that returns `SKIP_REACTION` infers the
-return type `symbol`; annotate it as `(): typeof SKIP_REACTION`. Schema
-fragment factories should return a single variant such as
-`FieldSchema<'string'>`, so a spread fragment keeps its tag when a reaction is
-added.
+return type `symbol`; annotate it as `(): typeof SKIP_REACTION`. Check schema
+fragments with `satisfies FieldSchema<'string'>` to preserve the tag and default
+type when spreading them and adding reactions; see [Data type inference](#data-type-inference).
 
 Repeated triggers can overlap validations of the same reaction. Validation
 request IDs decide which write can commit. Only a successful computation queues
@@ -416,6 +456,11 @@ comparison logic.
 
 Subscribe via `model.on(eventName, handler)`.
 
+Field names in events are strings, including numeric schema keys.
+`field:change` is a discriminated union: checking `event.field` narrows
+`event.value` to that field's data type. Keep the pair together when forwarding
+events so the relationship is preserved.
+
 | Event | Triggered when |
 | --- | --- |
 | `field:change` | A field value changes. |
@@ -523,7 +568,14 @@ const custom = formatValidationErrors(
 
 Publicly exported types include `Model`, `ModelOptions`, `ModelReturn`,
 `Validator`, `Reaction`, `ReactionAction`, `FieldSchema`, `ValidationError`, `ModelError`,
-`ModelErrorCode`, `ModelEventMap`, `InferFieldType`, and `InferModelData`.
+`ValidationErrors`, `ModelErrorCode`, `ModelEventMap`, `ModelFieldKey`,
+`ModelFieldName`, `InferFieldType`, and `InferModelData`.
+
+`ModelFieldKey<T>` extracts string/number keys; `ModelFieldName<T>` is their
+string representation. `ValidationErrors` is
+`Readonly<Record<string, readonly ValidationError[]>>`, shared by model error
+snapshots and the error formatter. `InferFieldType` combines tag-derived values
+and computed results; `InferModelData` also accounts for initial defaults.
 
 The core entry exports `createModel`, `ModelEvents`, and `SKIP_REACTION`.
 `model-reaction/validation` exports `ValidationRules`, `Rule`,
@@ -535,6 +587,17 @@ For full type definitions, see [`src/types.ts`](../src/types.ts).
 
 These changes are breaking and require updating consumers:
 
+- Inferred object/array reads now include computed result shapes. Narrow the
+  union before using shape-specific members. Fragments annotated with a broad
+  `FieldSchema` may infer `unknown`; use `satisfies` to preserve their default
+  types. Missing defaults still require handling `undefined`.
+- Model/React field APIs accept string and numeric keys; symbols are rejected.
+  Compare event fields with `String(key)` and preserve correlated field/value
+  pairs when constructing `field:change` payloads.
+- `data` and `validationErrors` properties are now `readonly`. Stop assigning
+  to these getters; update values with setters. `Object.keys(model.data)` now
+  includes every declared field, including unset fields. Filter values explicitly
+  if an application needs only assigned fields; JSON still omits `undefined`.
 - Finish schema composition before calling `createModel`. Runtime changes to
   fields, rules, dependency lists, or action arrays are unsupported; create a
   new schema and instance when configuration changes. Shared nested references

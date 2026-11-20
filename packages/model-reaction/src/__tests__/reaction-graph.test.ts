@@ -21,7 +21,7 @@ function edgesFromPrimitive(schema: Model): string[] {
 
 /**
  * Edges as the *runtime* actually indexes them: read `ReactionSystem`'s private
- * `reactionDeps` map (depField -> Set<field>) and flatten it. This is the map
+ * `dependentsByField` map (depField -> Set<field>) and flatten it. This is the map
  * that drives real reaction scheduling, so matching it proves the DevTools
  * graph reflects runtime behaviour.
  */
@@ -37,12 +37,12 @@ function edgesFromRuntime(schema: Model): string[] {
         },
         new PendingTasks()
     );
-    const reactionDeps = (
-        system as unknown as { reactionDeps: Map<string, Set<string>> }
-    ).reactionDeps;
+    const dependentsByField = (
+        system as unknown as { dependentsByField: Map<string, Set<string>> }
+    ).dependentsByField;
 
     const edges: Array<{ from: string; to: string }> = [];
-    reactionDeps.forEach((dependents, from) => {
+    dependentsByField.forEach((dependents, from) => {
         dependents.forEach((to) => edges.push({ from, to }));
     });
     system.dispose();

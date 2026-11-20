@@ -28,7 +28,7 @@
 
 ```typescript
 createModel<T>(schema: Model<T>, options?: ModelOptions): ModelReturn<T>;
-createModel<S extends Record<string, FieldSchema>>(
+createModel<S extends Record<string, FieldSchema> & Record<symbol, never>>(
   schema: S,
   options?: ModelOptions
 ): ModelReturn<InferModelData<S>>;
@@ -37,6 +37,35 @@ createModel<S extends Record<string, FieldSchema>>(
 第一个参数是单个扁平 Schema 对象，每个顶层属性对应一个模型字段。大型 Schema
 可以先按职责拆成多个片段，再通过对象展开合并后传入。对象、数组等字段值本身仍可
 包含嵌套数据，但模型只在顶层跟踪字段变化。
+
+字段使用 Schema 自有、可枚举的字符串 key，也支持数字字面量 key，运行时采用
+JavaScript 的字符串表示。例如 `{ 0: ... }` 使用 `setField(0, value)`，reaction
+依赖和事件过滤则使用 `'0'`。不支持 symbol 字段，Schema 类型会拒绝它们。
+
+### 数据类型推导
+
+未显式传入类型参数时，每个字段的读值类型由类型标签、默认值及声明的 `computed`
+返回值共同决定。数组/对象默认值保留元素或属性类型，computed 返回不同形状时加入
+联合类型，排除 `SKIP_REACTION`。缺少 default 时加入 `undefined`，派生字段也一样，
+因为初始化落定前仍可读取。Schema 联合类型会按分支分配这些规则。
+`data`、`getField`、setter、selector 和字段事件共用推导出的数据类型。
+
+可选 default 保留其声明类型，不会被当作缺失。把片段返回值注解成
+`FieldSchema<'string'>` 会将 default 宽化为 `unknown`，因此字段读值也变成
+`unknown`。推荐使用 `satisfies` 检查片段，同时保留实际默认值类型：
+
+```ts
+const textField = () =>
+  ({ type: 'string', default: null } satisfies FieldSchema<'string'>);
+const model = createModel({ label: textField() });
+// model.data.label: string | null
+```
+
+显式 `createModel<T>(schema)` 返回 `ModelReturn<T>`。`Model<T>` 检查字段 key 完整、
+定义合法，但**不会**把每项的标签、默认值或 transform 与 `T[K]` 关联起来检查。
+调用方承诺默认值、转换后的输入与计算结果符合 T；如果字段可能在赋值前读取，
+还需在 T 中包含 `undefined`。无法维持此承诺时优先使用 Schema 推导。
+无类型约束的 transform 和返回 `any` 的 computed 仍属于宽松边界，这不是运行时校验。
 
 ### Schema 固定性
 
@@ -101,6 +130,11 @@ reaction 索引和 DevTools 元数据在创建时建立，而部分写入配置�
 | `getField(field)` | 读取某个字段的当前值 |
 | `get data` | 读取字段映射的稳定浅冻结副本；没有默认值的字段可能为 `undefined` |
 | `get validationErrors` | 读取按字段分组的只读验证错误 |
+
+`data` 和 `validationErrors` 属性本身只有 getter。`data` 为每个已声明字段保留可枚举
+自有属性，没有 default 时初值为 `undefined`，包括 `constructor`、`__proto__` 和
+`toString`。直接写入的候选快照保留同一字段映射，快照仍使用普通对象原型。
+预置 `undefined` 不会启动初始化 reactions。
 
 错误快照会保留读取时的结果。每个字段的冻结错误数组在该字段的错误被清空或替换前
 保持引用稳定；其他字段更新不会重新创建它。
@@ -198,9 +232,9 @@ const label: Reaction = {
 ```
 
 在 schema 外单独声明、返回 `SKIP_REACTION` 的函数，返回类型会被推断为
-`symbol`，需要标注为 `(): typeof SKIP_REACTION`。Schema 片段工厂应返回
-`FieldSchema<'string'>` 这类单一分支，这样展开片段再添加 reaction 时，
-字段仍保留原来的 `type`。
+`symbol`，需要标注为 `(): typeof SKIP_REACTION`。Schema 片段使用
+`satisfies FieldSchema<'string'>` 检查，以便展开片段、添加 reaction 时保留标签和
+默认值类型，详见 [数据类型推导](#数据类型推导)。
 
 重复触发时，同一 reaction 的多次校验可能重叠。校验请求 ID 决定写入新鲜度。
 只有成功计算才登记 action；较晚跳过或失败不会移除已经登记的函数。
@@ -356,6 +390,10 @@ off();
 
 通过 `model.on(eventName, handler)` 订阅。
 
+事件中的字段名始终是字符串，包括数字 Schema key。`field:change` 是判别联合，
+判断 `event.field` 后，`event.value` 会收窄为该字段的数据类型。转发事件时保持
+field/value 成对，避免丢失两者的关联。
+
 | 事件 | 触发时机 |
 | --- | --- |
 | `field:change` | 字段值变化时 |
@@ -459,7 +497,13 @@ const custom = formatValidationErrors(
 
 当前公开导出的类型包括 `Model`、`ModelOptions`、`ModelReturn`、
 `Validator`、`Reaction`、`ReactionAction`、`FieldSchema`、`ValidationError`、`ModelError`、
-`ModelErrorCode`、`ModelEventMap`、`InferFieldType` 和 `InferModelData`。
+`ValidationErrors`、`ModelErrorCode`、`ModelEventMap`、`ModelFieldKey`、
+`ModelFieldName`、`InferFieldType` 和 `InferModelData`。
+
+`ModelFieldKey<T>` 提取字符串/数字 key，`ModelFieldName<T>` 表示它们的字符串形式。
+`ValidationErrors` 为 `Readonly<Record<string, readonly ValidationError[]>>`，
+由模型错误快照与错误格式化函数共用。`InferFieldType` 合并标签推导值与 computed
+返回值；`InferModelData` 还会计入初始默认值。
 
 核心入口导出 `createModel`、`ModelEvents` 和 `SKIP_REACTION`。
 `model-reaction/validation` 导出 `ValidationRules`、`Rule`、
@@ -471,6 +515,14 @@ const custom = formatValidationErrors(
 
 这组变更不向后兼容，升级时需要修改调用处：
 
+- 推导出的对象/数组读值现在包含 computed 返回形状，访问特定形状的成员前先收窄
+  联合类型。注解为宽泛 `FieldSchema` 的片段可能推导成 `unknown`，改用
+  `satisfies` 保留默认值类型；缺少默认值时仍需处理 `undefined`。
+- 模型与 React 字段 API 接受字符串和数字 key，拒绝 symbol。事件字段比较使用
+  `String(key)`；手工构造 `field:change` payload 时保持字段与值的类型关联。
+- `data` 与 `validationErrors` 属性现在声明为 `readonly`，不要给 getter 赋值，
+  使用 setter 更新字段。`Object.keys(model.data)` 现在包含全部已声明字段，包括
+  未赋值字段；若业务只需要已赋值项，应显式过滤值。JSON 仍会省略 `undefined`。
 - 在调用 `createModel` 前完成 Schema 组装。运行时修改字段、规则、依赖列表或
   action 数组属于不支持的用法；配置变化时创建新的 Schema 和实例，并保持共享
   嵌套引用不变。详见 [Schema 固定性](#schema-固定性)。

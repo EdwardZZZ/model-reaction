@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ModelEvents } from '../types';
-import type { ModelReturn } from '../types';
+import type { ModelFieldKey, ModelReturn } from '../types';
 import { useModelFieldState, type FieldMeta } from './field-state';
 
 /**
@@ -15,7 +15,7 @@ function toDisplay<V>(value: V, format: (value: V) => string): string {
     return format(value);
 }
 
-function seedDraft<T extends Record<string, any>, K extends keyof T>(
+function seedDraft<T extends Record<string, any>, K extends ModelFieldKey<T>>(
     model: ModelReturn<T>,
     field: K,
     committed: T[K],
@@ -69,6 +69,14 @@ export interface UseDraftFieldOptions<V> {
     format?: (value: V) => string;
 }
 
+interface DraftSession<V> {
+    committed: V;
+    pending: Set<() => void>;
+    edit: number;
+    acceptedEdit: number;
+    active: boolean;
+}
+
 /**
  * Bind a model field to a controlled text input, owning the edit-lifecycle
  * UI state (draft text, `touched`, error gating) so the rendering component
@@ -89,7 +97,7 @@ export interface UseDraftFieldOptions<V> {
  */
 export function useDraftField<
     T extends Record<string, any>,
-    K extends keyof T,
+    K extends ModelFieldKey<T>,
 >(
     model: ModelReturn<T>,
     field: K,
@@ -111,7 +119,7 @@ export function useDraftField<
     const [draft, setDraft] = useState(() => seedDraft(model, field, committed, display));
     const [touched, setTouched] = useState(false);
     const [writeError, setWriteError] = useState<Error | null>(null);
-    const session = useMemo(() => ({
+    const session = useMemo<DraftSession<T[K]>>(() => ({
         committed: model.getField(field),
         pending: new Set<() => void>(),
         edit: 0,
@@ -154,12 +162,18 @@ export function useDraftField<
             const editId = ++session.edit;
             let ownCommitted = session.committed;
             let observed = false;
-            const unsubscribe = model.on(ModelEvents.FIELD_VALIDATION_COMPLETE, (event) => {
-                if (event.field !== field || observed) return;
-                observed = true;
-                ownCommitted = model.getField(field);
+            let unsubscribe = () => {};
+            const stopObserving = () => unsubscribe();
+            session.pending.add(stopObserving);
+            // Register before this write resumes, after any reentrant dispatch; see docs/REACT.md.
+            queueMicrotask(() => {
+                if (!session.active || previous.current !== session) return;
+                unsubscribe = model.on(ModelEvents.FIELD_VALIDATION_COMPLETE, (event) => {
+                    if (event.field !== String(field) || observed) return;
+                    observed = true;
+                    ownCommitted = model.getField(field);
+                });
             });
-            session.pending.add(unsubscribe);
             // Draft is always a string; non-string fields rely on schema `transform`.
             void setValue(next as unknown as T[K]).then((accepted) => {
                 if (accepted && editId >= session.acceptedEdit) {
@@ -167,8 +181,8 @@ export function useDraftField<
                     session.committed = ownCommitted;
                 }
             }).finally(() => {
-                session.pending.delete(unsubscribe);
-                unsubscribe();
+                session.pending.delete(stopObserving);
+                stopObserving();
                 if (!session.active || previous.current !== session || session.pending.size > 0) return;
                 const current = model.getField(field);
                 if (!Object.is(session.committed, current)) {

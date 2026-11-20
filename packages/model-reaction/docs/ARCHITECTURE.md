@@ -42,7 +42,15 @@ formatter. React and DevTools remain separate package entry points.
 `devtools.ts` keeps its hook types and helpers private. Tests observe registered
 instances through a capturing global hook instead of importing internal helpers.
 
-Type contract tests live together in `__tests__/type-inference.test.ts`.
+`types.ts` groups schema/inference, errors/events, and instance APIs. Field tag
+values share one map; inferred reads also include defaults and computed results.
+`ValidationErrors` and string/number field-key types are shared across adapters.
+`Model<T>` remains a caller-supplied value contract; see [API.md](API.md#data-type-inference).
+
+Type contract tests live in `__tests__/type-inference.test.ts`, with exact
+assertions in `__tests__/public-type-contracts.ts`. `verify:exports` compiles
+that same contract against built declarations through Bundler and NodeNext
+ESM/CommonJS consumers in a temporary directory, then removes the directory.
 `tsconfig.build.json` excludes the whole test directory, including helpers;
 the default typecheck project still checks all source and tests.
 
@@ -85,9 +93,9 @@ setFields┘    ├─ prepareFieldWrites: resolve the whole batch, then transfo
 
 The owning field name identifies a reaction within its model instance.
 Construction uses `eachReactionEdge` to build
-`Map<dependency field, Set<owning field>>`. Execution reads the owner's
+`dependentsByField: Map<dependency field, Set<owning field>>`. Execution reads the owner's
 definition from fixed schema without a job or definition cache. A trigger pass
-uses `Map<owner, first triggering source>`, preserving changed-field traversal
+uses `firstSourceByOwner: Map<owner, first triggering source>`, preserving changed-field traversal
 and first owner appearance order and appending only the actual source to the
 reaction stack.
 
@@ -170,10 +178,16 @@ side-effect writeback cycles.
   read or transformed; fields then validate and commit independently.
 - **Safe field dictionaries:** only own schema keys count as fields. Storage
   and snapshots must support names such as `constructor` and `__proto__`
-  without inherited reads or prototype setters.
+  without inherited reads or prototype setters. Initialization seeds every
+  declared field into null-prototype storage, including own `undefined` values.
+  Spreading it into ordinary frozen data/candidate snapshots retains those keys;
+  only non-derived defaults other than `undefined` start initial reactions.
 - **UI boundaries:** local editing text and write exceptions belong in draft
   bindings; core dirty data contains failed model values. React and DevTools
   remain optional entry points, with no UI policy added to core state.
+  `DraftSession` stays in `react/draft-field.ts`; its completion listener is
+  registered in a microtask before the write's async validation resumes, so
+  reentrant edits do not claim an earlier synchronous completion dispatch.
 
 ## Dependency rules
 

@@ -6,7 +6,7 @@ import {
     useSyncExternalStore,
 } from 'react';
 import { ModelEvents } from '../types';
-import type { ModelReturn } from '../types';
+import type { ModelFieldKey, ModelReturn } from '../types';
 
 /**
  * Shallow equality for plain objects / arrays. Useful as the `isEqual`
@@ -150,7 +150,7 @@ export function useModelComputed<T extends Record<string, any>, R>(
  */
 export function useModelFields<
     T extends Record<string, any>,
-    K extends keyof T,
+    K extends ModelFieldKey<T>,
 >(model: ModelReturn<T>, fields: readonly K[]): Pick<T, K> {
     // JSON encoding handles arbitrary string field names without delimiter
     // collisions and keeps inline field arrays stable when their contents match.

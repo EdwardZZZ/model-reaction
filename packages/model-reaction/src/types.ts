@@ -1,14 +1,4 @@
-/** Public type contract for the core package entry. */
-export const ModelEvents = {
-    VALIDATION_ERROR: 'validation:error',
-    REACTION_ERROR: 'reaction:error',
-    DEPENDENCY_ERROR: 'dependency:error',
-    FIELD_NOT_FOUND: 'field:not-found',
-    FIELD_CHANGE: 'field:change',
-    VALIDATION_COMPLETE: 'validation:complete',
-    FIELD_VALIDATION_COMPLETE: 'field:validation-complete',
-    DIRTY_DATA_CLEARED: 'dirty-data:cleared',
-} as const;
+// Schema and value inference
 
 /**
  * Return from `reaction.computed` to skip the current reaction without
@@ -24,46 +14,6 @@ export interface Validator {
     validate: (value: any, data?: Record<string, any>) => boolean | Promise<boolean>;
     /** Skip this validator when the predicate returns false. */
     condition?: (data: Record<string, any>) => boolean;
-}
-
-export interface ValidationError {
-    field: string;
-    message: string;
-    rule?: string;
-    /** Application-defined localization or classification key. */
-    code?: string;
-}
-
-export type ModelErrorCode =
-    | 'reaction_error'
-    | 'dependency_error'
-    | 'circular_dependency'
-    | 'field_not_found';
-
-export interface ModelError {
-    code: ModelErrorCode;
-    field?: string;
-    message: string;
-    originalError?: Error;
-}
-
-export interface ModelEventMap<T = Record<string, any>> {
-    [ModelEvents.VALIDATION_ERROR]: ValidationError;
-    [ModelEvents.REACTION_ERROR]: ModelError;
-    [ModelEvents.DEPENDENCY_ERROR]: ModelError;
-    [ModelEvents.FIELD_NOT_FOUND]: ModelError;
-    [ModelEvents.FIELD_CHANGE]: {
-        field: keyof T & string;
-        value: T[keyof T];
-    };
-    /** Final validation result after tracked work settles; see docs/API.md. */
-    [ModelEvents.VALIDATION_COMPLETE]: { isValid: boolean };
-    [ModelEvents.FIELD_VALIDATION_COMPLETE]: {
-        field: keyof T & string;
-        isValid: boolean;
-        dirty: boolean;
-    };
-    [ModelEvents.DIRTY_DATA_CLEARED]: { fields: Array<keyof T & string> };
 }
 
 /** Return tracked work; never await this model's settled/validateAll. See docs/API.md. */
@@ -95,7 +45,7 @@ export interface Reaction<T = any> {
  * members live in `values`, which this per-tag lookup cannot see, so enum
  * results are not checked.
  */
-interface ComputedValueMap {
+interface FieldValueMap {
     string: string;
     number: number;
     boolean: boolean;
@@ -105,7 +55,7 @@ interface ComputedValueMap {
     enum: unknown;
 }
 
-type FieldType = keyof ComputedValueMap;
+type FieldType = keyof FieldValueMap;
 
 interface TypedFieldSchema<K extends FieldType> {
     /** Type metadata used for inference and tooling; not runtime validation. */
@@ -116,28 +66,30 @@ interface TypedFieldSchema<K extends FieldType> {
     /** Literal set used to infer enum values; validators enforce membership. */
     values?: readonly unknown[];
     /** One computation per field; side effects remain an action array. */
-    reaction?: Reaction<ComputedValueMap[K]>;
+    reaction?: Reaction<FieldValueMap[K]>;
     /** Transform input before validation. */
     transform?: (value: any) => any;
 }
 
 /**
  * Field definition, discriminated by `type`: `reaction.computed` must return
- * the matching {@link ComputedValueMap} value or {@link SKIP_REACTION}.
+ * the matching {@link FieldValueMap} value or {@link SKIP_REACTION}.
  * `FieldSchema<'number'>` selects a single variant.
  */
 export type FieldSchema<K extends FieldType = FieldType> = {
     [P in K]: TypedFieldSchema<P>;
 }[K];
 
+/** Supported API keys; events use their string representation. */
+export type ModelFieldKey<T> = keyof T & (string | number);
+export type ModelFieldName<T> = `${ModelFieldKey<T>}`;
+
+/** Explicit T is the caller's value contract; Model checks keys and type tags only. */
 export type Model<T = Record<string, any>> = {
     [K in keyof T]-?: FieldSchema;
-};
+} & Record<symbol, never>;
 
-/**
- * Map a `FieldSchema['type']` literal to its TypeScript value type.
- * Used by `InferModelData` to derive the data shape from a schema.
- */
+/** Empty defaults keep their existing open array/object inference. */
 type InferArrayItem<S extends FieldSchema> = S extends {
     default: readonly (infer Item)[];
 }
@@ -154,28 +106,93 @@ type InferObjectShape<S extends FieldSchema> = S extends {
         : Value
     : Record<string, unknown>;
 
-export type InferFieldType<S extends FieldSchema> =
-    S['type'] extends 'string' ? string :
-    S['type'] extends 'number' ? number :
-    S['type'] extends 'boolean' ? boolean :
-    S['type'] extends 'date' ? Date :
+type InferTaggedValue<S extends FieldSchema> =
     S['type'] extends 'array' ? InferArrayItem<S>[] :
     S['type'] extends 'object' ? InferObjectShape<S> :
     S['type'] extends 'enum' ?
         S extends { values: readonly (infer Value)[] }
             ? Value
             : unknown :
-    unknown;
+    FieldValueMap[S['type']];
+
+type InferComputedValue<R> = R extends Reaction
+    ? Exclude<ReturnType<R['computed']>, typeof SKIP_REACTION>
+    : never;
+
+/** Tag-derived values plus all declared computed results, excluding skipped writes. */
+export type InferFieldType<S extends FieldSchema> = S extends FieldSchema
+    ? InferTaggedValue<S> |
+        ('reaction' extends keyof S ? InferComputedValue<S['reaction']> : never)
+    : never;
+
+type InferDefault<S extends FieldSchema> = S extends FieldSchema
+    ? 'default' extends keyof S ? S['default'] : undefined
+    : never;
 
 /**
  * Derive the model data shape from a schema literal. Fields without a default
- * include `undefined`; array/object defaults and enum `values` retain useful
- * literal-derived value types.
+ * include `undefined`; widened optional defaults retain their declared type.
+ * Array/object defaults, computed results and enum values retain their shapes.
  */
 export type InferModelData<S extends Record<string, FieldSchema>> = {
-    [K in keyof S]: InferFieldType<S[K]> |
-        (S[K] extends { default: infer Default } ? Default : undefined);
+    [K in keyof S]: InferFieldType<S[K]> | Exclude<InferDefault<S[K]>, InferFieldType<S[K]>>;
 };
+
+// Errors and events
+
+export interface ValidationError {
+    field: string;
+    message: string;
+    rule?: string;
+    /** Application-defined localization or classification key. */
+    code?: string;
+}
+
+export type ValidationErrors = Readonly<Record<string, readonly ValidationError[]>>;
+
+export type ModelErrorCode =
+    | 'reaction_error'
+    | 'dependency_error'
+    | 'circular_dependency'
+    | 'field_not_found';
+
+export interface ModelError {
+    code: ModelErrorCode;
+    field?: string;
+    message: string;
+    originalError?: Error;
+}
+
+export const ModelEvents = {
+    VALIDATION_ERROR: 'validation:error',
+    REACTION_ERROR: 'reaction:error',
+    DEPENDENCY_ERROR: 'dependency:error',
+    FIELD_NOT_FOUND: 'field:not-found',
+    FIELD_CHANGE: 'field:change',
+    VALIDATION_COMPLETE: 'validation:complete',
+    FIELD_VALIDATION_COMPLETE: 'field:validation-complete',
+    DIRTY_DATA_CLEARED: 'dirty-data:cleared',
+} as const;
+
+export interface ModelEventMap<T = Record<string, any>> {
+    [ModelEvents.VALIDATION_ERROR]: ValidationError;
+    [ModelEvents.REACTION_ERROR]: ModelError;
+    [ModelEvents.DEPENDENCY_ERROR]: ModelError;
+    [ModelEvents.FIELD_NOT_FOUND]: ModelError;
+    [ModelEvents.FIELD_CHANGE]: {
+        [K in ModelFieldKey<T>]-?: { field: `${K}`; value: T[K] };
+    }[ModelFieldKey<T>];
+    /** Final validation result after tracked work settles; see docs/API.md. */
+    [ModelEvents.VALIDATION_COMPLETE]: { isValid: boolean };
+    [ModelEvents.FIELD_VALIDATION_COMPLETE]: {
+        field: ModelFieldName<T>;
+        isValid: boolean;
+        dirty: boolean;
+    };
+    [ModelEvents.DIRTY_DATA_CLEARED]: { fields: ModelFieldName<T>[] };
+}
+
+// Model instance API
 
 export interface ModelOptions {
     /** Async validation timeout in milliseconds. */
@@ -186,11 +203,11 @@ export interface ModelOptions {
 
 export interface ModelReturn<T = Record<string, any>> {
     /** Stable shallow read-only snapshot of the field map. */
-    data: Readonly<T>;
+    readonly data: Readonly<T>;
     /** Read-only snapshot of current validation errors. */
-    validationErrors: Readonly<Record<string, readonly ValidationError[]>>;
-    setField: <K extends keyof T>(field: K, value: T[K]) => Promise<boolean>;
-    getField: <K extends keyof T>(field: K) => T[K];
+    readonly validationErrors: ValidationErrors;
+    setField: <K extends ModelFieldKey<T>>(field: K, value: T[K]) => Promise<boolean>;
+    getField: <K extends ModelFieldKey<T>>(field: K) => T[K];
     setFields: (fields: Partial<T>) => Promise<boolean>;
     /** Validate once, await tracked work, then check dirty values and errors; see docs/API.md. */
     validateAll: () => Promise<boolean>;

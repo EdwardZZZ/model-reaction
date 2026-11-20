@@ -12,6 +12,18 @@ import { makeCart, makeOrderModel } from './react-test-helpers';
 // ---------------------------------------------------------------------------
 
 describe('useModelField', () => {
+    it('receives numeric field commits through string event names', async () => {
+        const model = createModel({ 0: { type: 'string', default: 'before' } });
+        const { result, unmount } = renderHook(() => useModelField(model, 0));
+        const picked = renderHook(() => useModelFields(model, [0]));
+        await act(async () => { await model.setField(0, 'after'); });
+        expect(result.current).toBe('after');
+        expect(picked.result.current[0]).toBe('after');
+        unmount();
+        picked.unmount();
+        model.dispose();
+    });
+
     it('returns the current value and re-renders only when that field changes', async () => {
         const cart = makeCart();
         let renderCount = 0;
@@ -139,6 +151,23 @@ describe('useModelFields', () => {
 // ---------------------------------------------------------------------------
 
 describe('useModelFieldState', () => {
+    it('tracks numeric field errors, dirty clearing and outside recovery', async () => {
+        const model = createModel({
+            0: { type: 'string', default: 'before', validator: [ValidationRules.required] },
+        });
+        const { result, unmount } = renderHook(() => useModelFieldState(model, 0));
+        await act(async () => { expect(await model.setField(0, '')).toBe(false); });
+        expect(result.current[2].error).not.toBeNull();
+        expect(result.current[2].dirty).toBe(true);
+        act(() => model.clearDirtyData());
+        expect(result.current[2].dirty).toBe(false);
+        await act(async () => { await model.setField(0, 'after'); });
+        expect(result.current[0]).toBe('after');
+        expect(result.current[2].error).toBeNull();
+        unmount();
+        model.dispose();
+    });
+
     interface Signup {
         email: string;
     }
@@ -476,4 +505,3 @@ describe('useModelFieldState', () => {
         }
     });
 });
-

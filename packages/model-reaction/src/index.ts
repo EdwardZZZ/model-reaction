@@ -16,6 +16,9 @@ export type {
     ReactionAction,
     FieldSchema,
     ValidationError,
+    ValidationErrors,
+    ModelFieldKey,
+    ModelFieldName,
     ModelError,
     ModelErrorCode,
     ModelEventMap,
@@ -32,9 +35,9 @@ export { ModelEvents, SKIP_REACTION } from './types';
  *        createModel<User>(schema)
  *   2. With inferred data type (from schema literal):
  *        const m = createModel({ name: { type: 'string' }, age: { type: 'number' } });
- *        // m.data is { name: string; age: number }
+ *        // m.data is Readonly<{ name: string | undefined; age: number | undefined }>
  */
-export function createModel<S extends Record<string, FieldSchema>>(
+export function createModel<S extends Record<string, FieldSchema> & Record<symbol, never>>(
     schema: S,
     options?: ModelOptions
 ): ModelReturn<InferModelData<S>>;

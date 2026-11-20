@@ -296,6 +296,47 @@ describe('ModelManager - Boundary values', () => {
 
 
 describe('ModelManager - own field keys', () => {
+    test.each(['toString', 'constructor', '__proto__', 'ordinary'])(
+        'reads unset own %s as undefined in committed and validation snapshots',
+        async (field) => {
+            const computed = jest.fn(() => 2);
+            const local = createModel({
+                [field]: { type: 'number' },
+                input: {
+                    type: 'number',
+                    validator: [{
+                        type: 'unset-sibling', message: 'sibling must be unset',
+                        validate: (_value, data) => data?.[field] === undefined,
+                    }],
+                },
+                derived: {
+                    type: 'number',
+                    reaction: { fields: [field], computed },
+                },
+            });
+            try {
+                await local.settled();
+                expect(local.getField(field)).toBeUndefined();
+                expect(local.data[field]).toBeUndefined();
+                expect(Object.hasOwn(local.data, field)).toBe(true);
+                expect(Object.getPrototypeOf(local.data)).toBe(Object.prototype);
+                expect(Object.isFrozen(local.data)).toBe(true);
+                expect(computed).not.toHaveBeenCalled();
+                expect(await local.setField('input', 1)).toBe(true);
+                expect(await local.validateAll()).toBe(true);
+                expect(computed).not.toHaveBeenCalled();
+                const previous = local.data;
+                expect(await local.setField(field, 3)).toBe(true);
+                await local.settled();
+                expect(local.data[field]).toBe(3);
+                expect(previous[field]).toBeUndefined();
+                expect(computed).toHaveBeenCalledTimes(1);
+            } finally {
+                local.dispose();
+            }
+        }
+    );
+
     test.each(['toString', 'constructor', '__proto__'])(
         'preserves %s through validation, dirty storage, clearing and reactions',
         async (field) => {
