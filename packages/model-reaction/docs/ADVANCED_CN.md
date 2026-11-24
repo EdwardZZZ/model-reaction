@@ -222,11 +222,12 @@ const optional = createModel({ note: { type: 'string' } });
 // optional.data.note 类型为 string | undefined
 
 // `values` 为 enum 字段推导出具体联合类型；运行时校验仍由 validator 提供。
+const statusValues = ['draft', 'published'] as const;
 const status = createModel({
   state: {
     type: 'enum',
-    values: ['draft', 'published'] as const,
-    default: 'draft',
+    values: statusValues,
+    default: statusValues[0],
   },
 });
 // status.data.state 类型为 'draft' | 'published'

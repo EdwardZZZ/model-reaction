@@ -3,6 +3,8 @@ import { useMemo, useState, type ReactElement } from 'react';
 import type { InstanceState } from '../protocol';
 import { DEFAULT_LAYOUT_OPTIONS, type LaidOutNode } from '../graph-layout';
 import { ACTION_STEP, layoutActionGraph, type ActionNode } from '../action-graph-layout';
+import { layoutDerivedGraph } from '../derived-graph-layout';
+import { derivedLabel, DerivedValuesView } from './DerivedValuesView';
 
 interface DependencyGraphViewProps {
     instance: InstanceState;
@@ -23,22 +25,31 @@ export function DependencyGraphView({ instance }: DependencyGraphViewProps): Rea
         () => layoutActionGraph(instance.graph, instance.fields),
         [instance.graph, instance.fields]
     );
+    const derived = useMemo(
+        () => layoutDerivedGraph(layout, instance.snapshot.derivedValues),
+        [layout, instance.snapshot.derivedValues]
+    );
     const { nodeWidth } = layout;
-    const [active, setActive] = useState<{ kind: 'field' | 'action'; id: string } | null>(null);
+    const [active, setActive] = useState<
+        { kind: 'field' | 'action'; id: string } | { kind: 'derived'; id: number } | null
+    >(null);
 
-    if (instance.graph.edges.length === 0 && !hasActions) {
+    if (instance.graph.edges.length === 0 && !hasActions && derived.nodes.length === 0) {
         return (
-            <div className="mrd-empty mrd-graph-empty">
-                No reactions declared — every field is independent.
-            </div>
+            <>
+                <div className="mrd-empty mrd-graph-empty">
+                    No reactions or derived values — every field is independent.
+                </div>
+                <DerivedValuesView values={instance.snapshot.derivedValues} truncated={instance.snapshot.truncated ?? false} />
+            </>
         );
     }
 
     const pos = new Map<string, LaidOutNode>();
     layout.fields.nodes.forEach((n) => pos.set(n.id, n));
 
-    const svgWidth = layout.width + PAD * 2;
-    const svgHeight = layout.height + PAD * 2;
+    const svgWidth = derived.width + PAD * 2;
+    const svgHeight = derived.height + PAD * 2;
 
     return (
         <div className="mrd-graph">
@@ -88,7 +99,7 @@ export function DependencyGraphView({ instance }: DependencyGraphViewProps): Rea
                     const bendX = x2 - DEFAULT_LAYOUT_OPTIONS.hGap / 2;
                     const highlighted = active?.kind === 'action'
                         ? active.id === action.id
-                        : active?.id === field;
+                        : active?.kind === 'field' && active.id === field;
                     return (
                         <path
                             key={`${action.id}:${field}`}
@@ -101,12 +112,37 @@ export function DependencyGraphView({ instance }: DependencyGraphViewProps): Rea
                     );
                 }))}
 
+                {derived.nodes.flatMap((node) => node.fields.map((field) => {
+                    const from = pos.get(field)!;
+                    const x1 = from.x + nodeWidth + PAD;
+                    const y1 = from.y + HEADER_HEIGHT / 2 + PAD;
+                    const x2 = node.x + PAD;
+                    const y2 = node.y + node.height / 2 + PAD;
+                    const bendX = x2 - DEFAULT_LAYOUT_OPTIONS.hGap / 2;
+                    const highlighted = active?.kind === 'derived'
+                        ? active.id === node.entry.id
+                        : active?.kind === 'field' && active.id === field;
+                    return (
+                        <path
+                            key={JSON.stringify([node.entry.id, field])}
+                            d={`M ${x1} ${y1} H ${bendX} V ${y2} H ${x2}`}
+                            className={`mrd-edge mrd-derived-edge${highlighted ? ' mrd-edge-active' : ''}`}
+                            data-from-field={field}
+                            data-to-derived={node.entry.id}
+                            markerEnd="url(#mrd-arrow)"
+                        />
+                    );
+                }))}
+
                 {layout.fields.nodes.map((n) => {
                     const info = instance.fields[n.id];
                     const actions = layout.fieldActions.get(n.id) ?? [];
                     const isActive = active?.kind === 'field' && active.id === n.id
                         || active?.kind === 'action' && layout.sharedActions.some(
                             (action) => action.id === active.id && action.fields.includes(n.id)
+                        )
+                        || active?.kind === 'derived' && derived.nodes.some(
+                            (node) => node.entry.id === active.id && node.fields.includes(n.id)
                         );
                     return (
                         <g
@@ -161,7 +197,7 @@ export function DependencyGraphView({ instance }: DependencyGraphViewProps): Rea
                 {layout.sharedActions.map((action) => {
                     const isActive = active?.kind === 'action'
                         ? active.id === action.id
-                        : active !== null && action.fields.includes(active.id);
+                        : active?.kind === 'field' && action.fields.includes(active.id);
                     return (
                         <g
                             key={action.id}
@@ -182,11 +218,41 @@ export function DependencyGraphView({ instance }: DependencyGraphViewProps): Rea
                         </g>
                     );
                 })}
+                {derived.nodes.map((node) => {
+                    const { entry } = node;
+                    const label = entry.debugName || `${entry.kind} #${entry.id}`;
+                    const isActive = active?.kind === 'derived'
+                        ? active.id === entry.id
+                        : active?.kind === 'field' && node.fields.includes(active.id);
+                    const inputs = entry.fields === undefined ? 'dependencies unavailable'
+                        : entry.fields.length ? `← ${entry.fields.join(', ')}` : 'no model dependencies';
+                    return (
+                        <g
+                            key={entry.id}
+                            transform={`translate(${node.x + PAD}, ${node.y + PAD})`}
+                            className={`mrd-node mrd-derived-node${isActive ? ' mrd-node-active' : ''}`}
+                            data-derived-id={entry.id}
+                            onMouseEnter={() => setActive({ kind: 'derived', id: entry.id })}
+                            onMouseLeave={() => setActive(null)}
+                        >
+                            <rect width={node.width} height={node.height} rx={12} />
+                            <text x={node.width / 2} y={16} className="mrd-node-label">
+                                {derivedLabel(entry, 28)}
+                            </text>
+                            <text x={node.width / 2} y={34} className="mrd-node-label mrd-derived-kind">
+                                {entry.fields === undefined ? 'derived · inputs unknown' : `derived · ${entry.kind}`}
+                            </text>
+                            <title>{`${label}\n${entry.kind} · #${entry.id}\n${inputs}`}</title>
+                        </g>
+                    );
+                })}
             </svg>
             <p className="mrd-graph-hint">
                 Solid arrows show computation dependencies; dashed arrows connect fields to actions.
                 A shared node represents the same function reference. Actions run after computation settles.
+                {' '}Rounded derived nodes show React Hook results; their input arrows follow observed field reads.
             </p>
+            <DerivedValuesView values={instance.snapshot.derivedValues} truncated={instance.snapshot.truncated ?? false} />
         </div>
     );
 }

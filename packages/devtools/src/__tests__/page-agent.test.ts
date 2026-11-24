@@ -6,6 +6,7 @@ import {
     isPanelMessage,
     type AgentMessage,
     type PanelMessage,
+    type DerivedValue,
 } from '../protocol';
 
 /** A controllable fake of the library's `DevtoolsModelInstance`. */
@@ -58,8 +59,10 @@ function makeFakeInstance(id: number) {
 }
 
 type Hook = {
-    register(instance: unknown): void;
+    register(instance: unknown, model?: object): void;
     unregister(id: number): void;
+    getDerivedObserver(model: object): unknown;
+    updateDerived(model: object, token: object, selection: Omit<DerivedValue, 'id' | 'value'> & { value: unknown } | null): void;
 };
 
 /** Collect agent → panel messages posted on the window. */
@@ -232,7 +235,136 @@ describe('page agent', () => {
         inst.emitChange('firstName', 'Ada');
         await flush();
         await flush();
-        expect(received.filter((m) => m.kind === 'snapshot')).toHaveLength(1);
+        const snapshots = received.filter((m) => m.kind === 'snapshot');
+        expect(snapshots).toHaveLength(1);
+        expect(snapshots[0]!.snapshot.derivedValues).toBeUndefined();
+    });
+
+    test('exposes collection only for registered capable models and releases it on disposal', () => {
+        dispose = installAgent(window);
+        const hook = getHook();
+        const model = {};
+        const legacyModel = {};
+        const observer = jest.fn();
+        hook.register({ ...makeFakeInstance(19), observeSelector: observer }, model);
+        hook.register(makeFakeInstance(20), legacyModel);
+        expect(hook.getDerivedObserver(model)).toBe(observer);
+        expect(hook.getDerivedObserver(model)).toBe(observer);
+        expect(hook.getDerivedObserver(legacyModel)).toBeUndefined();
+        expect(hook.getDerivedObserver({})).toBeUndefined();
+        expect(observer).not.toHaveBeenCalled();
+        hook.unregister(19);
+        expect(hook.getDerivedObserver(model)).toBeUndefined();
+    });
+
+    test('owns per-model derived values and refreshes only changed Hook instances', async () => {
+        const received = collectAgentMessages();
+        dispose = installAgent(window);
+        const first = {};
+        const second = {};
+        const firstToken = {};
+        const secondToken = {};
+        const selection = { kind: 'useModelComputed' as const, debugName: 'same name', value: 2 };
+        const hook = getHook();
+        hook.register(makeFakeInstance(21), first);
+        hook.register(makeFakeInstance(22), second);
+        hook.updateDerived({}, firstToken, selection);
+        hook.updateDerived(first, firstToken, selection);
+        hook.updateDerived(first, secondToken, { ...selection, value: 6 });
+        hook.updateDerived(first, secondToken, { ...selection, value: 7 });
+        hook.updateDerived(second, firstToken, { ...selection, value: 20 });
+        await flush();
+        await flush();
+        const snapshots = () => received.filter(
+            (message): message is Extract<AgentMessage, { kind: 'snapshot' }> => message.kind === 'snapshot'
+        );
+        expect(snapshots()).toHaveLength(2);
+        expect(snapshots()[0]!.snapshot.derivedValues).toEqual([
+            { ...selection, id: 1, value: { t: 'primitive', v: 2 } },
+            { ...selection, id: 2, value: { t: 'primitive', v: 7 } },
+        ]);
+        expect(snapshots()[1]!.snapshot.derivedValues).toEqual([
+            { ...selection, id: 1, value: { t: 'primitive', v: 20 } },
+        ]);
+        expect(received.filter((message) => message.kind === 'change')).toEqual([]);
+
+        hook.updateDerived(first, secondToken, { ...selection, value: 7 });
+        await flush();
+        expect(snapshots()).toHaveLength(2);
+        hook.updateDerived(first, secondToken, { ...selection, value: 7, debugName: 'renamed' });
+        hook.updateDerived(first, firstToken, null);
+        hook.updateDerived(first, firstToken, null);
+        await flush();
+        await flush();
+        expect(snapshots()).toHaveLength(3);
+        const expected = [{
+            ...selection, id: 2, debugName: 'renamed', value: { t: 'primitive', v: 7 },
+        }];
+        expect(snapshots()[2]!.snapshot.derivedValues).toEqual(expected);
+        window.postMessage({ source: PANEL_SOURCE, kind: 'get-snapshot', id: 21 }, '*');
+        await flush();
+        await flush();
+        expect(snapshots()).toHaveLength(4);
+        expect(snapshots()[3]!.snapshot.derivedValues).toEqual(expected);
+    });
+
+    test('drops queued and late derived reports after unregister or agent disposal', async () => {
+        const received = collectAgentMessages();
+        dispose = installAgent(window);
+        const model = {};
+        const token = {};
+        const selection = { kind: 'useModelSelector' as const, value: undefined };
+        const hook = getHook();
+        hook.register(makeFakeInstance(23), model);
+        hook.updateDerived(model, token, selection);
+        hook.unregister(23);
+        hook.updateDerived(model, token, selection);
+        hook.updateDerived(model, token, null);
+        await flush();
+        await flush();
+        expect(received.filter((message) => message.kind === 'snapshot')).toEqual([]);
+
+        hook.register(makeFakeInstance(24), model);
+        hook.updateDerived(model, token, selection);
+        dispose();
+        hook.updateDerived(model, token, selection);
+        await flush();
+        await flush();
+        expect(received.filter((message) => message.kind === 'snapshot')).toEqual([]);
+    });
+
+    test('publishes changed dependencies even when the derived value is equal', async () => {
+        const received = collectAgentMessages();
+        dispose = installAgent(window);
+        const model = {};
+        const token = {};
+        const hook = getHook();
+        hook.register(makeFakeInstance(25), model);
+        const selection = { kind: 'useModelSelector' as const, value: 2, fields: ['firstName'] };
+        hook.updateDerived(model, token, selection);
+        await flush();
+        await flush();
+        received.length = 0;
+        hook.updateDerived(model, token, { ...selection, fields: ['firstName'] });
+        await flush();
+        expect(received).toEqual([]);
+        for (const fields of [['fullName'], [], undefined]) {
+            hook.updateDerived(model, token, {
+                kind: selection.kind, value: selection.value,
+                ...(fields === undefined ? {} : { fields }),
+            });
+            await flush();
+            await flush();
+            const message = received[received.length - 1]!;
+            expect(message.kind).toBe('snapshot');
+            if (message.kind === 'snapshot') {
+                expect(message.snapshot.derivedValues![0]).toEqual({
+                    id: 1, kind: selection.kind, value: { t: 'primitive', v: 2 },
+                    ...(fields === undefined ? {} : { fields }),
+                });
+            }
+        }
+        expect(received).toHaveLength(3);
     });
 
     test('does not send a queued snapshot after the instance is unregistered', async () => {

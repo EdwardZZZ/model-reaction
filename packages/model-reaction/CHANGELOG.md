@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **React derived values in DevTools:** `useModelSelector` and `useModelComputed`
+  appear as green terminal nodes in Dependencies, with committed values and
+  automatically observed top-level input arrows. Anonymous selectors use a
+  source summary with the original source in the tooltip; named selectors use
+  their function name. Conditional inputs update even when results stay equal.
+  Hook signatures remain `(model, selector, isEqual?)`; no debug argument is required.
 - **Action context:** each `reaction.action` receives `{ field, value }`, with
   the owning field from the last pending registration and its latest committed
   value read immediately before the call. `ReactionAction<T>` types the value;
@@ -28,17 +34,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `'model-reaction/devtools'` and each model registers with the global DevTools
   hook when one is installed (a constant-time hook check with no integration
   allocation when it is absent). The package root imports none of this, so apps
-  that never opt in ship zero DevTools code. The hook is a private dev-time
+  using only the core entry ship no DevTools integration. The React entry includes
+  lightweight optional observation checks. The hook is a private dev-time
   channel — not part of the public `ModelReturn` API. See `docs/DEVTOOLS.md` /
   `docs/DEVTOOLS_CN.md`
   and the `packages/devtools/` workspace package.
 
 ### Changed
+- **DevTools snapshot compatibility:** when the installed hook supports automatic
+  selector observation, the opt-in entry wraps `model.data` in a stable shallow
+  Proxy. Hook inputs and public snapshot reads keep matching identities.
+  Native structured cloning requires copying the outer record first, such as
+  `structuredClone({ ...model.data })`. Core models and models created without
+  a capable hook retain their original snapshots. See [DevTools](docs/DEVTOOLS.md#enabling-it-in-your-app).
 - **Source organization:** DevTools integration now lives in `src/devtools.ts`,
   with only `createModel` exported. Hook types and helpers remain private;
   tests observe registered instances through the global hook. Updated build,
-  declaration, example, demo, and extension source mappings. The
-  `model-reaction/devtools` import and runtime behavior remain unchanged.
+  declaration, example, demo, and extension source mappings. Selector observation
+  and its private types live in `src/devtools-observer.ts`; React snapshot caching
+  and reporting stay private in `src/react/selectors.ts`. Public entry paths and
+  exports remain unchanged.
 - **Source organization:** commit options now live with write preparation;
   default cloning and structural equality move into `core/`. The validation
   entry owns error formatting, and type contract tests share one file. Removed
@@ -165,6 +180,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the covered schemas.
 
 ### Docs
+- Checked documentation links and examples; corrected enum default inference,
+  selector example fields, and the scope of DevTools overhead. Documented
+  component effects versus model actions and explicit app-wide model ownership.
 - Consolidated document navigation; merged best-practice guidance into advanced
   usage and comparison, and completed design decisions into architecture.
   The ad-creation scenario now lives in

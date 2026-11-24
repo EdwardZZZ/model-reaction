@@ -30,8 +30,10 @@ flowchart LR
 | `src/core/` | 模型状态、字段写入流程、默认值克隆、结构比较、事件和待处理任务 | `ModelManager` 是 `data`、`dirtyData`、错误和验证新鲜度的唯一所有者 |
 | `src/validation/` | 单字段校验、规则构造、错误格式化 | `validate-field.ts` 供 core 调用；规则和格式化器由独立入口导出 |
 | `src/reaction/` | 依赖索引、反应调度、计算写回和 action 生命周期 | 通过 `ReactionSystem` 回调读写模型，不持有模型数据 |
-| `src/react/` | Provider、字段绑定、draft 和 selector Hooks | 只面向公开模型接口；通过独立 `model-reaction/react` 入口发布 |
+| `src/react/` | Provider、字段绑定、draft 和 selector Hooks | 读取公开模型接口；通过独立 `model-reaction/react` 入口发布 |
 | `src/devtools.ts` | 可选 hook 和模型观测适配 | 只导出 `createModel`；通过公开模型接口读取状态，使用共享依赖解析器保持图语义一致 |
+| `src/react/selectors.ts` | selector Hooks、快照缓存与已提交派生值上报 | 只有已提交值可作为 equality 基准；扩展管理观测记录，不增加模型订阅 |
+| `src/devtools-observer.ts` | 稳定浅层快照、同步顶层读取采集与私有观测类型 | 仅用于可选适配层；React 仅导入类型，不加入包的公开导出 |
 | `src/__tests__/` | 按核心行为、React 适配和集成场景组织测试 | 集成测试同时约束 README 示例契约 |
 
 `core/write-preparation.ts` 统一保存内部提交选项、待写入字段类型和无状态准备函数，
@@ -40,6 +42,8 @@ flowchart LR
 React 和 DevTools 也各自保持独立的发布入口。
 `devtools.ts` 的 hook 类型和辅助函数保持私有。测试通过全局 hook 捕获注册实例，
 不直接导入内部辅助函数。
+selector 缓存及上报辅助函数作为 `react/selectors.ts` 的私有实现；
+`devtools-observer.ts` 统一保存依赖采集及其共享类型契约。
 
 `types.ts` 按 Schema/推导、错误/事件和实例 API 分区。字段标签共用一个值类型映射，
 推导读值还包含默认值与 computed 结果；适配层共用 `ValidationErrors` 和

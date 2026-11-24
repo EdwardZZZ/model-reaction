@@ -225,11 +225,12 @@ const optional = createModel({ note: { type: 'string' } });
 
 // `values` gives an enum field a useful inferred union. Runtime validation
 // still comes from the field's validators.
+const statusValues = ['draft', 'published'] as const;
 const status = createModel({
   state: {
     type: 'enum',
-    values: ['draft', 'published'] as const,
-    default: 'draft',
+    values: statusValues,
+    default: statusValues[0],
   },
 });
 // status.data.state is 'draft' | 'published'

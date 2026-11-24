@@ -17,6 +17,10 @@
   --mrd-action-active: #684582;
   --mrd-action-border: #aa82cf;
   --mrd-action-border-active: #d3aff2;
+  --mrd-derived: #214a3d;
+  --mrd-derived-active: #2d6851;
+  --mrd-derived-border: #60bc96;
+  --mrd-derived-border-active: #a0edc5;
 }
 
 * {
@@ -122,10 +126,14 @@ body {
 
 .mrd-tabs {
   display: flex;
+  flex-shrink: 0;
+  overflow-x: auto;
   border-bottom: 1px solid var(--mrd-border);
 }
 
 .mrd-tab {
+  flex-shrink: 0;
+  white-space: nowrap;
   background: transparent;
   border: none;
   border-bottom: 2px solid transparent;
@@ -142,6 +150,10 @@ body {
 .mrd-tab-active {
   color: var(--mrd-accent);
   border-bottom-color: var(--mrd-accent);
+}
+
+.mrd-tab .mrd-badge {
+  margin-left: 6px;
 }
 
 .mrd-content {
@@ -186,6 +198,21 @@ body {
 
 .mrd-section-body {
   padding: 8px 10px;
+}
+
+.mrd-derived .mrd-section-title {
+  flex-wrap: wrap;
+}
+
+.mrd-derived-entry + .mrd-derived-entry {
+  border-top: 1px solid var(--mrd-border);
+  margin-top: 8px;
+  padding-top: 8px;
+}
+
+.mrd-derived-meta {
+  color: var(--mrd-muted);
+  font-size: 10px;
 }
 
 .mrd-badge {
@@ -341,6 +368,22 @@ body {
 .mrd-action-kind {
   fill: var(--mrd-fg);
   opacity: 0.8;
+  font-size: 10px;
+}
+
+.mrd-derived-node rect {
+  fill: var(--mrd-derived);
+  stroke: var(--mrd-derived-border);
+}
+
+.mrd-derived-node.mrd-node-active rect {
+  fill: var(--mrd-derived-active);
+  stroke: var(--mrd-derived-border-active);
+}
+
+.mrd-derived-kind {
+  fill: var(--mrd-fg);
+  opacity: 0.85;
   font-size: 10px;
 }
 

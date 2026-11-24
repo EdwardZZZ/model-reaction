@@ -25,6 +25,7 @@ import {
     type InstanceState,
     type PanelMessage,
     type Snapshot,
+    type DerivedValue,
 } from './protocol';
 import { serializeSnapshot, serializeValue } from './serialize';
 
@@ -40,14 +41,21 @@ interface HookModelInstance {
     };
     subscribe(listener: (change: { field: string; value: unknown; timestamp: number }) => void): () => void;
     subscribeSnapshot?(listener: () => void): () => void;
+    observeSelector?<T extends Record<string, any>, R>(
+        data: Readonly<T>, selector: (data: Readonly<T>) => R
+    ): { value: R; fields?: string[] };
 }
 
 const HOOK_KEY = '__MODEL_REACTION_DEVTOOLS_HOOK__';
+
+type RawDerivedValue = Omit<DerivedValue, 'value'> & { value: unknown };
 
 interface TrackedInstance {
     instance: HookModelInstance;
     timeline: ChangeEntry[];
     values: Map<string, unknown>;
+    derivedValues: Map<object, RawDerivedValue> | undefined;
+    nextDerivedId: number;
     unsubscribe: () => void;
     seq: number;
     snapshotQueued: boolean;
@@ -66,19 +74,23 @@ export function installAgent(
     if ((win as unknown as Record<string, unknown>)[HOOK_KEY]) return () => {};
 
     const tracked = new Map<number, TrackedInstance>();
+    const modelIds = new WeakMap<object, number>();
 
     const post = (message: AgentMessage): void => {
         win.postMessage(message, '*');
     };
 
-    const takeSnapshot = (instance: HookModelInstance): Snapshot =>
-        serializeSnapshot(instance.getSnapshot());
+    const takeSnapshot = (entry: TrackedInstance): Snapshot =>
+        serializeSnapshot({
+            ...entry.instance.getSnapshot(),
+            ...(entry.derivedValues ? { derivedValues: [...entry.derivedValues.values()] } : {}),
+        });
 
     const toState = (entry: TrackedInstance): InstanceState => ({
         id: entry.instance.id,
         fields: entry.instance.getFields(),
         graph: entry.instance.getDependencyGraph(),
-        snapshot: takeSnapshot(entry.instance),
+        snapshot: takeSnapshot(entry),
         timeline: entry.timeline.slice(),
     });
 
@@ -92,17 +104,19 @@ export function installAgent(
                 source: AGENT_SOURCE,
                 kind: 'snapshot',
                 id: entry.instance.id,
-                snapshot: takeSnapshot(entry.instance),
+                snapshot: takeSnapshot(entry),
             });
         });
     };
 
     const hook = {
-        register(instance: HookModelInstance): void {
+        register(instance: HookModelInstance, model?: object): void {
             const entry: TrackedInstance = {
                 instance,
                 timeline: [],
                 values: new Map(Object.entries(instance.getSnapshot().data)),
+                derivedValues: model === undefined ? undefined : new Map(),
+                nextDerivedId: 1,
                 unsubscribe: () => {},
                 seq: 0,
                 snapshotQueued: false,
@@ -132,14 +146,36 @@ export function installAgent(
                 unsubscribeSnapshot?.();
             };
             tracked.set(instance.id, entry);
+            if (model !== undefined) modelIds.set(model, instance.id);
             post({ source: AGENT_SOURCE, kind: 'instance-added', instance: toState(entry) });
         },
         unregister(id: number): void {
             const entry = tracked.get(id);
             if (!entry) return;
             entry.unsubscribe();
+            entry.derivedValues?.clear();
             tracked.delete(id);
             post({ source: AGENT_SOURCE, kind: 'instance-removed', id });
+        },
+        getDerivedObserver(model: object): HookModelInstance['observeSelector'] {
+            const id = modelIds.get(model);
+            return id === undefined ? undefined : tracked.get(id)?.instance.observeSelector;
+        },
+        updateDerived(model: object, token: object, selection: Omit<RawDerivedValue, 'id'> | null): void {
+            const id = modelIds.get(model);
+            const entry = id === undefined ? undefined : tracked.get(id);
+            const values = entry?.derivedValues;
+            if (!entry || !values) return;
+            if (selection === null) {
+                if (values.delete(token)) scheduleSnapshot(entry);
+                return;
+            }
+            const previous = values.get(token);
+            if (previous && Object.is(previous.value, selection.value) &&
+                previous.kind === selection.kind && previous.debugName === selection.debugName &&
+                JSON.stringify(previous.fields) === JSON.stringify(selection.fields)) return;
+            values.set(token, { ...selection, id: previous?.id ?? entry.nextDerivedId++ });
+            scheduleSnapshot(entry);
         },
     };
 
@@ -174,7 +210,7 @@ function handlePanelMessage(
     msg: PanelMessage,
     tracked: Map<number, TrackedInstance>,
     toState: (entry: TrackedInstance) => InstanceState,
-    takeSnapshot: (instance: HookModelInstance) => Snapshot,
+    takeSnapshot: (entry: TrackedInstance) => Snapshot,
     post: (message: AgentMessage) => void
 ): void {
     if (msg.kind === 'get-init') {
@@ -195,7 +231,7 @@ function handlePanelMessage(
             source: AGENT_SOURCE,
             kind: 'snapshot',
             id: msg.id,
-            snapshot: takeSnapshot(entry.instance),
+            snapshot: takeSnapshot(entry),
         });
     }
 }

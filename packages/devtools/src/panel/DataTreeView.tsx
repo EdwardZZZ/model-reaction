@@ -20,7 +20,7 @@ export function DataTreeView({ instance }: DataTreeViewProps): ReactElement {
         <div className="mrd-datatree">
             {instance.snapshot.truncated && (
                 <div className="mrd-empty" role="status">
-                    Snapshot truncated to fit size limits. Values, fields, or errors may be omitted.
+                    Snapshot truncated to fit size limits. Values, fields, errors, or React observations may be omitted.
                 </div>
             )}
             <Section title="data" subtitle="committed source of truth" count={Object.keys(data).length}>

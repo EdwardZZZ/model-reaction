@@ -14,6 +14,8 @@
 - **类型化事件** —— 订阅字段变化、验证流程和反应错误。
 - **类型安全** —— Schema 字面量推导字段类型；没有默认值的字段包含 `undefined`。
 - **可选 React 适配** —— 细粒度、selector 级订阅；核心入口零 React 依赖。
+- **可选 DevTools** —— 查看模型字段、action 和已挂载的 React 派生值，自动采集
+  selector 输入，详见 [DevTools](docs/DEVTOOLS_CN.md)。
 
 ### 面向 AI 友好设计
 

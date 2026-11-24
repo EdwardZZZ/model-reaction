@@ -218,7 +218,7 @@ describe('Panel', () => {
                 snapshot: { ...instance(1).snapshot, truncated: true },
             });
         });
-        expect(getByRole('status').textContent).toContain('errors may be omitted');
+        expect(getByRole('status').textContent).toContain('errors, or React observations may be omitted');
         act(() => {
             emit({ source: AGENT_SOURCE, kind: 'snapshot', id: 1, snapshot: instance(1).snapshot });
         });
@@ -241,6 +241,87 @@ describe('Panel', () => {
             (n) => n.textContent
         );
         expect(labels).toEqual(expect.arrayContaining(['first', 'last', 'full']));
+    });
+
+    test('shows derived observations inside Dependencies for unavailable, empty, and populated snapshots', () => {
+        const { connect, emit } = makeFakeConnect();
+        const panel = render(<Panel connect={connect} />);
+        const model = instance(1);
+        act(() => emit({ source: AGENT_SOURCE, kind: 'init', instances: [model] }));
+        expect(panel.queryByRole('button', { name: /^Derived/ })).toBeNull();
+        fireEvent.click(panel.getByRole('button', { name: 'Dependencies' }));
+        expect(panel.getByRole('status').textContent).toContain('unavailable for this model');
+        act(() => emit({
+            source: AGENT_SOURCE, kind: 'snapshot', id: 1,
+            snapshot: { ...model.snapshot, derivedValues: [] },
+        }));
+        expect(panel.getByText('no mounted selector hooks')).toBeTruthy();
+        expect(panel.queryByRole('status')).toBeNull();
+        const source = '(data) => {\n    return data.greeting.toUpperCase() + data.first + data.last;\n}';
+        act(() => emit({
+            source: AGENT_SOURCE, kind: 'snapshot', id: 1,
+            snapshot: {
+                ...model.snapshot,
+                derivedValues: [
+                    { id: 1, kind: 'useModelSelector', debugName: 'name length', fields: ['full'], value: { t: 'primitive', v: 12 } },
+                    { id: 2, kind: 'useModelComputed', debugName: source, value: { t: 'primitive', v: 'Hello!' } },
+                    { id: 3, kind: 'useModelComputed', value: { t: 'primitive', v: 1 } },
+                ],
+                truncated: true,
+            },
+        }));
+        expect(panel.container.querySelectorAll('[data-derived-id]')).toHaveLength(3);
+        expect(panel.container.querySelectorAll('[data-to-derived]')).toHaveLength(1);
+        expect(panel.container.querySelector('[data-to-derived="1"]')!.getAttribute('data-from-field')).toBe('full');
+        expect(panel.container.querySelector('[data-derived-id="2"] title')!.textContent).toContain('dependencies unavailable');
+        expect(panel.getByText('name length:')).toBeTruthy();
+        const node = panel.container.querySelector('[data-derived-id="2"]')!;
+        expect(node.querySelector('title')!.textContent).toContain(source);
+        const summary = node.querySelector('text')!.textContent!;
+        expect(summary).toMatch(/^\(data\) => \{ return .+…$/);
+        expect(summary).toHaveLength(28);
+        expect(summary).not.toContain('\n');
+        const row = panel.container.querySelectorAll('.mrd-derived-entry')[1]!;
+        expect(row.getAttribute('title')).toBe(source);
+        expect(row.querySelector('.mrd-tree-key')!.textContent).toMatch(/^.{63}…: $/);
+        expect(panel.getByText('useModelComputed #3:')).toBeTruthy();
+        expect(panel.getByRole('status').textContent).toContain('Derived values may be omitted');
+    });
+
+    test('highlights observed derived inputs without mixing action, field, or Hook identity', () => {
+        const state = instance(1);
+        state.fields.first!.actions = [{ reactionIndex: 0, actionIndex: 0, name: 'save', functionId: 1 }];
+        state.fields.last!.actions = [{ reactionIndex: 0, actionIndex: 0, name: 'save', functionId: 1 }];
+        state.snapshot.derivedValues = [
+            { id: 1, kind: 'useModelSelector', debugName: 'full', fields: ['first', 'last', 'first', 'missing'], value: { t: 'primitive', v: 12 } },
+            { id: 2, kind: 'useModelComputed', debugName: 'full', fields: [], value: { t: 'primitive', v: 12 } },
+        ];
+        const { container, rerender } = render(<DependencyGraphView instance={state} />);
+        const derived = container.querySelector('[data-derived-id="1"]')!;
+        const second = container.querySelector('[data-derived-id="2"]')!;
+        expect(container.querySelectorAll('[data-field-id]')).toHaveLength(3);
+        expect(container.querySelectorAll('.mrd-derived-edge')).toHaveLength(2);
+        expect(container.querySelectorAll('.mrd-derived-edge.mrd-action-edge')).toHaveLength(0);
+        expect(second.querySelector('title')!.textContent).toContain('no model dependencies');
+        fireEvent.mouseEnter(derived);
+        expect(container.querySelectorAll('[data-field-id].mrd-node-active')).toHaveLength(2);
+        expect(container.querySelectorAll('.mrd-derived-edge.mrd-edge-active')).toHaveLength(2);
+        expect(container.querySelectorAll('.mrd-action.mrd-node-active')).toHaveLength(0);
+        expect(second.classList.contains('mrd-node-active')).toBe(false);
+        fireEvent.mouseLeave(derived);
+        fireEvent.mouseEnter(container.querySelector('[data-field-id="first"]')!);
+        expect(derived.classList.contains('mrd-node-active')).toBe(true);
+        expect(container.querySelectorAll('.mrd-derived-edge.mrd-edge-active')).toHaveLength(1);
+        expect(container.querySelectorAll('.mrd-action-edge.mrd-edge-active')).toHaveLength(1);
+        rerender(<DependencyGraphView instance={{
+            ...state, snapshot: {
+                ...state.snapshot,
+                derivedValues: [{ ...state.snapshot.derivedValues[0]!, fields: ['full'] }],
+            },
+        }} />);
+        expect(container.querySelectorAll('[data-derived-id]')).toHaveLength(1);
+        expect(container.querySelectorAll('.mrd-derived-edge')).toHaveLength(1);
+        expect(container.querySelector('.mrd-derived-edge')!.getAttribute('data-from-field')).toBe('full');
     });
 
     test('timeline tab lists changes pushed after init', () => {

@@ -1,6 +1,9 @@
-import { ModelProvider, useModel, useModelField } from 'model-reaction/react';
+import { useEffect, useState } from 'react';
+import { ModelProvider, useModel, useModelComputed, useModelField, useModelSelector } from 'model-reaction/react';
 import { TextField } from '../TextField';
 import { nameModel, type NameForm } from './reaction-chain-model';
+
+const selectNameLength = (data: Readonly<NameForm>) => data.fullName.length;
 
 /**
  * Reaction chain scenario: firstName/lastName → fullName → greeting.
@@ -22,6 +25,17 @@ function ReactionChainView() {
     const nameActionRuns = useModelField(model, 'nameActionRuns');
     const capturedFullName = useModelField(model, 'capturedFullName');
     const capturedGreeting = useModelField(model, 'capturedGreeting');
+    const nameLength = useModelSelector(model, selectNameLength);
+    const [uppercase, setUppercase] = useState(false);
+    const preview = useModelComputed(
+        model,
+        (data) => uppercase ? data.greeting.toUpperCase() : data.greeting
+    );
+
+    useEffect(() => {
+        console.log('preview 更新：', preview);
+        // 在这里调用你的业务 action
+    }, [preview]);
 
     return (
         <section className="scenario">
@@ -40,6 +54,19 @@ function ReactionChainView() {
             <div className="derived">
                 <div><span className="derived-label">fullName</span> {fullName || '—'}</div>
                 <div><span className="derived-label">greeting</span> {greeting || '—'}</div>
+            </div>
+            <p className="scenario-desc">
+                Open Dependencies in DevTools to see fullName → selectNameLength and
+                greeting → the preview selector source, with their current Hook values below the graph.
+                Uppercase changes only the local preview; the model stays the same.
+            </p>
+            <label>
+                <input type="checkbox" checked={uppercase} onChange={(event) => setUppercase(event.target.checked)} />
+                Uppercase preview
+            </label>
+            <div className="derived" role="region" aria-label="React derived values">
+                <div><span className="derived-label">name length</span> {nameLength}</div>
+                <div><span className="derived-label">greeting preview</span> {preview || '—'}</div>
             </div>
             <p className="scenario-desc">
                 <code>fullName</code> runs <code>countNameAction</code> and{' '}

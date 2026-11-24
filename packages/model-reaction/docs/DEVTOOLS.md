@@ -1,7 +1,7 @@
 # DevTools
 
 A browser extension for inspecting `model-reaction` models at runtime: the
-live data tree, the field dependency graph, and a timeline of changes.
+live data tree, the field dependency graph with React derived values, and a timeline of changes.
 
 [中文版本](DEVTOOLS_CN.md) | English
 
@@ -18,7 +18,7 @@ live data tree, the field dependency graph, and a timeline of changes.
 - [Loading it in Chrome](#loading-it-in-chrome)
 - [Using the panel](#using-the-panel)
 - [The DevTools hook contract](#the-devtools-hook-contract)
-- [Zero overhead when absent](#zero-overhead-when-absent)
+- [Behavior without an installed hook](#behavior-without-an-installed-hook)
 - [Known limitations](#known-limitations)
 
 ---
@@ -29,11 +29,11 @@ Once the extension is installed and its panel is open, models created through
 the opt-in `model-reaction/devtools` entry show up under a **Model Reaction**
 tab in the browser DevTools, with three views:
 
-1. **Data Tree** — the three layers of the model, each collapsible:
+1. **Data Tree** — the three layers of the model:
    - `data` — the committed source of truth (schema defaults are seeded without validation)
    - `dirtyData` — the last input that failed validation, per field
    - `errors` — current validation errors, per field
-2. **Dependencies** — the reaction dependency graph. Solid arrows point
+2. **Dependencies** — the reaction dependency graph and React derived values. Solid arrows point
    **from a dependency to the field its reaction computes** (read it as
    "`from` feeds `to`"). Actions used by one field appear inside its module,
    connected by dashed arrows. The same function reference renders as one action
@@ -49,11 +49,20 @@ tab in the browser DevTools, with three views:
    its declaring fields and incoming dashed arrows.
    Field blocks use blue backgrounds; action nodes use purple backgrounds,
    including on hover, whether drawn inside a field or shared across fields.
+   `useModelSelector` / `useModelComputed` observations appear as rounded terminal
+   nodes with green backgrounds, including on hover. Names come from `selector.name`,
+   then anonymous selector source, then Hook kind and number. Source labels use a
+   single-line summary; hovering shows the original source within serialization limits.
+   Solid arrows follow automatically observed
+   top-level field reads; hovering highlights sources and edges. Older integrations
+   without collection show dependencies as unavailable. Values, Hook kinds, and instance numbers appear below the graph;
+   see [React bindings](REACT.md#devtools-derived-values).
    Fields remain ordered vertically by dependency layer, preserving schema order
    and alignment within a layer. Each additional dependency level moves one column
    to the right. Computation arrows connect the source field's right edge to the
    target field's left edge. Field counts grow the diagram vertically, while
-   dependency depth increases its width. Shared actions occupy a separate column.
+   dependency depth increases its width. Shared actions and derived nodes share a
+   separate terminal column without overlapping.
    Each field reserves height only for actions drawn inside it; shared actions
    do not leave empty rows in their declaring field modules.
 3. **Timeline** — a reverse-chronological list of committed field changes.
@@ -83,7 +92,7 @@ content.js      (ISOLATED world relay)
    ▼
 background.js   (MV3 service worker, routes by tab)
    ▼
-panel           (React UI: data tree · dependency graph · timeline)
+panel           (React UI: data tree · dependency graph with derived values · timeline)
 ```
 
 The opt-in wrapper and its internal hook contract live in
@@ -93,10 +102,9 @@ lives under [packages/devtools](../../devtools). The package root
 
 ## Enabling it in your app
 
-Swap the import — nothing else changes. `createModel` from
-`model-reaction/devtools` has the exact same signature and behaviour as the one
-from the package root; it just also registers with the DevTools hook when one is
-present.
+Swap the import to opt in. `createModel` from `model-reaction/devtools` keeps the
+package root's signature, validation, and reaction scheduling, and registers
+with an installed DevTools hook.
 
 ```ts
 // import { createModel } from 'model-reaction';
@@ -105,11 +113,23 @@ import { createModel } from 'model-reaction/devtools';
 const model = createModel(schema); // now visible in the panel
 ```
 
+With a hook that supports automatic selector observation, `model.data` becomes
+a stable shallow Proxy. Normal reads, nested value references, and snapshot
+identity are preserved. Native structured cloning cannot clone a Proxy; copy
+the outer record before passing it to `structuredClone` or `postMessage`:
+
+```ts
+const copy = structuredClone({ ...model.data });
+```
+
+Nested values must themselves be structured-cloneable. The panel uses its own
+bounded serializer and does not require this copy from application code.
+
 When no extension is installed, the wrapper performs one hook lookup and
 returns the model without registering or subscribing. Applications that want
-the integration removed from production bundles can alias
+the wrapper and its Proxy collection removed from production bundles can alias
 `model-reaction/devtools` to `model-reaction` in their production bundler
-configuration.
+configuration. The React entry still includes its lightweight reporting checks.
 
 ## Building the extension
 
@@ -171,13 +191,23 @@ Refresh the inspected page and reopen DevTools to restore that context.
 - Rejected input, validation completion, dirty clearing, and reaction errors
   refresh the data tree automatically. Synchronous notifications share one
   queued snapshot; only committed field changes enter the timeline.
-- Each snapshot shares a budget across `data`, `dirtyData`, and `errors`:
+- Derived nodes and their values in **Dependencies** refresh after React commits,
+  including props/state-only changes. Hooks with shared names or selectors remain
+  separate. Unmounting, switching models, or disposal clears previous observations
+  and edges. Observed dependency changes refresh the edges even when the result is equal.
+  These values do not enter Timeline or the scheduler's reaction graph. Empty lists
+  and unavailable observations are explained below the graph.
+- Each snapshot shares a budget across `data`, `dirtyData`, `errors`, and React derived values:
   2,000 nodes and a conservative 256 KiB UTF-8 JSON cap. Each timeline value
   (before and after the commit) has its own budget. Defaults also cap depth at 6,
-  entries per container or record at 100, and string prefixes at 10,000 characters.
+  entries per container, record, or derived-value list at 100, and string prefixes at 10,000 characters.
 - Traversal stops when a budget is exhausted, with truncation markers and a
-  snapshot banner when values, fields, or errors were omitted or clipped.
-  Shared objects in sibling branches remain readable; true cycles are marked.
+  snapshot banner when values, fields, or errors were omitted or clipped. Derived
+  values, names (including anonymous selector source), and observed input lists share these limits. Input lists are capped
+  at 100; field names that exceed the remaining budget are omitted, never clipped
+  into different identities. The banner also covers omitted derived arrows. Shared objects in sibling branches
+  remain readable; true cycles are marked. Unreadable derived values show a marker
+  while preserving the rest of the snapshot.
 
 ## The DevTools hook contract
 
@@ -190,13 +220,26 @@ model only through its public API (`data` / `getDirtyData()` /
 `validationErrors` / `on`) plus the schema it was handed — it needs no
 privileged access to `ModelManager` internals.
 
-The internal contract (from [src/devtools.ts](../src/devtools.ts)):
+The registration contract lives in [src/devtools.ts](../src/devtools.ts);
+React reporting lives in [src/react/selectors.ts](../src/react/selectors.ts);
+collection and its private types live in [src/devtools-observer.ts](../src/devtools-observer.ts):
 
 ```ts
 interface ModelReactionDevtoolsHook {
-  register(instance: DevtoolsModelInstance): void;
+  register(instance: DevtoolsModelInstance, model?: object): void;
   unregister(id: number): void;
+  getDerivedObserver?(model: object): SelectorObserver | undefined;
+  updateDerived?(model: object, token: object, selection: {
+    kind: 'useModelSelector' | 'useModelComputed';
+    value: unknown;
+    debugName?: string;
+    fields?: string[];
+  } | null): void;
 }
+
+type SelectorObserver = <T extends Record<string, any>, R>(
+  data: Readonly<T>, selector: (data: Readonly<T>) => R
+) => { value: R; fields?: string[] };
 ```
 
 Each registered instance exposes pull-based reads (`getFields`,
@@ -204,7 +247,43 @@ Each registered instance exposes pull-based reads (`getFields`,
 optional `subscribeSnapshot` for validation, dirty-data, and error updates.
 The agent still refreshes on committed changes for older instances without
 `subscribeSnapshot`. Both subscriptions are removed on unregister/disposal.
-The extension's page agent implements the hook; the DevTools entry consumes it.
+The extension's page agent implements the global hook. The DevTools entry also
+passes the model object when registering; the agent associates its identity
+through a WeakMap. That object never enters extension messages.
+The two React derived Hooks call `updateDerived` directly in post-commit effects,
+using a distinct token per Hook. `selection: null` removes the observation on
+unmount or model switch. Older hooks without this method skip reporting; the
+agent ignores reports for unregistered or disposed models.
+
+When the hook supports `getDerivedObserver`, the wrapper exposes an optional
+`observeSelector` capability on its registered instance. The agent returns that
+capability only for a registered model. A private, shallow Proxy cache in the wrapper
+provides one public `data` object per underlying snapshot: Hook inputs, `model.data`,
+and `model.subscribe` inputs share the same reference. Nested values and frozen
+property descriptors stay unchanged. Without this capability (including older hooks),
+the wrapper keeps the original snapshots. Proxies are for in-page inspection;
+native structured cloning of a Proxy is unsupported; copy the snapshot first when
+using `structuredClone` or `postMessage` directly.
+
+React invokes the observer at its existing selector evaluation points, never for an
+extra debug evaluation. Collection is synchronous and scoped with `try/finally`;
+selector errors propagate normally. Only the committed selector cache receives a
+dependency-update listener, so speculative selectors cannot publish. If observed
+inputs change but the result equals the committed result, that listener publishes
+the new inputs with the retained committed value without rendering or resubscribing.
+New values and prop-dependent selectors publish after a React commit. See
+[collection scope](REACT.md#devtools-derived-values) for enumeration and deferred-read limits.
+
+The page agent owns all derived values and their instance numbers, with no
+additional registry on the model or in the library. It adds
+`derivedValues: { id, kind, debugName?, fields?, value }[]` to outgoing panel snapshots,
+reusing existing snapshot scheduling and reconnection synchronization.
+Unregistering a model releases its list; older registrations without model
+identity omit `derivedValues` and the panel shows an unavailable message.
+Reports carry existing results and observed top-level model inputs, never selectors.
+The observer collects unique string keys, including numeric property names. The panel overlays
+derived nodes and edges without modifying the schema graph; unknown keys are ignored
+and duplicate inputs produce one arrow per source.
 
 The dependency graph is derived from the schema through a shared primitive,
 [`eachReactionEdge`](../src/reaction/reaction-graph.ts), which is the single definition of
@@ -212,7 +291,8 @@ how `reaction.fields` is read as edges. The core reaction scheduler
 (`collectReactions`) uses the same primitive, and a lock-in test
 ([reaction-graph.test.ts](../src/__tests__/reaction-graph.test.ts)) asserts the
 primitive, the runtime index, and the DevTools graph agree for the covered
-schemas. The diagram represents declared calculation dependencies, not
+schemas. The schema portion of the diagram represents declared calculation
+dependencies; React observations add their collected inputs. Neither infers
 action closure reads/writes or live execution state.
 Field metadata is built once per registered model; the graph projects those
 same dependency lists. Subsequent reads reuse both structures.
@@ -226,13 +306,20 @@ These declarations do not expose candidates, versions, barriers, or execution
 status. Action nodes and dashed arrows are a separate view layer; they never
 change the computation graph's nodes or edges.
 
-## Zero overhead when absent
+## Behavior without an installed hook
 
-If you import from the package root (`model-reaction`), none of this code is
-even bundled. If you opt in via `model-reaction/devtools` but no hook is
-installed (e.g. production without the extension), `createModel` performs a
-constant-time lookup of `globalThis.__MODEL_REACTION_DEVTOOLS_HOOK__` and
-returns without building an instance descriptor or adding subscriptions.
+The core entry (`model-reaction`) imports no DevTools integration code. If you
+opt in via `model-reaction/devtools` but no hook is installed, `createModel`
+performs a constant-time lookup of `globalThis.__MODEL_REACTION_DEVTOOLS_HOOK__`
+and returns without building an instance descriptor, wrapping `data`, or adding
+subscriptions.
+
+The React selector Hooks include optional observer lookup, label lookup, and
+commit/cleanup reporting checks. These are small runtime costs, not zero overhead.
+Without the reporting method they do not stringify selector source or create
+agent records; with it, the agent ignores unregistered models. Observation adds
+no model subscriptions or selector evaluations and keeps its registry in the
+page agent, outside the library and core state.
 
 ## Known limitations
 

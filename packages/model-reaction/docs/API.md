@@ -179,6 +179,11 @@ Replace the whole field value with `setField()` or `setFields()` when it changes
 The outer `data` and dirty-data records are shallow-frozen; field values
 themselves are not frozen.
 
+The optional DevTools entry uses a stable shallow Proxy for `data` when automatic
+selector observation is available. Snapshot identity remains stable, but native
+structured cloning requires copying the outer record first; see
+[DevTools integration](DEVTOOLS.md#enabling-it-in-your-app).
+
 Replacement values are compared structurally for plain objects, arrays,
 `Date`, and `RegExp`. Other objects, including `Map`, `Set`, and class
 instances, are compared by reference: a new instance is treated as a change.
@@ -391,7 +396,7 @@ Promises are not included in `settled()`.
 | Method | Description |
 | --- | --- |
 | `validateAll(): Promise<boolean>` | Validate every field once, wait for all tracked model work, and return the final result. |
-| `getDirtyData(): Partial<T>` | Get a stable, shallow-frozen snapshot of values that failed validation. |
+| `getDirtyData(): Readonly<Partial<T>>` | Get a stable, shallow-frozen snapshot of values that failed validation. |
 | `clearDirtyData(): void` | Clear all dirty data records. |
 
 For submission, wait for existing inputs and initialization before creating

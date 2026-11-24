@@ -12,7 +12,7 @@ Redux Toolkit 和 zustand 提供应用状态容器。根据管理的状态选择
 | --- | --- | --- | --- |
 | 建模 | slice、reducer、action | 提供 `set` / `get` 的 store | 扁平字段 Schema |
 | 更新 | Immer 支持的不可变 reducer 更新 | 约定不可变更新，可选 Immer | 校验后整体替换字段，浅冻结快照 |
-| 派生值 | selector，提供 `createSelector` | selector 或应用逻辑 | 声明 `reaction.fields`，纯函数 `computed` |
+| 派生值 | selector，提供 `createSelector` | selector 或应用逻辑 | 声明 `reaction.fields` 与纯函数 `computed`；React selector Hooks |
 | 异步工作 | thunk、listener middleware、RTK Query | 应用 action 或集成 | 异步 validator 与 `reaction.action` 函数 |
 | 字段校验与脏数据 | 应用或表单库实现 | 应用或表单库实现 | 内置 validator、`validationErrors`、`getDirtyData()` |
 | React 订阅 | React Redux selector | store selector | 字段绑定与 selector Hook |

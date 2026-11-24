@@ -1,5 +1,5 @@
 // Serialization limits and snapshot semantics: model-reaction/docs/DEVTOOLS.md.
-import type { SerializedValue, Snapshot } from './protocol';
+import type { DerivedValue, SerializedValue, Snapshot } from './protocol';
 
 export interface SerializeOptions {
     maxDepth: number;
@@ -192,6 +192,7 @@ export function serializeSnapshot(
         data: Record<string, unknown>;
         dirtyData: Record<string, unknown>;
         errors: Snapshot['errors'];
+        derivedValues?: Array<Omit<DerivedValue, 'value'> & { value: unknown }>;
     },
     options: SerializeOptions = DEFAULT_SERIALIZE_OPTIONS
 ): Snapshot {
@@ -219,5 +220,37 @@ export function serializeSnapshot(
         }
         Object.defineProperty(errors, key, { value: list, enumerable: true });
     }
-    return { data, dirtyData, errors, ...(budget.truncated ? { truncated: true } : {}) };
+    const derivedValues: DerivedValue[] = [];
+    for (const entry of raw.derivedValues ?? []) {
+        if (derivedValues.length >= options.maxItems || !budget.take() || !budget.take()) {
+            budget.truncated = true;
+            break;
+        }
+        const debugName = entry.debugName === undefined
+            ? undefined : budget.text(entry.debugName, NODE_BYTES);
+        const fields: string[] = [];
+        for (const field of entry.fields ?? []) {
+            if (fields.length >= options.maxItems || !budget.key(field) || !budget.take()) {
+                budget.truncated = true;
+                break;
+            }
+            fields.push(field);
+        }
+        let value: SerializedValue;
+        try {
+            value = serialize(entry.value, budget, 0, new WeakSet());
+        } catch {
+            value = budget.marker('value could not be inspected');
+        }
+        derivedValues.push({
+            id: entry.id, kind: entry.kind, value,
+            ...(debugName === undefined ? {} : { debugName }),
+            ...(entry.fields === undefined ? {} : { fields }),
+        });
+    }
+    return {
+        data, dirtyData, errors,
+        ...(raw.derivedValues === undefined ? {} : { derivedValues }),
+        ...(budget.truncated ? { truncated: true } : {}),
+    };
 }

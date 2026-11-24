@@ -16,6 +16,8 @@
 - [严格 / 异步校验下的受控输入](#严格--异步校验下的受控输入)
 - [React 中的 Model 生命周期](#react-中的-model-生命周期)
 - [`useModelSelector` vs `useModelComputed`](#usemodelselector-vs-usemodelcomputed)
+- [派生值的副作用](#派生值的副作用)
+- [DevTools 派生值](#devtools-派生值)
 - [提交流程](#提交流程)
 - [SSR 与并发渲染](#ssr-与并发渲染)
 
@@ -60,6 +62,7 @@ interface Cart {
     price: number;
     coupon: string;
     name: string;
+    items: Record<string, { name: string }>;
 }
 
 function createCartModel() {
@@ -68,6 +71,7 @@ function createCartModel() {
         price:  { type: 'number', default: 100 },
         coupon: { type: 'string', default: '' },
         name:   { type: 'string', default: '', validator: [ValidationRules.required] },
+        items:  { type: 'object', default: {} },
     });
 }
 
@@ -253,9 +257,9 @@ draft 建模的是「受控 `<input>` 里的文本」，所以它永远是 `stri
 - **number（或其他非 string）字段** —— 必须声明 schema `transform`
   （如 `transform: Number`），提交时把字符串 draft 转回真实类型。否则字符串会
   被直接写进 `data`，成为一个静默的类型谎言。
-- **绑到 checkbox / select / date picker 的 boolean / enum / date 字段** ——
-  **不**适配；它们的控件 `value` 不是字符串。请改用普通的 `useModelFieldState`
-  绑定。
+- **checkbox / select / date picker** —— 控件直接选择已提交值、无需编辑中间文本时，
+  优先使用 `useModelFieldState`。HTML select 的 value 是字符串；允许文本编辑的日期
+  控件也可结合 transform 使用 draft，应按控件的编辑行为选择。
 
 value→text（回填）方向上有两个边界情况，`useDraftField` 内部已处理（nullish /
 非有限数收敛）加上可选的 `format`：
@@ -361,7 +365,8 @@ function EditUserRoute({ userId }: { userId: string }) {
 | 推荐场景 | 不推荐 | 应用级 / 功能级共享状态 | 路由或弹窗内的局部状态 |
 
 经验法则：**谁调用 `createModel`，谁就负责调用 `dispose()`**。在 React 中，
-这个责任应放在带 `useEffect` cleanup 的组件里，而不是模块顶层。
+组件拥有的模型通过对应 effect cleanup 释放。有意共享的应用级 singleton 可以交给
+应用 owner，在应用退出和热替换时释放；不要与路由级编辑器或 SSR 请求混用。
 
 ## `useModelSelector` vs `useModelComputed`
 
@@ -429,6 +434,87 @@ const summary = useModelComputed(
 `shallow` 只比较一层，嵌套对象按引用比较。自定义 equality 是可选项，也不会省掉
 下一次结果的计算。两者都不保证每次 commit 或 render 恰好调用 selector 一次：
 订阅和快照读取都可能求值。selector 应保持纯函数，昂贵派生先测量再添加缓存。
+
+## 派生值的副作用
+
+`useModelSelector` 和 `useModelComputed` 返回组件内的值，不创建 Schema 字段，
+也不接受 `reaction.action`。selector 保持纯函数；组件负责的副作用通过
+`useEffect` 观察返回值：
+
+```tsx
+import { useEffect } from 'react';
+import type { ModelReturn } from 'model-reaction';
+import { useModelComputed } from 'model-reaction/react';
+
+function PreviewReporter({ model, uppercase, onPreviewChange }: {
+    model: ModelReturn<{ greeting: string }>;
+    uppercase: boolean;
+    onPreviewChange: (value: string) => void;
+}) {
+    const preview = useModelComputed(
+        model,
+        (data) => uppercase ? data.greeting.toUpperCase() : data.greeting
+    );
+    useEffect(() => {
+        onPreviewChange(preview);
+    }, [preview, onPreviewChange]);
+    return <output>{preview}</output>;
+}
+```
+
+effect 在首次提交后及任一依赖变化后执行。希望只随值变化重跑时，通过模块级函数
+或 `useCallback` 保持回调引用稳定。开发环境 StrictMode 可能重复挂载 effect；
+副作用应支持重复执行，并清理订阅或请求。effect 回调及其异步工作不属于模型 action，
+不纳入 `model.settled()`，也不会作为 action 节点显示在 DevTools 中。
+
+模型业务副作用应将派生值及其可变输入定义为 Schema 字段，再配置 `reaction.action`。
+该队列在计算值验证、提交成功且计算链落定后执行；初始化和相等计算结果也可以登记
+action，具体见 [action 契约](API_CN.md#action-队列)。
+
+## DevTools 派生值
+
+使用 `model-reaction/devtools` 创建模型且创建时扩展 hook 已存在后，
+这两个 Hook 会作为终端节点出现在 **Dependencies** 中，图下方列出已提交渲染的值。
+依赖来自 selector 正常求值时实际读取的顶层字段，自动采集，无需 debug 参数：
+
+```tsx
+const selectTotal = (data: Readonly<Cart>) => data.qty * data.price;
+const total = useModelSelector(cart, selectTotal);
+const item = useModelComputed(cart, (data) => data.items[id]);
+```
+
+上例连线为 `qty/price → selectTotal` 和 `items → (data) => data.items[id]`。
+显示名称优先取 `selector.name`，匿名函数使用 `Function.prototype.toString.call(selector)`
+获取源码；源码不可用时（如原生函数）回退为 Hook 类型加编号。
+图节点展示最多 28 字符的单行摘要，值列表允许 64 字符，悬停显示原始源码，
+仍受快照序列化上限约束。Hook 类型和实例编号继续显示。
+打包器可能改写函数名或转换源码，闭包变量的当前值不会展开；标签不作为实例身份。
+两个 Hook 均只接受 `(model, selector, isEqual?)`。
+
+采集覆盖顶层自有属性读取、`in`、属性描述符及枚举（`Object.keys`、展开）。
+`data.items[id].name` 等嵌套读取记录为 `items`，嵌套值保留原引用；直接返回
+`data` 时记录全部字段。条件分支只记录当前求值实际使用的输入。结果相等时，
+依赖改变仍会刷新连线，无需触发 React 重渲染，并保留 `isEqual` 留下的结果引用。
+这些边只用于调试展示，不过滤订阅，也不做静态依赖分析：props、经 `getField`
+读取、其他模型的读取，以及返回的回调/getter 中延迟发生的读取均不采集。
+在 Hook 外预先填充的缓存可能隐藏读取，无法采集；同一 Hook 内对相同 selector
+和快照重复求值则保留已观测的输入。
+返回嵌入 `data` 的容器时，不递归检查该容器的依赖。没有观测到读取就不连线；
+不支持采集的旧版集成显示依赖不可用。
+
+每个挂载的 Hook 单独占一个节点和一个值条目，显示名称、Hook 类型、实例编号和最近一次已提交 React
+渲染采用的结果；同名或复用同一个 selector 也不会合并。
+上报发生在提交后的 effect 中，因此 props/state 单独改变也会刷新；SSR 和被放弃的
+渲染不会留下条目。切换模型时转移归属，卸载或模型 dispose 时清理，支持 StrictMode
+的 effect 清理与重建。编号属于当前观测注册，重新挂载或 effect 重建可产生新编号。
+
+DevTools 复用 Hook 返回的结果（包含 `isEqual` 保留的引用），不额外调用 selector。
+值属于只读调试观测，不写入 `data`，不参与校验、调度器的 reaction 图或字段提交时间线。
+面板在 schema 图上叠加观测到的派生连线，悬停时高亮来源字段和箭头。
+列表只包含这两个派生 Hook，`useModelFields` 等字段绑定不会加入。
+采集不改变两个 Hook 各自的订阅策略。未启用 DevTools 的模型不创建观测注册或额外模型订阅；
+React 侧上报已提交结果、等价结果的依赖更新和卸载通知，page-agent 忽略未注册模型的上报。
+序列化和展示限制见 [DevTools](DEVTOOLS_CN.md)。
 
 ## 提交流程
 

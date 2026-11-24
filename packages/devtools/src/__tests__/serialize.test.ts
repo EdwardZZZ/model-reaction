@@ -187,6 +187,65 @@ describe('serializeRecord', () => {
 });
 
 describe('serializeSnapshot', () => {
+    test('preserves exact dependency names and budgets their count and bytes', () => {
+        const fields = ['__proto__', 'constructor', 'a"b', 'a,b', '0'];
+        const raw = {
+            data: {}, dirtyData: {}, errors: {},
+            derivedValues: [
+                { id: 1, kind: 'useModelComputed' as const, value: 2, fields },
+                { id: 2, kind: 'useModelComputed' as const, value: 2, fields: [] },
+                { id: 3, kind: 'useModelComputed' as const, value: 2 },
+            ],
+        };
+        const snapshot = JSON.parse(JSON.stringify(serializeSnapshot(raw)));
+        expect(snapshot.derivedValues[0].fields).toEqual(fields);
+        expect(snapshot.derivedValues[1].fields).toEqual([]);
+        expect(snapshot.derivedValues[2]).not.toHaveProperty('fields');
+        const options = { ...DEFAULT_SERIALIZE_OPTIONS, maxItems: 2, maxBytes: 2048 };
+        const capped = serializeSnapshot(raw, options);
+        expect(capped.derivedValues![0]!.fields).toEqual(fields.slice(0, 2));
+        expect(capped.truncated).toBe(true);
+        const long = serializeSnapshot({
+            ...raw, derivedValues: [{
+                ...raw.derivedValues[0]!, fields: ['\0'.repeat(5000)],
+            }],
+        }, options);
+        expect(long.derivedValues![0]!.fields).toEqual([]);
+        expect(long.truncated).toBe(true);
+        expect(Buffer.byteLength(JSON.stringify(long))).toBeLessThanOrEqual(options.maxBytes);
+    });
+
+    test('serializes derived values and names within the shared snapshot budget', () => {
+        const options = { ...DEFAULT_SERIALIZE_OPTIONS, maxBytes: 2048, maxItems: 2 };
+        const derivedValues = Array.from({ length: 20 }, (_, id) => ({
+            id, kind: 'useModelComputed' as const,
+            debugName: '派生\0'.repeat(1000), value: '值'.repeat(1000),
+        }));
+        const snapshot = serializeSnapshot({ data: { count: 1 }, dirtyData: {}, errors: {}, derivedValues }, options);
+        expect(snapshot.data.count).toEqual({ t: 'primitive', v: 1 });
+        expect(snapshot.derivedValues!.length).toBeGreaterThan(0);
+        expect(snapshot.derivedValues!.length).toBeLessThanOrEqual(2);
+        expect(snapshot.truncated).toBe(true);
+        expect(Buffer.byteLength(JSON.stringify(snapshot))).toBeLessThanOrEqual(options.maxBytes);
+    });
+
+    test('preserves exceptional derived values and contains failed inspection', () => {
+        const cycle: Record<string, unknown> = {};
+        cycle.self = cycle;
+        const unreadable = { get value() { throw new Error('cannot inspect'); } };
+        const snapshot = JSON.parse(JSON.stringify(serializeSnapshot({
+            data: {}, dirtyData: {}, errors: {},
+            derivedValues: [NaN, undefined, cycle, unreadable].map((value, id) => ({
+                id, kind: 'useModelSelector', value,
+            })),
+        })));
+        expect(snapshot.derivedValues[0].value).toEqual({ t: 'number', v: 'NaN' });
+        expect(snapshot.derivedValues[1].value).toEqual({ t: 'undefined' });
+        expect(snapshot.derivedValues[2].value.entries[0][1]).toEqual({ t: 'circular' });
+        expect(snapshot.derivedValues[3].value).toEqual({ t: 'truncated', note: 'value could not be inspected' });
+        expect(snapshot.truncated).toBe(true);
+    });
+
     test('shares one budget across committed, dirty, and error values', () => {
         const options = { ...DEFAULT_SERIALIZE_OPTIONS, maxBytes: 2048 };
         const snapshot = serializeSnapshot({

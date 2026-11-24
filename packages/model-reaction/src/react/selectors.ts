@@ -7,6 +7,27 @@ import {
 } from 'react';
 import { ModelEvents } from '../types';
 import type { ModelFieldKey, ModelReturn } from '../types';
+import type { ObservedSelection, SelectorObserver } from '../devtools-observer';
+
+interface SelectionSource<T extends Record<string, any>, R> {
+    getSnapshot(): R;
+    select(data: Readonly<T>): R;
+    fields?: string[] | undefined;
+    latest?: ObservedSelection<R>;
+    onEvaluate?: (selection: ObservedSelection<R>) => void;
+}
+
+interface DerivedSelection {
+    kind: 'useModelSelector' | 'useModelComputed';
+    value: unknown;
+    debugName?: string;
+    fields?: string[];
+}
+
+interface DevtoolsHook {
+    updateDerived?(model: object, token: object, selection: DerivedSelection | null): void;
+    getDerivedObserver?(model: object): SelectorObserver | undefined;
+}
 
 /**
  * Shallow equality for plain objects / arrays. Useful as the `isEqual`
@@ -49,46 +70,6 @@ export function shallow<T>(a: T, b: T): boolean {
 }
 
 /**
- * Build a render-local snapshot getter while retaining the last committed
- * selection for equality checks when selector references change.
- */
-function useSelectionSnapshot<T extends Record<string, any>, R>(
-    model: ModelReturn<T>,
-    selector: (data: Readonly<T>) => R,
-    isEqual: (a: R, b: R) => boolean
-): () => R {
-    const committedSelectionRef = useRef<{ value: R } | null>(null);
-    const getSnapshot = useMemo(() => {
-        let previous: { data: Readonly<T>; value: R } | null = null;
-
-        return (): R => {
-            const data = model.data;
-            if (previous !== null && Object.is(previous.data, data)) {
-                return previous.value;
-            }
-
-            const nextSelection = selector(data);
-            const committed = committedSelectionRef.current;
-            const selection =
-                committed !== null && isEqual(committed.value, nextSelection)
-                    ? committed.value
-                    : nextSelection;
-
-            previous = { data, value: selection };
-            return selection;
-        };
-    }, [model, selector, isEqual]);
-
-    // Only committed renders may update the cross-render equality baseline.
-    // The memoized getter above keeps speculative render state local.
-    useEffect(() => {
-        committedSelectionRef.current = { value: getSnapshot() };
-    });
-
-    return getSnapshot;
-}
-
-/**
  * Subscribe a component to a derived value. The component re-renders only
  * when `selector(data)` changes (compared via `isEqual`, default Object.is).
  *
@@ -102,14 +83,34 @@ export function useModelSelector<T extends Record<string, any>, R>(
     selector: (data: Readonly<T>) => R,
     isEqual: (a: R, b: R) => boolean = Object.is
 ): R {
-    const getSnapshot = useSelectionSnapshot(model, selector, isEqual);
+    return useSelectorValue(model, selector, isEqual, 'useModelSelector');
+}
+
+function useSelectorValue<T extends Record<string, any>, R>(
+    model: ModelReturn<T>,
+    selector: (data: Readonly<T>) => R,
+    isEqual: (a: R, b: R) => boolean,
+    kind?: 'useModelSelector' | 'useModelComputed'
+): R {
+    const observer = useMemo(() => kind ? getDerivedObserver(model) : undefined, [model, kind]);
+    const { source, committed } = useSelectionSnapshot(model, selector, isEqual, observer);
 
     const subscribe = useCallback(
         (notify: () => void) =>
-            model.subscribe(selector, () => notify(), isEqual),
-        [model, selector, isEqual]
+            model.subscribe(source.select, () => notify(), isEqual),
+        [model, source, isEqual]
     );
-    return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+    const subscribeComputed = useCallback(
+        (notify: () => void) => model.on(ModelEvents.FIELD_CHANGE, notify),
+        [model]
+    );
+    const value = useSyncExternalStore(
+        kind === 'useModelComputed' ? subscribeComputed : subscribe,
+        source.getSnapshot, source.getSnapshot
+    );
+    useEffect(() => { committed.current = { value }; });
+    useDerivedValue(model, kind, value, selector, isEqual, source);
+    return value;
 }
 
 /**
@@ -131,14 +132,7 @@ export function useModelComputed<T extends Record<string, any>, R>(
     selector: (data: Readonly<T>) => R,
     isEqual: (a: R, b: R) => boolean = Object.is
 ): R {
-    const getSnapshot = useSelectionSnapshot(model, selector, isEqual);
-
-    const subscribe = useCallback(
-        (notify: () => void) => model.on(ModelEvents.FIELD_CHANGE, notify),
-        [model]
-    );
-
-    return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+    return useSelectorValue(model, selector, isEqual, 'useModelComputed');
 }
 
 /**
@@ -160,5 +154,128 @@ export function useModelFields<
         // `key` covers `fields` content; intentional dep list.
     }, [key]);
 
-    return useModelSelector(model, pick, shallow);
+    return useSelectorValue(model, pick, shallow);
+}
+
+// Each selector has a render-local cache; only commits update the equality baseline.
+function useSelectionSnapshot<T extends Record<string, any>, R>(
+    model: ModelReturn<T>,
+    selector: (data: Readonly<T>) => R,
+    isEqual: (a: R, b: R) => boolean,
+    observer?: SelectorObserver
+) {
+    const committed = useRef<{ value: R } | null>(null);
+    const source = useMemo(() => {
+        let previous: { data: Readonly<T>; value: R } | null = null;
+        let observed: { data: Readonly<T>; fields: string[] } | null = null;
+        const evaluate = (data: Readonly<T>): ObservedSelection<R> => {
+            const selection = observer ? observer(data, selector) : { value: selector(data) };
+            if (selection.fields !== undefined) {
+                if (observed?.data === data) {
+                    selection.fields = [...new Set([...observed.fields, ...selection.fields])].sort();
+                }
+                observed = { data, fields: selection.fields };
+            }
+            source.latest = selection;
+            source.onEvaluate?.(selection);
+            return selection;
+        };
+        const source: SelectionSource<T, R> = {
+            select: (data) => evaluate(data).value,
+            getSnapshot: () => {
+                const data = model.data;
+                if (previous !== null && Object.is(previous.data, data)) return previous.value;
+                const selection = evaluate(data);
+                const value = committed.current !== null && isEqual(committed.current.value, selection.value)
+                    ? committed.current.value : selection.value;
+                source.fields = selection.fields;
+                previous = { data, value };
+                return value;
+            },
+        };
+        return source;
+    }, [model, selector, isEqual, observer]);
+    return { source, committed };
+}
+
+function getDerivedObserver(model: object): SelectorObserver | undefined {
+    try {
+        const hook = (globalThis as Record<string, unknown>)
+            .__MODEL_REACTION_DEVTOOLS_HOOK__ as DevtoolsHook | undefined;
+        return hook?.getDerivedObserver?.(model);
+    } catch {
+        return undefined;
+    }
+}
+
+function report(model: object, token: object, selection: DerivedSelection | null): void {
+    try {
+        const hook = (globalThis as Record<string, unknown>)
+            .__MODEL_REACTION_DEVTOOLS_HOOK__ as DevtoolsHook | undefined;
+        hook?.updateDerived?.(model, token, selection);
+    } catch {
+        // Debugging must not interrupt a React commit or cleanup.
+    }
+}
+
+// Publish only committed render results; see docs/REACT.md#devtools-derived-values.
+function useDerivedValue<T extends Record<string, any>, R>(
+    model: ModelReturn<T>,
+    kind: DerivedSelection['kind'] | undefined,
+    value: R,
+    selector: (data: Readonly<T>) => R,
+    isEqual: (a: R, b: R) => boolean,
+    source: SelectionSource<T, R>
+): void {
+    const token = useRef({}).current;
+    const lastReport = useRef<DerivedSelection | null>(null);
+    const debugName = useMemo(() => {
+        if (!kind) return undefined;
+        try {
+            const hook = (globalThis as Record<string, unknown>)
+                .__MODEL_REACTION_DEVTOOLS_HOOK__ as DevtoolsHook | undefined;
+            if (typeof hook?.updateDerived !== 'function') return undefined;
+            if (selector.name) return selector.name;
+            const text = Function.prototype.toString.call(selector).trim();
+            return text && !/\{\s*\[native code\]\s*\}$/.test(text) ? text : undefined;
+        } catch {
+            return undefined;
+        }
+    }, [kind, selector]);
+    const fieldsKey = JSON.stringify(source.fields);
+    useEffect(() => {
+        if (!kind) return;
+        return () => {
+            report(model, token, null);
+            lastReport.current = null;
+        };
+    }, [model, token, kind]);
+
+    useEffect(() => {
+        if (!kind) return;
+        let currentFields = fieldsKey;
+        const publish = (fields: string | undefined): void => {
+            const next: DerivedSelection = {
+                kind, value,
+                ...(debugName === undefined ? {} : { debugName }),
+                ...(fields === undefined ? {} : { fields: JSON.parse(fields) as string[] }),
+            };
+            const previous = lastReport.current;
+            if (previous && Object.is(previous.value, value) && previous.kind === kind &&
+                previous.debugName === debugName && JSON.stringify(previous.fields) === fields) return;
+            lastReport.current = next;
+            report(model, token, next);
+        };
+        publish(currentFields);
+        source.onEvaluate = (selection) => {
+            const nextFields = JSON.stringify(selection.fields);
+            if (nextFields !== currentFields && isEqual(value, selection.value)) {
+                currentFields = nextFields;
+                publish(currentFields);
+            }
+        };
+        // Reconcile equal-result changes between render and effect subscription.
+        if (source.latest) source.onEvaluate(source.latest);
+        return () => { delete source.onEvaluate; };
+    }, [model, token, kind, value, debugName, fieldsKey, source, isEqual]);
 }

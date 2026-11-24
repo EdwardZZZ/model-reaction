@@ -18,6 +18,8 @@ This page is the canonical React contract; README and examples link here.
 - [Controlled Inputs Under Strict / Async Validation](#controlled-inputs-under-strict--async-validation)
 - [Model Lifecycle in React](#model-lifecycle-in-react)
 - [`useModelSelector` vs `useModelComputed`](#usemodelselector-vs-usemodelcomputed)
+- [Side effects from derived values](#side-effects-from-derived-values)
+- [DevTools derived values](#devtools-derived-values)
 - [Submission Flow](#submission-flow)
 - [SSR and Concurrent Rendering](#ssr-and-concurrent-rendering)
 
@@ -63,6 +65,7 @@ interface Cart {
     price: number;
     coupon: string;
     name: string;
+    items: Record<string, { name: string }>;
 }
 
 function createCartModel() {
@@ -71,6 +74,7 @@ function createCartModel() {
         price:  { type: 'number', default: 100 },
         coupon: { type: 'string', default: '' },
         name:   { type: 'string', default: '', validator: [ValidationRules.required] },
+        items:  { type: 'object', default: {} },
     });
 }
 
@@ -277,9 +281,10 @@ The draft models "the text in a controlled `<input>`", so it is always a
   (e.g. `transform: Number`) so the string draft is coerced back to the real
   type on commit. Without one, the string is written straight into `data` as a
   silent type lie.
-- **boolean / enum / date fields** bound to checkboxes, selects or pickers —
-  **not** a fit; their control `value` isn't a string. Use a plain
-  `useModelFieldState` binding instead.
+- **Checkboxes, selects, and date pickers** — prefer `useModelFieldState` when
+  the control chooses a committed value without intermediate editing text.
+  HTML select values are strings, and a text-based picker may use a draft with
+  an appropriate transform; choose by the control's editing behavior.
 
 Two edge cases on the value→text (reseed) direction, which `useDraftField`
 handles internally (nullish/non-finite collapse) plus the optional `format`:
@@ -394,8 +399,9 @@ own different models.
 | Best for | — (avoid) | App-wide / feature-wide state | Route- or modal-scoped state |
 
 Rule of thumb: **whoever calls `createModel` is responsible for calling
-`dispose()`**. In React, that responsibility belongs to a component
-with a `useEffect` cleanup — never to a module's top-level scope.
+`dispose()`**. Component-owned models use matching effect cleanup. An intentionally
+app-wide singleton can instead have an application owner that disposes it on
+shutdown and hot replacement; keep it separate from route-scoped editors and SSR requests.
 
 ## `useModelSelector` vs `useModelComputed`
 
@@ -469,6 +475,102 @@ Equality is opt-in and does not avoid computing the next result. Neither hook
 guarantees exactly one selector call per commit or render: subscriptions and
 snapshot reads can both evaluate it. Keep selectors pure, and measure expensive
 derivations before adding memoization.
+
+## Side effects from derived values
+
+`useModelSelector` and `useModelComputed` return component values; they do not
+create schema fields or accept `reaction.action`. Keep their selectors pure.
+For a component-owned side effect, observe the returned value in `useEffect`:
+
+```tsx
+import { useEffect } from 'react';
+import type { ModelReturn } from 'model-reaction';
+import { useModelComputed } from 'model-reaction/react';
+
+function PreviewReporter({ model, uppercase, onPreviewChange }: {
+    model: ModelReturn<{ greeting: string }>;
+    uppercase: boolean;
+    onPreviewChange: (value: string) => void;
+}) {
+    const preview = useModelComputed(
+        model,
+        (data) => uppercase ? data.greeting.toUpperCase() : data.greeting
+    );
+    useEffect(() => {
+        onPreviewChange(preview);
+    }, [preview, onPreviewChange]);
+    return <output>{preview}</output>;
+}
+```
+
+The effect runs after the initial commit and when either dependency changes.
+Keep the callback stable with a module-level function or `useCallback` when
+only value changes should rerun it. StrictMode can repeat mount effects in
+development; make effects repeatable and clean up subscriptions or requests.
+Effect callbacks and their async work are not model actions, are not covered
+by `model.settled()`, and do not appear as action nodes in DevTools.
+
+For model-owned business work, define the derived value and its changing inputs
+as schema fields and configure `reaction.action`. That queue runs after successful
+computed-value validation/commit and calculation settlement; initialization and
+equal computed results can also queue actions. See the [action contract](API.md#action-queue).
+
+## DevTools derived values
+
+When a model is created through `model-reaction/devtools` with the extension hook
+already installed, these two Hooks appear as terminal nodes in **Dependencies**,
+with committed values listed below the graph. Dependencies are collected automatically
+from top-level reads during normal selector evaluation; no debug argument is needed:
+
+```tsx
+const selectTotal = (data: Readonly<Cart>) => data.qty * data.price;
+const total = useModelSelector(cart, selectTotal);
+const item = useModelComputed(cart, (data) => data.items[id]);
+```
+
+Here the arrows are `qty/price → selectTotal` and `items → (data) => data.items[id]`.
+The display name comes from `selector.name`, then the anonymous selector's source
+via `Function.prototype.toString.call(selector)`, then Hook kind and number if source
+is unavailable (for example, native code). Graph labels show a single-line summary
+of up to 28 characters; value rows allow 64. Hover to read the original source,
+subject to snapshot serialization limits. Hook kind and instance number remain visible.
+Bundlers may rename functions or transform source; closure values are not expanded.
+Labels do not identify Hook instances.
+Both Hooks accept only `(model, selector, isEqual?)`.
+
+Collection covers own top-level property reads, `in`, property descriptors, and
+enumeration (`Object.keys`, spread). Nested reads such as `data.items[id].name`
+record `items`; nested values keep their original identity. Directly returning
+`data` records all fields. Conditional branches record only the inputs used on the
+current evaluation. Equal-result dependency changes update arrows without forcing
+a React render, and keep the result reference retained by `isEqual`.
+The edges are debugging observations, not subscription filters or a static dependency
+analysis: props, reads through `getField`, reads on other models, and deferred reads
+inside returned callbacks/getters are not collected. Reads hidden by a cache populated
+outside this Hook are also unavailable; repeated evaluations of the same selector and
+snapshot within the Hook retain their observed inputs. Returning a container that
+embeds `data` does not recursively inspect that container for dependencies.
+No observed reads means no arrows; an older integration without collection marks
+dependencies as unavailable.
+
+Each mounted Hook gets its own node and value row showing its name, Hook kind, instance number,
+and the result adopted by its latest committed React render. Identical names or shared selectors never merge rows.
+Reporting runs in a post-commit effect, so props/state-only changes also refresh
+the list. SSR and abandoned renders create no rows. Switching models moves the
+observation; unmounting or disposing the model clears it. StrictMode effect
+cleanup and recreation are supported. Numbers identify the current observation
+registration; remounting or recreating effects can assign a new number.
+
+DevTools reuses the Hook's returned result, including references retained by
+`isEqual`, without evaluating the selector again. These are read-only debugging
+observations: they never enter `data`, validation, the scheduler's reaction graph,
+or the field-commit timeline. The panel overlays their observed edges on the schema
+graph; hovering highlights source fields and their arrows. Only these two derived Hooks
+populate the list; field bindings such as `useModelFields` do not.
+Collection does not alter either Hook's subscription policy. Models without DevTools create no observation
+registrations or additional model subscriptions; the React adapter only reports
+committed results, equivalent-result dependency updates, and unmounts, and the page agent ignores unregistered models.
+See [DevTools](DEVTOOLS.md) for serialization limits.
 
 ## Submission Flow
 

@@ -10,6 +10,7 @@ import type {
 } from './types';
 import { ModelEvents } from './types';
 import { eachReactionEdge } from './reaction/reaction-graph';
+import { observeModelSelectors, type SelectorObserver } from './devtools-observer';
 
 const DEVTOOLS_HOOK_KEY = '__MODEL_REACTION_DEVTOOLS_HOOK__';
 
@@ -50,11 +51,13 @@ interface DevtoolsModelInstance {
     getSnapshot(): DevtoolsSnapshot;
     subscribe(listener: (change: DevtoolsChange) => void): () => void;
     subscribeSnapshot?(listener: () => void): () => void;
+    observeSelector?: SelectorObserver;
 }
 
 interface ModelReactionDevtoolsHook {
-    register(instance: DevtoolsModelInstance): void;
+    register(instance: DevtoolsModelInstance, model?: object): void;
     unregister(id: number): void;
+    getDerivedObserver?(model: object): SelectorObserver | undefined;
 }
 
 function getDevtoolsHook(): ModelReactionDevtoolsHook | undefined {
@@ -73,12 +76,13 @@ let nextInstanceId = 0;
 
 function attachToDevtools(
     hook: ModelReactionDevtoolsHook,
-    instance: Omit<DevtoolsModelInstance, 'id'>
+    instance: Omit<DevtoolsModelInstance, 'id'>,
+    model: object
 ): () => void {
     const id = nextInstanceId++;
     const full: DevtoolsModelInstance = { id, ...instance };
     try {
-        hook.register(full);
+        hook.register(full, model);
     } catch {
         return () => {};
     }
@@ -147,6 +151,8 @@ export const createModel: typeof baseCreateModel = (
     const fields = buildFieldInfo(schema as Model);
     const graph = buildDependencyGraph(fields);
     const detach = attachToDevtools(hook, {
+        ...(typeof hook.getDerivedObserver === 'function'
+            ? { observeSelector: observeModelSelectors(model) } : {}),
         getFields: () => fields,
         getDependencyGraph: () => graph,
         getSnapshot: () => ({
@@ -175,7 +181,7 @@ export const createModel: typeof baseCreateModel = (
             ];
             return () => unsubscribers.forEach((unsubscribe) => unsubscribe());
         },
-    });
+    }, model);
 
     const originalDispose = model.dispose;
     model.dispose = () => {

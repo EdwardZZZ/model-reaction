@@ -30,8 +30,10 @@ flowchart LR
 | `src/core/` | Model state, field-write flow, default cloning, structural comparison, events, and pending tasks | `ModelManager` is the sole owner of data, dirty data, errors, and validation freshness |
 | `src/validation/` | Field validation, rule builders, and error formatting | Core calls `validate-field.ts`; rules and formatting have a separate entry |
 | `src/reaction/` | Dependency indexing, scheduling, computed writeback, and action lifecycle | Uses `ReactionSystem` callbacks to access the model; owns no model data |
-| `src/react/` | Provider, field bindings, draft state, and selector hooks | Uses the public model surface and ships through `model-reaction/react` |
+| `src/react/` | Provider, field bindings, draft state, and selector hooks | Reads the public model surface; ships through `model-reaction/react` |
 | `src/devtools.ts` | Optional hook and model-inspection adapter | Exports only `createModel`; reads through the public model API and shares dependency parsing |
+| `src/react/selectors.ts` | Selector Hooks, snapshot caching, and committed derived-value reporting | Only committed values seed equality; the extension owns observations; no additional model subscriptions |
+| `src/devtools-observer.ts` | Stable shallow snapshots, synchronous top-level read collection, and private observation types | Opt-in adapter only; React imports types only; no package exports |
 | `src/__tests__/` | Core behavior, React adapter, and integration tests | Integration tests also protect README examples |
 
 `core/write-preparation.ts` owns the internal commit options, prepared-write type,
@@ -41,6 +43,8 @@ cloning and structural comparison stay in separate files under `core/`.
 formatter. React and DevTools remain separate package entry points.
 `devtools.ts` keeps its hook types and helpers private. Tests observe registered
 instances through a capturing global hook instead of importing internal helpers.
+Selector cache and reporting helpers remain private within `react/selectors.ts`;
+`devtools-observer.ts` keeps collection and its shared type contract together.
 
 `types.ts` groups schema/inference, errors/events, and instance APIs. Field tag
 values share one map; inferred reads also include defaults and computed results.

@@ -14,6 +14,8 @@ A type-safe data model library for TypeScript: validation, dependency reactions,
 - **Typed events** — subscribe to field changes, validation, and reaction errors.
 - **Type-safe** — schema literals infer field values; fields without defaults include `undefined`.
 - **Optional React adapter** — fine-grained, selector-level subscriptions; no React in the core.
+- **Optional DevTools** — inspect model fields, actions, and mounted React derived
+  values with automatically collected selector inputs; see [DevTools](docs/DEVTOOLS.md).
 
 ### AI-Friendly by Design
 

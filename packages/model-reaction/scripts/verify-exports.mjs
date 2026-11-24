@@ -138,7 +138,7 @@ async function verifyDeclarations() {
     const entryContracts = `
 import { createModel as createDevtoolsModel } from 'model-reaction/devtools';
 import { formatValidationErrors } from 'model-reaction/validation';
-import { useDraftField, useModelField, useModelFields, useModelFieldState, Field } from 'model-reaction/react';
+import { useDraftField, useModelField, useModelFields, useModelFieldState, useModelSelector, useModelComputed, Field } from 'model-reaction/react';
 import type { ModelFieldKey, ModelFieldName, ValidationErrors } from 'model-reaction';
 const devtools: typeof createModel = createDevtoolsModel;
 const root: typeof createDevtoolsModel = createModel;
@@ -151,11 +151,17 @@ function verifyEntries() {
   const fields: { 0: number } = useModelFields(model, [key]);
   const state: number = useModelFieldState(model, key)[0];
   const draft: number = useDraftField(model, key).committed;
+  const selected: number = useModelSelector(model, (data) => data[0], Object.is);
+  const computed: number = useModelComputed(model, (data) => data[0] * 2, Object.is);
+  // @ts-expect-error selector hooks have no debug argument
+  useModelSelector(model, (data) => data[0], undefined, 'selected');
+  // @ts-expect-error selector hooks have no debug argument
+  useModelComputed(model, (data) => data[0], undefined, { fields: [0] });
   Field({ model, name: key, children: ({ value }) => { const v: number = value; return v; } });
   formatValidationErrors(errors);
   // @ts-expect-error React fields share the string/number key contract
   useModelField(model, Symbol('field'));
-  void [devtools, root, name, field, fields, state, draft];
+  void [devtools, root, name, field, fields, state, draft, selected, computed];
 }
 void verifyEntries;
 `;

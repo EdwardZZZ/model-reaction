@@ -6,7 +6,8 @@ its [DevTools extension](../devtools) across three scenarios:
 - **Reaction chain** — `firstName`/`lastName` → `fullName` → `greeting`
   (two derivation layers in the dependency graph), with three named actions
   including a shared function, visible writeback results, and an app-wide model
-  that preserves state when switching scenarios.
+  that preserves state when switching scenarios. React selectors add observed
+  derived nodes and a local uppercase preview with an effect.
 - **Async validation** — an async "username available?" check showing
   `validating` state and `dirtyData` on rejection.
 - **Multiple instances** — two independent models on one page, exercising the
@@ -48,10 +49,22 @@ edges to target blocks' left edges.
 Writebacks appear in **Data Tree** and **Timeline**. The graph does not infer
 writeback dependencies from action closures.
 
+The same view mounts `useModelSelector` for `selectNameLength` and an anonymous
+`useModelComputed` for the greeting preview. Dependencies shows green nodes with
+automatically collected `fullName` and `greeting` input arrows. The anonymous
+node uses a source summary; hover to read its original source. Toggle **Uppercase
+preview** to update the Hook result without writing model fields or adding
+Timeline entries. A React `useEffect` logs the committed preview to the console,
+including the initial mount; development StrictMode can repeat that mount effect.
+It is separate from the schema actions and is not shown as an action node or
+tracked by `model.settled()`. See [derived-value effects](../model-reaction/docs/REACT.md#side-effects-from-derived-values).
+Switching away removes the Hook observations; returning mounts new observations
+while retaining the shared model's data.
+
 ## How it resolves the library
 
 `vite.config.ts` (and `tsconfig.json` `paths`) alias `model-reaction`,
-`model-reaction/react`, and `model-reaction/devtools` to the library **source**
+`model-reaction/react`, `model-reaction/validation`, and `model-reaction/devtools` to the library **source**
 under `../model-reaction/src`. Editing the library is reflected instantly in
 `dev`, and the demo build never depends on the library being built first —
 mirroring the source-mapping used by the devtools package's tests.

@@ -110,7 +110,7 @@ reaction 索引和 DevTools 元数据在创建时建立，而部分写入配置�
 > **默认值不经过校验。** 每个字段的 `default` 在构造时被直接写入 `data`，
 > 验证器**不会**对其运行。因此 model 可能一开始就处于非法状态，而
 > `validationErrors` 却是空的。在信任初始 `data` 之前，请先
-> 先 `await settled()` 等待初始化，再 `await validateAll()`。
+> `await settled()` 等待初始化，再 `await validateAll()`。
 >
 > **初始化反应会经过未变化的值继续传播。** 非派生字段的默认值启动初始反应流程。
 > 派生值通过校验后，即使等于自身默认值，也会继续初始化下游，但不会为未变化的值
@@ -147,6 +147,10 @@ reaction 索引和 DevTools 元数据在创建时建立，而部分写入配置�
 本库只支持浅层数据，按字段替换跟踪变化。对象、数组和 Date 等可变内建对象字段值对模型来说是整体：
 原地修改不会被观察，也不会触发校验、reactions 或订阅。值变化时请用 `setField()`
 或 `setFields()` 整体替换。`data` 和脏数据记录的外层对象会浅冻结，字段值本身不会被冻结。
+
+可选的 DevTools 入口在支持自动 selector 观测时，为 `data` 提供稳定的浅层 Proxy。
+快照引用仍保持稳定，但原生结构化克隆前需要先复制外层对象，见
+[DevTools 接入](DEVTOOLS_CN.md#在应用中启用)。
 
 替换值为普通对象、数组、`Date` 或 `RegExp` 时按结构判等。`Map`、`Set` 和类实例等
 其他对象按引用判等：传入新的实例会被视为变化。
@@ -334,7 +338,7 @@ type ReactionAction<T = any> = (context: {
 | 方法 | 说明 |
 | --- | --- |
 | `validateAll(): Promise<boolean>` | 对全部字段校验一次，等待模型全部追踪工作落定，返回最终结果 |
-| `getDirtyData(): Partial<T>` | 获取稳定的浅冻结脏数据快照 |
+| `getDirtyData(): Readonly<Partial<T>>` | 获取稳定的浅冻结脏数据快照 |
 | `clearDirtyData(): void` | 清空所有脏数据记录 |
 
 提交前先等待已有输入写入与初始化落定，再创建完整校验的候选快照：

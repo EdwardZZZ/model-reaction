@@ -3,7 +3,7 @@
  *
  * Wires the transport ({@link createPanelPort}) to the pure reducer
  * ({@link panelReducer}) via `useReducer`, then renders the selected instance
- * through one of three tabs: data tree, dependency graph, change timeline.
+ * through data, dependency graph, and change timeline tabs.
  *
  * The `connect` prop is injected so tests can drive the panel with a fake
  * transport instead of the real `chrome.runtime` port.
@@ -101,7 +101,7 @@ export function Panel({ connect }: PanelProps): ReactElement {
                     </nav>
                     <main className="mrd-content">
                         {tab === 'data' && <DataTreeView instance={selected} />}
-                        {tab === 'graph' && <DependencyGraphView instance={selected} />}
+                        {tab === 'graph' && <DependencyGraphView key={selected.id} instance={selected} />}
                         {tab === 'timeline' && <TimelineView key={selected.id} instance={selected} />}
                     </main>
                 </>

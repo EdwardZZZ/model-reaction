@@ -64,11 +64,23 @@ export interface DependencyGraph {
     edges: DependencyEdge[];
 }
 
-/** The three-layer snapshot, with every value pre-serialized. */
+export interface DerivedValue {
+    id: number;
+    kind: 'useModelSelector' | 'useModelComputed';
+    /** Function name or anonymous selector source; absent when neither is available. */
+    debugName?: string;
+    /** Observed top-level model inputs; absent means unknown, [] means none. */
+    fields?: string[];
+    value: SerializedValue;
+}
+
+/** Model layers and optional React observations, with every value pre-serialized. */
 export interface Snapshot {
     data: Record<string, SerializedValue>;
     dirtyData: Record<string, SerializedValue>;
     errors: Record<string, Array<{ field: string; message: string; rule?: string }>>;
+    /** Absent in snapshots from older library versions. */
+    derivedValues?: DerivedValue[];
     /** Some values or fields were omitted or clipped to fit serialization limits. */
     truncated?: boolean;
 }
