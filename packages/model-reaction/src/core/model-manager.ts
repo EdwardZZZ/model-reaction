@@ -209,13 +209,11 @@ export class ModelManager<
         const endBatch = this.pendingTasks.begin();
         const changedFields = new Set<string>();
         try {
-            let allValid: boolean;
             try {
-                allValid = await validate({ changedFields });
+                return await validate({ changedFields });
             } finally {
                 this.reactionSystem.triggerReactionsForFields([...changedFields]);
             }
-            return allValid;
         } finally {
             endBatch();
         }

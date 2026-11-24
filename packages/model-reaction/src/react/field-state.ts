@@ -76,33 +76,19 @@ export function useModelFieldState<
 
     const metaSubscribe = useCallback(
         (notify: () => void) => {
+            const fieldName = String(field);
             const validationHandler = (e: { field?: string }): void => {
-                if (e.field === String(field)) notify();
+                if (e.field === fieldName) notify();
             };
-            const unsubscribeError = model.on(
-                ModelEvents.VALIDATION_ERROR,
-                validationHandler
-            );
-            const unsubscribeReactionError = model.on(
-                ModelEvents.REACTION_ERROR,
-                validationHandler
-            );
-            const unsubscribeFieldValidation = model.on(
-                ModelEvents.FIELD_VALIDATION_COMPLETE,
-                validationHandler
-            );
-            const unsubscribeDirty = model.on(
-                ModelEvents.DIRTY_DATA_CLEARED,
-                (e) => {
-                    if (e.fields.some((name) => name === String(field))) notify();
-                }
-            );
-            return () => {
-                unsubscribeError();
-                unsubscribeReactionError();
-                unsubscribeFieldValidation();
-                unsubscribeDirty();
-            };
+            const unsubscribers = [
+                model.on(ModelEvents.VALIDATION_ERROR, validationHandler),
+                model.on(ModelEvents.REACTION_ERROR, validationHandler),
+                model.on(ModelEvents.FIELD_VALIDATION_COMPLETE, validationHandler),
+                model.on(ModelEvents.DIRTY_DATA_CLEARED, (e) => {
+                    if (e.fields.some((name) => name === fieldName)) notify();
+                }),
+            ];
+            return () => unsubscribers.forEach((unsubscribe) => unsubscribe());
         },
         [model, field]
     );

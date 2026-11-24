@@ -2,8 +2,8 @@ import type { ModelReturn } from './types';
 
 /** Private in-page capability; not part of the package's public exports. */
 export interface ObservedSelection<R> {
-    value: R;
-    fields?: string[];
+    readonly value: R;
+    readonly fields?: readonly string[];
 }
 
 export type SelectorObserver = <T extends Record<string, any>, R>(

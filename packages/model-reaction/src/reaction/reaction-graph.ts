@@ -1,15 +1,5 @@
 import type { Model, Reaction } from '../types';
 
-export function eachReaction(
-    schema: Model,
-    visit: (field: string, reaction: Reaction) => void
-): void {
-    for (const [name, field] of Object.entries(schema)) {
-        if (!field.reaction) continue;
-        visit(name, field.reaction);
-    }
-}
-
 /**
  * The single definition of how a schema's `reaction` declarations are read as
  * dependency edges.
@@ -33,9 +23,10 @@ export function eachReactionEdge(
     schema: Model,
     visit: (computedField: string, dependencyField: string, reaction: Reaction) => void
 ): void {
-    eachReaction(schema, (computedField, reaction) => {
+    for (const [computedField, { reaction }] of Object.entries(schema)) {
+        if (!reaction) continue;
         for (const dependencyField of reaction.fields) {
             visit(computedField, dependencyField, reaction);
         }
-    });
+    }
 }

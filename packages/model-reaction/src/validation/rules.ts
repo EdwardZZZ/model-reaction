@@ -8,8 +8,7 @@
 
 import type { Validator } from '../types';
 
-const isFiniteNumber = (v: unknown): v is number =>
-    typeof v === 'number' && Number.isFinite(v);
+const isFiniteNumber = (v: unknown): v is number => Number.isFinite(v);
 
 const isString = (v: unknown): v is string => typeof v === 'string';
 
@@ -56,7 +55,7 @@ export const ValidationRules = {
     integer: /* @__PURE__ */ new Rule(
         'integer',
         'Must be an integer',
-        (v) => isFiniteNumber(v) && Number.isInteger(v)
+        (v) => Number.isInteger(v)
     ),
     boolean: /* @__PURE__ */ new Rule(
         'boolean',
@@ -93,9 +92,7 @@ export const ValidationRules = {
             if (!isString(v)) return false;
             // Global and sticky regexes mutate lastIndex during test(). Start
             // from zero on every validation without mutating the schema rule.
-            const stableRegex = new RegExp(regex.source, regex.flags);
-            stableRegex.lastIndex = 0;
-            return stableRegex.test(v);
+            return new RegExp(regex.source, regex.flags).test(v);
         }),
     email: /* @__PURE__ */ new Rule(
         'email',

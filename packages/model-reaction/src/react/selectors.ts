@@ -12,8 +12,8 @@ import type { ObservedSelection, SelectorObserver } from '../devtools-observer';
 interface SelectionSource<T extends Record<string, any>, R> {
     getSnapshot(): R;
     select(data: Readonly<T>): R;
-    fields?: string[] | undefined;
-    latest?: ObservedSelection<R>;
+    fields?: readonly string[] | undefined;
+    latest?: { data: Readonly<T>; selection: ObservedSelection<R> };
     onEvaluate?: (selection: ObservedSelection<R>) => void;
 }
 
@@ -167,16 +167,10 @@ function useSelectionSnapshot<T extends Record<string, any>, R>(
     const committed = useRef<{ value: R } | null>(null);
     const source = useMemo(() => {
         let previous: { data: Readonly<T>; value: R } | null = null;
-        let observed: { data: Readonly<T>; fields: string[] } | null = null;
         const evaluate = (data: Readonly<T>): ObservedSelection<R> => {
+            if (source.latest?.data === data) return source.latest.selection;
             const selection = observer ? observer(data, selector) : { value: selector(data) };
-            if (selection.fields !== undefined) {
-                if (observed?.data === data) {
-                    selection.fields = [...new Set([...observed.fields, ...selection.fields])].sort();
-                }
-                observed = { data, fields: selection.fields };
-            }
-            source.latest = selection;
+            source.latest = { data, selection };
             source.onEvaluate?.(selection);
             return selection;
         };
@@ -188,7 +182,7 @@ function useSelectionSnapshot<T extends Record<string, any>, R>(
                 const selection = evaluate(data);
                 const value = committed.current !== null && isEqual(committed.current.value, selection.value)
                     ? committed.current.value : selection.value;
-                source.fields = selection.fields;
+                if (!shallow(source.fields, selection.fields)) source.fields = selection.fields;
                 previous = { data, value };
                 return value;
             },
@@ -242,7 +236,7 @@ function useDerivedValue<T extends Record<string, any>, R>(
             return undefined;
         }
     }, [kind, selector]);
-    const fieldsKey = JSON.stringify(source.fields);
+    const snapshotFields = source.fields;
     useEffect(() => {
         if (!kind) return;
         return () => {
@@ -253,29 +247,29 @@ function useDerivedValue<T extends Record<string, any>, R>(
 
     useEffect(() => {
         if (!kind) return;
-        let currentFields = fieldsKey;
-        const publish = (fields: string | undefined): void => {
+        let currentFields = snapshotFields;
+        const publish = (fields: readonly string[] | undefined): void => {
+            const previous = lastReport.current;
+            if (previous && Object.is(previous.value, value) && previous.kind === kind &&
+                previous.debugName === debugName && shallow(previous.fields, fields)) return;
             const next: DerivedSelection = {
                 kind, value,
                 ...(debugName === undefined ? {} : { debugName }),
-                ...(fields === undefined ? {} : { fields: JSON.parse(fields) as string[] }),
+                ...(fields === undefined ? {} : { fields: [...fields] }),
             };
-            const previous = lastReport.current;
-            if (previous && Object.is(previous.value, value) && previous.kind === kind &&
-                previous.debugName === debugName && JSON.stringify(previous.fields) === fields) return;
             lastReport.current = next;
             report(model, token, next);
         };
         publish(currentFields);
         source.onEvaluate = (selection) => {
-            const nextFields = JSON.stringify(selection.fields);
-            if (nextFields !== currentFields && isEqual(value, selection.value)) {
+            const nextFields = selection.fields;
+            if (!shallow(nextFields, currentFields) && isEqual(value, selection.value)) {
                 currentFields = nextFields;
                 publish(currentFields);
             }
         };
         // Reconcile equal-result changes between render and effect subscription.
-        if (source.latest) source.onEvaluate(source.latest);
+        if (source.latest) source.onEvaluate(source.latest.selection);
         return () => { delete source.onEvaluate; };
-    }, [model, token, kind, value, debugName, fieldsKey, source, isEqual]);
+    }, [model, token, kind, value, debugName, snapshotFields, source, isEqual]);
 }
