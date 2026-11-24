@@ -18,7 +18,7 @@ Reference for the public `model-reaction` API surface.
 - [Validation Rules](#validation-rules)
 - [Error Formatting](#error-formatting)
 - [Type Definitions](#type-definitions)
-- [API simplification migration](#api-simplification-migration-unreleased)
+- [Migrating to 2.0.0](#migrating-to-200)
 
 ---
 
@@ -594,7 +594,7 @@ The core entry exports `createModel`, `ModelEvents`, and `SKIP_REACTION`.
 
 For full type definitions, see [`src/types.ts`](../src/types.ts).
 
-## API simplification migration (Unreleased)
+## Migrating to 2.0.0
 
 These changes are breaking and require updating consumers:
 

@@ -102,7 +102,7 @@ reactions。
 每字段只接受一个 `reaction`。字段内校验按规则顺序执行，首错即停。
 未知写入 key 先发送 `field:not-found` 再 reject，整批不开始处理。
 `setField` 和 `setFields` 的验证器读取经过 transform 的候选快照，包含字段自身的新值。
-字段结构判等保持不变，详见 [破坏性迁移说明](docs/API_CN.md#api-精简迁移unreleased)。
+字段结构判等保持不变，详见 [破坏性迁移说明](docs/API_CN.md#迁移到-200)。
 
 ## 核心概念
 
@@ -201,8 +201,8 @@ React 的技术契约与完整示例统一维护在 [docs/REACT_CN.md](docs/REAC
 draft 行为、非文本控件、transform 和错误展示，详见
 [受控输入](docs/REACT_CN.md#严格--异步校验下的受控输入)。
 
-未发布版本包含 API 不兼容变更，升级时请参考
-[迁移说明](docs/API_CN.md#api-精简迁移unreleased)。
+2.0.0 包含 API 不兼容变更，升级时请参考
+[迁移说明](docs/API_CN.md#迁移到-200)。
 
 ## 文档
 

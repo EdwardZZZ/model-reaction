@@ -18,7 +18,7 @@
 - [验证规则](#验证规则)
 - [错误格式化](#错误格式化)
 - [类型定义](#类型定义)
-- [API 精简迁移](#api-精简迁移unreleased)
+- [迁移到 2.0.0](#迁移到-200)
 
 ---
 
@@ -520,7 +520,7 @@ const custom = formatValidationErrors(
 
 完整类型定义请见 [`src/types.ts`](../src/types.ts)。
 
-## API 精简迁移（Unreleased）
+## 迁移到 2.0.0
 
 这组变更不向后兼容，升级时需要修改调用处：
 

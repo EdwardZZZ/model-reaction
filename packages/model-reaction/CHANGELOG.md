@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.0]
+
 ### Added
 - **React derived values in DevTools:** `useModelSelector` and `useModelComputed`
   appear as green terminal nodes in Dependencies, with committed values and
@@ -114,8 +116,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   one pending debounced computation. Pending functions and returned Promises
   are tracked without maintaining execution groups or action versions.
 - Structural field equality, both selector Hook contracts, async validation
-  timeout, and reaction debounce remain unchanged. These unreleased breaking
-  changes require a major release, not a patch release.
+  timeout, and reaction debounce remain unchanged.
 - **Breaking:** moved `ValidationRules`, `Rule`, `formatValidationErrors`, and
   the `ValidationErrorFormatter` type from the root to
   `model-reaction/validation`. The core still executes validators. Browser
