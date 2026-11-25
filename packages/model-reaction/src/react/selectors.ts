@@ -86,33 +86,6 @@ export function useModelSelector<T extends Record<string, any>, R>(
     return useSelectorValue(model, selector, isEqual, 'useModelSelector');
 }
 
-function useSelectorValue<T extends Record<string, any>, R>(
-    model: ModelReturn<T>,
-    selector: (data: Readonly<T>) => R,
-    isEqual: (a: R, b: R) => boolean,
-    kind?: 'useModelSelector' | 'useModelComputed'
-): R {
-    const observer = useMemo(() => kind ? getDerivedObserver(model) : undefined, [model, kind]);
-    const { source, committed } = useSelectionSnapshot(model, selector, isEqual, observer);
-
-    const subscribe = useCallback(
-        (notify: () => void) =>
-            model.subscribe(source.select, () => notify(), isEqual),
-        [model, source, isEqual]
-    );
-    const subscribeComputed = useCallback(
-        (notify: () => void) => model.on(ModelEvents.FIELD_CHANGE, notify),
-        [model]
-    );
-    const value = useSyncExternalStore(
-        kind === 'useModelComputed' ? subscribeComputed : subscribe,
-        source.getSnapshot, source.getSnapshot
-    );
-    useEffect(() => { committed.current = { value }; });
-    useDerivedValue(model, kind, value, selector, isEqual, source);
-    return value;
-}
-
 /**
  * Select a derived value using the current render's selector while subscribing
  * only by model identity. Inline selectors may close over current props without
@@ -157,6 +130,33 @@ export function useModelFields<
     return useSelectorValue(model, pick, shallow);
 }
 
+function useSelectorValue<T extends Record<string, any>, R>(
+    model: ModelReturn<T>,
+    selector: (data: Readonly<T>) => R,
+    isEqual: (a: R, b: R) => boolean,
+    kind?: 'useModelSelector' | 'useModelComputed'
+): R {
+    const observer = useMemo(() => kind ? getDerivedObserver(model) : undefined, [model, kind]);
+    const { source, committed } = useSelectionSnapshot(model, selector, isEqual, observer);
+
+    const subscribe = useCallback(
+        (notify: () => void) =>
+            model.subscribe(source.select, () => notify(), isEqual),
+        [model, source, isEqual]
+    );
+    const subscribeComputed = useCallback(
+        (notify: () => void) => model.on(ModelEvents.FIELD_CHANGE, notify),
+        [model]
+    );
+    const value = useSyncExternalStore(
+        kind === 'useModelComputed' ? subscribeComputed : subscribe,
+        source.getSnapshot, source.getSnapshot
+    );
+    useEffect(() => { committed.current = { value }; });
+    useDerivedValue(model, kind, value, selector, isEqual, source);
+    return value;
+}
+
 // Each selector has a render-local cache; only commits update the equality baseline.
 function useSelectionSnapshot<T extends Record<string, any>, R>(
     model: ModelReturn<T>,
@@ -190,26 +190,6 @@ function useSelectionSnapshot<T extends Record<string, any>, R>(
         return source;
     }, [model, selector, isEqual, observer]);
     return { source, committed };
-}
-
-function getDerivedObserver(model: object): SelectorObserver | undefined {
-    try {
-        const hook = (globalThis as Record<string, unknown>)
-            .__MODEL_REACTION_DEVTOOLS_HOOK__ as DevtoolsHook | undefined;
-        return hook?.getDerivedObserver?.(model);
-    } catch {
-        return undefined;
-    }
-}
-
-function report(model: object, token: object, selection: DerivedSelection | null): void {
-    try {
-        const hook = (globalThis as Record<string, unknown>)
-            .__MODEL_REACTION_DEVTOOLS_HOOK__ as DevtoolsHook | undefined;
-        hook?.updateDerived?.(model, token, selection);
-    } catch {
-        // Debugging must not interrupt a React commit or cleanup.
-    }
 }
 
 // Publish only committed render results; see docs/REACT.md#devtools-derived-values.
@@ -272,4 +252,24 @@ function useDerivedValue<T extends Record<string, any>, R>(
         if (source.latest) source.onEvaluate(source.latest.selection);
         return () => { delete source.onEvaluate; };
     }, [model, token, kind, value, debugName, snapshotFields, source, isEqual]);
+}
+
+function getDerivedObserver(model: object): SelectorObserver | undefined {
+    try {
+        const hook = (globalThis as Record<string, unknown>)
+            .__MODEL_REACTION_DEVTOOLS_HOOK__ as DevtoolsHook | undefined;
+        return hook?.getDerivedObserver?.(model);
+    } catch {
+        return undefined;
+    }
+}
+
+function report(model: object, token: object, selection: DerivedSelection | null): void {
+    try {
+        const hook = (globalThis as Record<string, unknown>)
+            .__MODEL_REACTION_DEVTOOLS_HOOK__ as DevtoolsHook | undefined;
+        hook?.updateDerived?.(model, token, selection);
+    } catch {
+        // Debugging must not interrupt a React commit or cleanup.
+    }
 }

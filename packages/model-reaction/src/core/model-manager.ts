@@ -80,44 +80,32 @@ export class ModelManager<
     }
 
     // -------------------------------------------------------------------------
-    // Lifecycle helpers
+    // Public read API
     // -------------------------------------------------------------------------
 
-    /** Seed defaults and bootstrap derived values; see docs/API.md. */
-    private initializeDefaults(): void {
-        const seededInputs: string[] = [];
-        Object.entries(this.schema).forEach(([field, schema]) => {
-            // Own undefined values keep prototype-named fields safe in snapshots.
-            this.modelData[field as keyof T] = cloneDefault(schema.default) as T[keyof T];
-            if (schema.default !== undefined) {
-                if (schema.reaction === undefined) {
-                    seededInputs.push(field);
-                }
-            }
-        });
-
-        if (seededInputs.length > 0) {
-            this.reactionSystem.triggerReactionsForFields(seededInputs, [], true);
+    get data(): Readonly<T> {
+        if (this.dataSnapshot === null) {
+            this.dataSnapshot = Object.freeze({ ...this.modelData });
         }
+        return this.dataSnapshot;
     }
 
-    private ensureNotDisposed(): void {
-        if (this.disposed) {
-            throw new Error(
-                'ModelManager has been disposed and cannot be used'
-            );
+    get validationErrors(): ValidationErrors {
+        if (this.errorsSnapshot === null) {
+            this.errorsSnapshot = Object.freeze({ ...this.errors });
         }
+        return this.errorsSnapshot;
     }
 
-    // -------------------------------------------------------------------------
-    // Event facade
-    // -------------------------------------------------------------------------
+    getField = <K extends ModelFieldKey<T>>(field: K): T[K] => {
+        return this.modelData[field];
+    };
 
-    on = <E extends keyof ModelEventMap<T>>(
-        event: E,
-        callback: (data: ModelEventMap<T>[E]) => void
-    ): (() => void) => {
-        return this.eventEmitter.on(event, callback);
+    getDirtyData = (): Readonly<Partial<T>> => {
+        if (this.dirtyDataSnapshot === null) {
+            this.dirtyDataSnapshot = Object.freeze({ ...this.dirtyData });
+        }
+        return this.dirtyDataSnapshot;
     };
 
     // -------------------------------------------------------------------------
@@ -169,38 +157,25 @@ export class ModelManager<
         return valid;
     };
 
-    /** Track the whole batch, including reactions from partial commits on rejection. */
-    private async runBatch(
-        prepare: () => PreparedFieldWrite[]
-    ): Promise<boolean> {
-        this.ensureNotDisposed();
-        const endBatch = this.pendingTasks.begin();
-        const changedFields = new Set<string>();
-        try {
-            const prepared = prepare();
-            const data = createValidationSnapshot(this.modelData, prepared);
-            const results = await Promise.allSettled(prepared.map((write) =>
-                this.validateAndCommit(write, data, (changed) => {
-                    if (changed) changedFields.add(write.field);
-                })
-            ));
-            const rejection = results.find(
-                (result): result is PromiseRejectedResult => result.status === 'rejected'
-            );
-            if (rejection) throw rejection.reason;
-            return results.every((result) => result.status === 'fulfilled' && result.value);
-        } finally {
-            try {
-                this.reactionSystem.triggerReactionsForFields([...changedFields]);
-            } finally {
-                endBatch();
-            }
+    clearDirtyData = (): void => {
+        const fields = Object.keys(this.dirtyData) as ModelFieldName<T>[];
+        this.dirtyData = Object.create(null);
+        this.dirtyDataSnapshot = null;
+        if (fields.length > 0) {
+            this.eventEmitter.emit(ModelEvents.DIRTY_DATA_CLEARED, { fields });
         }
-    }
+    };
 
     // -------------------------------------------------------------------------
-    // Selector subscriptions
+    // Public subscriptions
     // -------------------------------------------------------------------------
+
+    on = <E extends keyof ModelEventMap<T>>(
+        event: E,
+        callback: (data: ModelEventMap<T>[E]) => void
+    ): (() => void) => {
+        return this.eventEmitter.on(event, callback);
+    };
 
     /**
      * Subscribe to a derived value. Callback fires only when `selector(data)`
@@ -220,44 +195,6 @@ export class ModelManager<
                 callback(next, old);
             }
         });
-    };
-
-    // -------------------------------------------------------------------------
-    // Public read API
-    // -------------------------------------------------------------------------
-
-    get data(): Readonly<T> {
-        if (this.dataSnapshot === null) {
-            this.dataSnapshot = Object.freeze({ ...this.modelData });
-        }
-        return this.dataSnapshot;
-    }
-
-    get validationErrors(): ValidationErrors {
-        if (this.errorsSnapshot === null) {
-            this.errorsSnapshot = Object.freeze({ ...this.errors });
-        }
-        return this.errorsSnapshot;
-    }
-
-    getField = <K extends ModelFieldKey<T>>(field: K): T[K] => {
-        return this.modelData[field];
-    };
-
-    getDirtyData = (): Readonly<Partial<T>> => {
-        if (this.dirtyDataSnapshot === null) {
-            this.dirtyDataSnapshot = Object.freeze({ ...this.dirtyData });
-        }
-        return this.dirtyDataSnapshot;
-    };
-
-    clearDirtyData = (): void => {
-        const fields = Object.keys(this.dirtyData) as ModelFieldName<T>[];
-        this.dirtyData = Object.create(null);
-        this.dirtyDataSnapshot = null;
-        if (fields.length > 0) {
-            this.eventEmitter.emit(ModelEvents.DIRTY_DATA_CLEARED, { fields });
-        }
     };
 
     // -------------------------------------------------------------------------
@@ -286,20 +223,58 @@ export class ModelManager<
     };
 
     // -------------------------------------------------------------------------
-    // Internal: validate + commit
+    // Internal initialization
     // -------------------------------------------------------------------------
 
-    private requireField(field: string): FieldSchema {
-        if (!Object.prototype.hasOwnProperty.call(this.schema, field)) {
-            const error: ModelError = {
-                code: 'field_not_found',
-                field,
-                message: `Field ${field} does not exist in the model schema`,
-            };
-            this.eventEmitter.emit(ModelEvents.FIELD_NOT_FOUND, error);
-            throw new Error(error.message);
+    /** Seed defaults and bootstrap derived values; see docs/API.md. */
+    private initializeDefaults(): void {
+        const seededInputs: string[] = [];
+        Object.entries(this.schema).forEach(([field, schema]) => {
+            // Own undefined values keep prototype-named fields safe in snapshots.
+            this.modelData[field as keyof T] = cloneDefault(schema.default) as T[keyof T];
+            if (schema.default !== undefined) {
+                if (schema.reaction === undefined) {
+                    seededInputs.push(field);
+                }
+            }
+        });
+
+        if (seededInputs.length > 0) {
+            this.reactionSystem.triggerReactionsForFields(seededInputs, [], true);
         }
-        return this.schema[field]!;
+    }
+
+    // -------------------------------------------------------------------------
+    // Internal write pipeline
+    // -------------------------------------------------------------------------
+
+    /** Track the whole batch, including reactions from partial commits on rejection. */
+    private async runBatch(
+        prepare: () => PreparedFieldWrite[]
+    ): Promise<boolean> {
+        this.ensureNotDisposed();
+        const endBatch = this.pendingTasks.begin();
+        const changedFields = new Set<string>();
+        try {
+            const prepared = prepare();
+            const data = createValidationSnapshot(this.modelData, prepared);
+            const results = await Promise.allSettled(prepared.map((write) =>
+                this.validateAndCommit(write, data, (changed) => {
+                    if (changed) changedFields.add(write.field);
+                })
+            ));
+            const rejection = results.find(
+                (result): result is PromiseRejectedResult => result.status === 'rejected'
+            );
+            if (rejection) throw rejection.reason;
+            return results.every((result) => result.status === 'fulfilled' && result.value);
+        } finally {
+            try {
+                this.reactionSystem.triggerReactionsForFields([...changedFields]);
+            } finally {
+                endBatch();
+            }
+        }
     }
 
     /** Reaction writeback retains its path and initialization context. */
@@ -363,16 +338,6 @@ export class ModelManager<
         return isValid;
     }
 
-    /** Store an error before its owner emits the corresponding typed event. */
-    private recordError(field: string, error: ValidationError): void {
-        if (this.disposed) return;
-        this.errors[field] = Object.freeze([
-            ...(this.errors[field] ?? []),
-            Object.freeze({ ...error }),
-        ]);
-        this.errorsSnapshot = null;
-    }
-
     /** Commit validated values; see docs/ARCHITECTURE.md#write-path. */
     private commitValid(
         field: string,
@@ -396,5 +361,40 @@ export class ModelManager<
             } as ModelEventMap<T>[typeof ModelEvents.FIELD_CHANGE]);
         }
         return dataChanged;
+    }
+
+    // -------------------------------------------------------------------------
+    // Internal helpers
+    // -------------------------------------------------------------------------
+
+    /** Store an error before its owner emits the corresponding typed event. */
+    private recordError(field: string, error: ValidationError): void {
+        if (this.disposed) return;
+        this.errors[field] = Object.freeze([
+            ...(this.errors[field] ?? []),
+            Object.freeze({ ...error }),
+        ]);
+        this.errorsSnapshot = null;
+    }
+
+    private requireField(field: string): FieldSchema {
+        if (!Object.prototype.hasOwnProperty.call(this.schema, field)) {
+            const error: ModelError = {
+                code: 'field_not_found',
+                field,
+                message: `Field ${field} does not exist in the model schema`,
+            };
+            this.eventEmitter.emit(ModelEvents.FIELD_NOT_FOUND, error);
+            throw new Error(error.message);
+        }
+        return this.schema[field]!;
+    }
+
+    private ensureNotDisposed(): void {
+        if (this.disposed) {
+            throw new Error(
+                'ModelManager has been disposed and cannot be used'
+            );
+        }
     }
 }

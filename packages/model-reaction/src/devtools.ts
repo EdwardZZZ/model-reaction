@@ -60,6 +60,7 @@ interface ModelReactionDevtoolsHook {
     getDerivedObserver?(model: object): SelectorObserver | undefined;
 }
 
+/** Return the global hook if both register and unregister are callable. */
 function getDevtoolsHook(): ModelReactionDevtoolsHook | undefined {
     const candidate = (globalThis as Record<string, unknown>)[DEVTOOLS_HOOK_KEY];
     if (
@@ -74,6 +75,7 @@ function getDevtoolsHook(): ModelReactionDevtoolsHook | undefined {
 
 let nextInstanceId = 0;
 
+/** Register the model instance and return cleanup, swallowing registration and cleanup failures. */
 function attachToDevtools(
     hook: ModelReactionDevtoolsHook,
     instance: Omit<DevtoolsModelInstance, 'id'>,
@@ -95,6 +97,7 @@ function attachToDevtools(
     };
 }
 
+/** Build field metadata with deduplicated dependencies and shared action IDs by function reference. */
 function buildFieldInfo(schema: Model): Record<string, DevtoolsFieldInfo> {
     const out: Record<string, DevtoolsFieldInfo> = Object.create(null);
     const functionIds = new Map<ReactionAction, number>();
@@ -126,6 +129,7 @@ function buildFieldInfo(schema: Model): Record<string, DevtoolsFieldInfo> {
     return { ...out };
 }
 
+/** Derive nodes and dependency-to-field edges from the field metadata. */
 function buildDependencyGraph(
     fields: Record<string, DevtoolsFieldInfo>
 ): DevtoolsDependencyGraph {
@@ -139,6 +143,7 @@ function buildDependencyGraph(
     return { nodes, edges };
 }
 
+/** Create a model with DevTools inspection and disposal cleanup when a valid global hook exists. */
 export const createModel: typeof baseCreateModel = (
     schema: Record<string, FieldSchema>,
     options: ModelOptions = {}
