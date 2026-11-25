@@ -1,3 +1,5 @@
+import { isPlainObject } from './is-plain-object';
+
 /**
  * Clone a schema `default` so mutable defaults (arrays / plain objects) are
  * not shared across model instances created from the same schema literal.
@@ -13,10 +15,7 @@ export function cloneDefault<V>(value: V, seen?: WeakMap<object, any>): V {
 
     // Only clone plain objects and arrays; leave class instances by reference.
     const isArray = Array.isArray(value);
-    if (!isArray) {
-        const proto = Object.getPrototypeOf(value);
-        if (proto !== Object.prototype && proto !== null) return value;
-    }
+    if (!isArray && !isPlainObject(value)) return value;
 
     seen ??= new WeakMap();
     const existing = seen.get(value as object);

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Internal
+- Track each write through its enclosing batch or scheduled reaction, and
+  share the same field validation and commit pipeline.
+
 ## [2.0.0]
 
 ### Added

@@ -6,7 +6,6 @@ import {
     SKIP_REACTION,
     ValidationError,
 } from '../types';
-import type { CommitOptions } from '../core/write-preparation';
 import { eachReactionEdge } from './reaction-graph';
 import { PendingTasks } from '../core/pending-tasks';
 import { ActionExecutor } from './action-executor';
@@ -15,10 +14,16 @@ type ReactionErrorEvent =
     | typeof ModelEvents.REACTION_ERROR
     | typeof ModelEvents.DEPENDENCY_ERROR;
 
+/** Internal context carried through reaction writeback. */
+export interface ReactionWriteContext {
+    reactionStack: string[];
+    initializeReactions: boolean;
+}
+
 /** Internal contract between {@link ReactionSystem} and its owning model. */
 interface ReactionCallbacks {
     getValue: (field: string) => any;
-    setValue: (field: string, value: any, options: CommitOptions) => Promise<boolean>;
+    setValue: (field: string, value: any, context: ReactionWriteContext) => Promise<boolean>;
     setError: (field: string, error: ValidationError) => void;
     reportError: (
         event: ReactionErrorEvent,

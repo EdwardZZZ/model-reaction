@@ -20,8 +20,8 @@ import {
     createValidationSnapshot,
     prepareFieldWrites,
 } from './write-preparation';
-import type { CommitOptions, PreparedFieldWrite } from './write-preparation';
-import { ReactionSystem } from '../reaction/reaction-system';
+import type { PreparedFieldWrite } from './write-preparation';
+import { ReactionSystem, type ReactionWriteContext } from '../reaction/reaction-system';
 
 /**
  * Core class behind `createModel(...)`.
@@ -139,29 +139,22 @@ export class ModelManager<
     };
 
     setFields = async (fields: Partial<T>): Promise<boolean> => {
-        return this.runBatch((options) => {
-            const prepared = prepareFieldWrites(
-                fields,
-                (field) => this.requireField(field)
-            );
-            return this.validatePrepared(prepared, options);
-        });
+        return this.runBatch(() =>
+            prepareFieldWrites(fields, (field) => this.requireField(field))
+        );
     };
 
     validateAll = async (): Promise<boolean> => {
         let allValid = false;
         try {
-            allValid = await this.runBatch((options) =>
-                this.validatePrepared(
-                    Object.keys(this.schema).map((field) => ({
-                        field,
-                        schema: this.schema[field] as FieldSchema,
-                        value: Object.prototype.hasOwnProperty.call(this.dirtyData, field)
-                            ? this.dirtyData[field as keyof T]
-                            : this.modelData[field as keyof T],
-                    })),
-                    options
-                )
+            allValid = await this.runBatch(() =>
+                Object.keys(this.schema).map((field) => ({
+                    field,
+                    schema: this.schema[field] as FieldSchema,
+                    value: Object.prototype.hasOwnProperty.call(this.dirtyData, field)
+                        ? this.dirtyData[field as keyof T]
+                        : this.modelData[field as keyof T],
+                }))
             );
         } finally {
             await this.settled();
@@ -176,46 +169,32 @@ export class ModelManager<
         return valid;
     };
 
-    /**
-     * Build one candidate snapshot and validate all prepared values against it.
-     * Each field commits independently; Promise.allSettled lets every validator
-     * finish before propagating a thrown transform/validation error.
-     */
-    private async validatePrepared(
-        prepared: readonly PreparedFieldWrite[],
-        options: CommitOptions
-    ): Promise<boolean> {
-        const validationData = createValidationSnapshot(this.modelData, prepared);
-        const commitOptions = { ...options, validationData };
-        const results = await Promise.allSettled(prepared.map(({ field, schema, value }) =>
-            this.validateAndCommit(field, schema, value, commitOptions)
-        ));
-        const rejection = results.find(
-            (result): result is PromiseRejectedResult => result.status === 'rejected'
-        );
-        if (rejection) throw rejection.reason;
-        return results.every((result) => result.status === 'fulfilled' && result.value);
-    }
-
-    /**
-     * Own the outer batch task and reaction boundary. The finally block ensures
-     * already committed fields still produce their reaction pass on failure;
-     * endBatch keeps `settled()` accurate across the whole operation.
-     */
+    /** Track the whole batch, including reactions from partial commits on rejection. */
     private async runBatch(
-        validate: (options: CommitOptions) => Promise<boolean>
+        prepare: () => PreparedFieldWrite[]
     ): Promise<boolean> {
         this.ensureNotDisposed();
         const endBatch = this.pendingTasks.begin();
         const changedFields = new Set<string>();
         try {
-            try {
-                return await validate({ changedFields });
-            } finally {
-                this.reactionSystem.triggerReactionsForFields([...changedFields]);
-            }
+            const prepared = prepare();
+            const data = createValidationSnapshot(this.modelData, prepared);
+            const results = await Promise.allSettled(prepared.map((write) =>
+                this.validateAndCommit(write, data, (changed) => {
+                    if (changed) changedFields.add(write.field);
+                })
+            ));
+            const rejection = results.find(
+                (result): result is PromiseRejectedResult => result.status === 'rejected'
+            );
+            if (rejection) throw rejection.reason;
+            return results.every((result) => result.status === 'fulfilled' && result.value);
         } finally {
-            endBatch();
+            try {
+                this.reactionSystem.triggerReactionsForFields([...changedFields]);
+            } finally {
+                endBatch();
+            }
         }
     }
 
@@ -327,63 +306,61 @@ export class ModelManager<
     private async updateField(
         field: string,
         value: any,
-        options: CommitOptions
+        { reactionStack, initializeReactions }: ReactionWriteContext
     ): Promise<boolean> {
         if (this.disposed) return false;
         const schema = this.requireField(field);
 
         const transformed = schema.transform ? schema.transform(value) : value;
 
-        return this.validateAndCommit(field, schema, transformed, options);
+        return this.validateAndCommit({ field, schema, value: transformed }, this.data, (changed) => {
+            if (changed || initializeReactions) {
+                this.reactionSystem.triggerReactionsForFields([field], reactionStack, initializeReactions);
+            }
+        });
     }
 
     private async validateAndCommit(
-        field: string,
-        schema: FieldSchema,
-        value: unknown,
-        options: CommitOptions
+        { field, schema, value }: PreparedFieldWrite,
+        data: Readonly<Record<string, any>>,
+        onCommit: (changed: boolean) => void
     ): Promise<boolean> {
         if (this.disposed) return false;
-        const endTask = this.pendingTasks.begin();
-        try {
-            const requestId = (this.validationRequestIds[field] ?? 0) + 1;
-            const isCurrent = () =>
-                !this.disposed && this.validationRequestIds[field] === requestId;
-            this.validationRequestIds[field] = requestId;
-            this.errors[field] = Object.freeze([]);
-            this.errorsSnapshot = null;
+        const requestId = (this.validationRequestIds[field] ?? 0) + 1;
+        const isCurrent = () =>
+            !this.disposed && this.validationRequestIds[field] === requestId;
+        this.validationRequestIds[field] = requestId;
+        this.errors[field] = Object.freeze([]);
+        this.errorsSnapshot = null;
 
-            const isValid = await validateField({
-                schema,
-                value,
-                field,
-                timeout: this.asyncValidationTimeout,
-                data: options.validationData ?? this.data,
-                isCurrent,
-                onError: (error) => {
-                    if (!isCurrent()) return;
-                    this.recordError(field, error);
-                    this.eventEmitter.emit(ModelEvents.VALIDATION_ERROR, { ...error });
-                },
-            });
+        const isValid = await validateField({
+            schema,
+            value,
+            field,
+            timeout: this.asyncValidationTimeout,
+            data,
+            isCurrent,
+            onError: (error) => {
+                if (!isCurrent()) return;
+                this.recordError(field, error);
+                this.eventEmitter.emit(ModelEvents.VALIDATION_ERROR, { ...error });
+            },
+        });
 
-            if (!isCurrent()) return false;
+        if (!isCurrent()) return false;
 
-            if (isValid) {
-                this.commitValid(field, value, options);
-            } else {
-                this.dirtyData[field as keyof T] = value as T[keyof T];
-                this.dirtyDataSnapshot = null;
-            }
-            this.eventEmitter.emit(ModelEvents.FIELD_VALIDATION_COMPLETE, {
-                field: field as ModelFieldName<T>,
-                isValid,
-                dirty: Object.prototype.hasOwnProperty.call(this.dirtyData, field),
-            });
-            return isValid;
-        } finally {
-            endTask();
+        if (isValid) {
+            onCommit(this.commitValid(field, value));
+        } else {
+            this.dirtyData[field as keyof T] = value as T[keyof T];
+            this.dirtyDataSnapshot = null;
         }
+        this.eventEmitter.emit(ModelEvents.FIELD_VALIDATION_COMPLETE, {
+            field: field as ModelFieldName<T>,
+            isValid,
+            dirty: Object.prototype.hasOwnProperty.call(this.dirtyData, field),
+        });
+        return isValid;
     }
 
     /** Store an error before its owner emits the corresponding typed event. */
@@ -399,14 +376,8 @@ export class ModelManager<
     /** Commit validated values; see docs/ARCHITECTURE.md#write-path. */
     private commitValid(
         field: string,
-        value: any,
-        options: CommitOptions
-    ): void {
-        const {
-            reactionStack = [],
-            changedFields,
-            initializeReactions = false,
-        } = options;
+        value: any
+    ): boolean {
         const fieldKey = field as keyof T;
         const dataChanged = !deepEqual(this.modelData[fieldKey], value);
         const hadDirty = Object.prototype.hasOwnProperty.call(this.dirtyData, field);
@@ -419,18 +390,11 @@ export class ModelManager<
         if (dataChanged) {
             this.modelData[fieldKey] = value;
             this.dataSnapshot = null;
-            changedFields?.add(field);
             this.eventEmitter.emit<typeof ModelEvents.FIELD_CHANGE>(ModelEvents.FIELD_CHANGE, {
                 field,
                 value,
             } as ModelEventMap<T>[typeof ModelEvents.FIELD_CHANGE]);
         }
-        if (!changedFields && (dataChanged || initializeReactions)) {
-            this.reactionSystem.triggerReactionsForFields(
-                [field],
-                reactionStack,
-                initializeReactions
-            );
-        }
+        return dataChanged;
     }
 }

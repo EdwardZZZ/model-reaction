@@ -36,9 +36,11 @@ flowchart LR
 | `src/devtools-observer.ts` | Stable shallow snapshots, synchronous top-level read collection, and private observation types | Opt-in adapter only; React imports types only; no package exports |
 | `src/__tests__/` | Core behavior, React adapter, and integration tests | Integration tests also protect README examples |
 
-`core/write-preparation.ts` owns the internal commit options, prepared-write type,
-and stateless preparation helpers; none are added to package exports. Default
-cloning and structural comparison stay in separate files under `core/`.
+`core/write-preparation.ts` owns the prepared-write type and stateless preparation
+helpers; none are added to package exports. Default
+cloning and structural comparison stay in separate files under `core/` and share
+the internal `core/is-plain-object.ts` predicate for objects whose prototype is
+`Object.prototype` or `null`.
 `validation/index.ts` exports rule builders and implements the small error
 formatter. React and DevTools remain separate package entry points.
 `devtools.ts` keeps its hook types and helpers private. Tests observe registered
@@ -65,8 +67,8 @@ setField ─┐
          ├─> runBatch
 setFields┘    ├─ prepareFieldWrites: resolve the whole batch, then transform once
               ├─ createValidationSnapshot: build one shallow-frozen candidate
-              ├─ validatePrepared: start field validations and await all of them
-              │    └─ validateAndCommit: validate the latest request, commit or record dirty data
+              ├─ validateAndCommit: validate each field, commit or record dirty data
+              ├─ await all field results, including rejections
               ├─ trigger one reaction pass for fields that really changed
               └─ release the batch task, so settled() covers the whole operation
 ```
@@ -83,9 +85,11 @@ setFields┘    ├─ prepareFieldWrites: resolve the whole batch, then transfo
 - Fields commit independently, so `setFields()` is not an all-or-nothing transaction.
 - Each field increments its own validation request ID. Freshness compares only
   requests for that field; there is no global request counter.
-- `validatePrepared()` builds one commit-options object per batch, sharing the
-  candidate snapshot and changed-field Set. The pipeline reads the options
-  without replacing their properties.
+- `validateAndCommit()` takes the validation snapshot and reports a valid
+  commit to its caller. The batch collects changed fields for one reaction pass;
+  reaction writeback forwards changes or initialization to downstream fields.
+  The enclosing batch or scheduled reaction tracks the whole write, including
+  field validation. Fields do not create an additional pending task.
 - A valid commit clears any dirty entry before notifying listeners. Only
   changed values update data, invalidate its snapshot, and emit `field:change`;
   unchanged values can still propagate reaction initialization. `ModelManager`

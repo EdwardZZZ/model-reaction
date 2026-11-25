@@ -36,8 +36,10 @@ flowchart LR
 | `src/devtools-observer.ts` | 稳定浅层快照、同步顶层读取采集与私有观测类型 | 仅用于可选适配层；React 仅导入类型，不加入包的公开导出 |
 | `src/__tests__/` | 按核心行为、React 适配和集成场景组织测试 | 集成测试同时约束 README 示例契约 |
 
-`core/write-preparation.ts` 统一保存内部提交选项、待写入字段类型和无状态准备函数，
+`core/write-preparation.ts` 保存待写入字段类型和无状态准备函数，
 都不加入包的公开导出。默认值克隆和结构比较分别保留独立文件，归入 `core/`。
+两者共用内部的 `core/is-plain-object.ts`，将原型为 `Object.prototype` 或 `null`
+的对象识别为普通对象。
 `validation/index.ts` 导出规则构造器，并直接实现小型错误格式化函数。
 React 和 DevTools 也各自保持独立的发布入口。
 `devtools.ts` 的 hook 类型和辅助函数保持私有。测试通过全局 hook 捕获注册实例，
@@ -64,8 +66,8 @@ setField ─┐
           ├─> runBatch
 setFields ┘     ├─ prepareFieldWrites：先解析整批 schema，再各执行一次 transform
                 ├─ createValidationSnapshot：构造共享的浅冻结候选数据
-                ├─ validatePrepared：并行启动字段校验，等待全部字段结束
-                │    └─ validateAndCommit：校验最新请求，提交有效值或记录 dirtyData
+                ├─ validateAndCommit：校验各字段，提交有效值或记录 dirtyData
+                ├─ 等待所有字段结束，包括异常拒绝
                 ├─ 用真实变更字段触发一次 reaction pass
                 └─ 释放批次任务；settled() 因而覆盖整批工作
 ```
@@ -79,8 +81,9 @@ setFields ┘     ├─ prepareFieldWrites：先解析整批 schema，再各执
 - reaction 写回走 `updateField()`，保留 reaction stack 和初始化上下文。
 - 每个字段分别提交，所以 `setFields()` 不是全有或全无事务；一个字段失败不回滚其他有效字段。
 - 每个字段的校验请求 ID 独立递增，新鲜度只比较同字段请求，不再维护全局请求计数器。
-- `validatePrepared()` 每批只构造一个提交选项对象，共享候选快照与真实变更字段 Set；
-  流程读取选项，不替换其中的属性。
+- `validateAndCommit()` 接收校验快照，成功提交后通知调用端。批次收集真实变更字段，
+  统一触发一次 reaction；reaction 写回把真实变更或初始化继续传给下游。外层批次
+  或已调度的 reaction 追踪整次写入，包括字段校验；字段不再额外登记待处理任务。
 - 有效提交先清除 dirty 条目，再通知监听者。只有值变化时才更新 data、使其快照失效并
   发送 `field:change`；等值提交仍可传播 reaction 初始化。`ModelManager` 直接通过
   typed event bus 发送事件。校验和 reaction 错误属于可恢复事件，通过 `model.on(...)`

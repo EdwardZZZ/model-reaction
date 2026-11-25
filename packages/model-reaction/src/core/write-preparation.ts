@@ -1,15 +1,5 @@
 import type { FieldSchema } from '../types';
 
-/** Internal options for the validation and commit pipeline. */
-export interface CommitOptions {
-    reactionStack?: string[];
-    /** Collect fields whose committed values actually changed. */
-    changedFields?: Set<string>;
-    /** Shared candidate data used by all validators in a direct batch. */
-    validationData?: Readonly<Record<string, any>>;
-    initializeReactions?: boolean;
-}
-
 /** A field's transformed input and schema, ready for validation. */
 export interface PreparedFieldWrite {
     field: string;
