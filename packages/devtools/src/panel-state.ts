@@ -7,11 +7,7 @@
  * currently selected instance id. The React panel wraps this reducer; the
  * transport ({@link createPanelPort}) feeds messages into it.
  */
-import type {
-    AgentMessage,
-    ChangeEntry,
-    InstanceState,
-} from './protocol';
+import { DEFAULT_TIMELINE_LIMIT, type AgentMessage, type InstanceState } from './protocol';
 
 export interface PanelState {
     /** Live instances by id, in insertion order (Map preserves it). */
@@ -27,21 +23,10 @@ export function initialPanelState(): PanelState {
     return { instances: new Map(), selectedId: null };
 }
 
-/** Append a change to an instance's timeline, honoring the ring-buffer cap. */
-function pushChange(
-    instance: InstanceState,
-    change: ChangeEntry,
-    timelineLimit: number
-): InstanceState {
-    const timeline = [...instance.timeline, change];
-    if (timeline.length > timelineLimit) timeline.shift();
-    return { ...instance, timeline };
-}
-
 export function panelReducer(
     state: PanelState,
     message: PanelAction,
-    timelineLimit = 100
+    timelineLimit = DEFAULT_TIMELINE_LIMIT
 ): PanelState {
     switch (message.kind) {
         case 'select':
@@ -71,31 +56,22 @@ export function panelReducer(
                     : state.selectedId;
             return { instances, selectedId };
         }
-        case 'snapshot': {
-            const existing = state.instances.get(message.id);
-            if (!existing) return state;
-            const instances = new Map(state.instances);
-            instances.set(message.id, {
-                ...existing,
-                snapshot: message.snapshot,
-            });
-            return { ...state, instances };
-        }
-        case 'timeline-cleared': {
-            const existing = state.instances.get(message.id);
-            if (!existing) return state;
-            const instances = new Map(state.instances);
-            instances.set(message.id, { ...existing, timeline: [] });
-            return { ...state, instances };
-        }
+        case 'snapshot':
+        case 'timeline-cleared':
         case 'change': {
             const existing = state.instances.get(message.id);
             if (!existing) return state;
+            const next = { ...existing };
+            if (message.kind === 'snapshot') {
+                next.snapshot = message.snapshot;
+            } else if (message.kind === 'timeline-cleared') {
+                next.timeline = [];
+            } else {
+                next.timeline = [...existing.timeline, message.change];
+                if (next.timeline.length > timelineLimit) next.timeline.shift();
+            }
             const instances = new Map(state.instances);
-            instances.set(
-                message.id,
-                pushChange(existing, message.change, timelineLimit)
-            );
+            instances.set(message.id, next);
             return { ...state, instances };
         }
         default: {

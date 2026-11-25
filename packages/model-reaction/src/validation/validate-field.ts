@@ -28,60 +28,36 @@ export async function validateField(
 
     if (!schema.validator) return true;
 
+    const fail = (rule: string, message: string): false => {
+        onError({ field, rule, message });
+        return false;
+    };
+
+    const runValidator = async (validator: Validator): Promise<boolean> => {
+        if (!validator.validate) return true;
+        try {
+            const result = validator.validate(value, data);
+            const ok = await (typeof result === 'boolean'
+                ? result
+                : raceTimeout(Promise.resolve(result), field, timeout));
+            return ok ? true : fail(validator.type, validator.message);
+        } catch (err) {
+            const detail = err instanceof Error ? err.message : String(err);
+            return fail('validation_error', `Validation failed: ${detail}`);
+        }
+    };
+
     for (const validator of schema.validator) {
         if (!isCurrent()) return false;
         try {
             if (validator.condition && !validator.condition(data)) continue;
         } catch (err) {
             const detail = err instanceof Error ? err.message : String(err);
-            onError({
-                field,
-                rule: 'condition_error',
-                message: `Validation condition failed: ${detail}`,
-            });
-            return false;
+            return fail('condition_error', `Validation condition failed: ${detail}`);
         }
-        const ok = await runValidator(
-            validator, value, field, timeout, data, onError
-        );
-        if (!ok || !isCurrent()) return false;
+        if (!(await runValidator(validator)) || !isCurrent()) return false;
     }
     return true;
-}
-
-async function runValidator(
-    validator: Validator,
-    value: unknown,
-    field: string,
-    timeout: number,
-    data: Record<string, any>,
-    onError: (error: ValidationError) => void
-): Promise<boolean> {
-    if (!validator.validate) return true;
-
-    try {
-        const result = validator.validate(value, data);
-        const ok = await (typeof result === 'boolean'
-            ? result
-            : raceTimeout(Promise.resolve(result), field, timeout));
-
-        if (ok) return true;
-
-        onError({
-            field,
-            rule: validator.type,
-            message: validator.message,
-        });
-        return false;
-    } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        onError({
-            field,
-            rule: 'validation_error',
-            message: `Validation failed: ${msg}`,
-        });
-        return false;
-    }
 }
 
 /** Resolve `promise`, rejecting if it does not settle within `timeout` ms. */
