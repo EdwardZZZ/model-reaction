@@ -157,13 +157,13 @@ describe('useModelFieldState', () => {
         });
         const { result, unmount } = renderHook(() => useModelFieldState(model, 0));
         await act(async () => { expect(await model.setField(0, '')).toBe(false); });
-        expect(result.current[2].error).not.toBeNull();
+        expect(result.current[2].errors.length).toBeGreaterThan(0);
         expect(result.current[2].dirty).toBe(true);
         act(() => model.clearDirtyData());
         expect(result.current[2].dirty).toBe(false);
         await act(async () => { await model.setField(0, 'after'); });
         expect(result.current[0]).toBe('after');
-        expect(result.current[2].error).toBeNull();
+        expect(result.current[2].errors).toEqual([]);
         unmount();
         model.dispose();
     });
@@ -189,7 +189,7 @@ describe('useModelFieldState', () => {
         );
 
         expect(result.current[0]).toBe('');
-        expect(result.current[2].error).toBeNull();
+        expect(result.current[2].errors).toEqual([]);
         expect(result.current[2].dirty).toBe(false);
 
         await act(async () => {
@@ -198,7 +198,6 @@ describe('useModelFieldState', () => {
         });
 
         expect(result.current[0]).toBe('user@example.com');
-        expect(result.current[2].error).toBeNull();
         expect(result.current[2].errors).toHaveLength(0);
         expect(result.current[2].dirty).toBe(false);
 
@@ -218,7 +217,7 @@ describe('useModelFieldState', () => {
 
         // Committed value stays at the default; the failed input is dirty.
         expect(result.current[0]).toBe('');
-        expect(result.current[2].error).toBe('Invalid email format');
+        expect(result.current[2].errors[0]?.message).toBe('Invalid email format');
         expect(result.current[2].errors.length).toBeGreaterThan(0);
         expect(result.current[2].dirty).toBe(true);
 
@@ -226,7 +225,7 @@ describe('useModelFieldState', () => {
         await act(async () => {
             await result.current[1]('user@example.com');
         });
-        expect(result.current[2].error).toBeNull();
+        expect(result.current[2].errors).toEqual([]);
         expect(result.current[2].dirty).toBe(false);
 
         model.dispose();
@@ -263,7 +262,7 @@ describe('useModelFieldState', () => {
             await model.settled();
         });
 
-        expect(result.current[2].error).toBe('Reaction failed');
+        expect(result.current[2].errors[0]?.message).toBe('Reaction failed');
         expect(result.current[2].errors).toEqual([
             expect.objectContaining({ rule: 'reaction_error' }),
         ]);

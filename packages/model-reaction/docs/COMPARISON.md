@@ -94,7 +94,7 @@ const userModel = createModel<{ name: string }>({
 
 const { draft, setDraft, meta, writeError, onBlur, showError } =
   useDraftField(userModel, 'name');
-// Bind draft/setDraft; display writeError?.message ?? meta.error under showError.
+// Bind draft/setDraft; display writeError?.message ?? meta.errors[0]?.message under showError.
 ```
 
 The complete [comparison snippet](../examples/react-best-practices/7-10-5-cheat-sheet.ts)

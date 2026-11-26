@@ -241,7 +241,7 @@ describe('useDraftField', () => {
             fields: useModelFields(model, [field]),
         }));
         expect(result.current.input.draft).toBe('initial');
-        expect(result.current.input.meta.error).toBeNull();
+        expect(result.current.input.meta.errors).toEqual([]);
         expect(Object.keys(result.current.fields)).toEqual([field]);
         expect(result.current.fields[field]).toBe('initial');
         await act(async () => { result.current.input.setDraft('x'); });
@@ -477,7 +477,7 @@ describe('useDraftField', () => {
             result.current.setDraft('ab'); // invalid
         });
         // Error exists but is not shown until blurred.
-        expect(result.current.meta.error).toBe('too short');
+        expect(result.current.meta.errors[0]?.message).toBe('too short');
         expect(result.current.showError).toBe(false);
 
         await act(async () => {

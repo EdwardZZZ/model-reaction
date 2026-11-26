@@ -87,7 +87,7 @@ const userModel = createModel<{ name: string }>({
 
 const { draft, setDraft, meta, writeError, onBlur, showError } =
   useDraftField(userModel, 'name');
-// 绑定 draft/setDraft；showError 时显示 writeError?.message ?? meta.error。
+// 绑定 draft/setDraft；showError 时显示 writeError?.message ?? meta.errors[0]?.message。
 ```
 
 完整[对比片段](../examples/react-best-practices/7-10-5-cheat-sheet.ts)需要额外安装

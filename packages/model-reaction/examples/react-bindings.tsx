@@ -102,7 +102,7 @@ function CouponBadge() {
 function ValidationSummary() {
     const cart = useModel<Cart>();
     const [, , meta] = useModelFieldState(cart, 'name');
-    return meta.error ? <span style={{ color: 'red' }}>Invalid name</span> : null;
+    return meta.errors.length > 0 ? <span style={{ color: 'red' }}>Invalid name</span> : null;
 }
 
 // 7. Top-level app — create after commit and dispose that instance in cleanup.
@@ -164,8 +164,8 @@ function CouponField() {
                         <option value="">No coupon</option>
                         <option value="SAVE10">SAVE10</option>
                     </select>
-                    {meta.error ? (
-                        <span style={{ color: 'red' }}>{meta.error}</span>
+                    {meta.errors.length > 0 ? (
+                        <span style={{ color: 'red' }}>{meta.errors[0]?.message}</span>
                     ) : null}
                 </label>
             )}
@@ -174,7 +174,7 @@ function CouponField() {
 }
 
 // 7d. `useModelFieldState` example for a non-text control.
-//     Demonstrates `validating`, `dirty`, `error` metadata.
+//     Demonstrates `validating` and `dirty` metadata.
 function QtyControl() {
     const cart = useModel<Cart>();
     const [qty, setQty, meta] = useModelFieldState(cart, 'qty');
@@ -193,7 +193,7 @@ function QtyControl() {
 
 // 7e. Real-world controlled text input with touched / blur / error display.
 //     `useDraftField` owns the local draft and standard edit-lifecycle state:
-//       - `writeError?.message ?? meta.error` for the message,
+//       - `writeError?.message ?? meta.errors[0]?.message` for the message,
 //       - `meta.validating` to indicate pending validation,
 //       - `meta.dirty` if you want to flag rejected writes.
 function NameFieldWithBlur() {
@@ -215,7 +215,7 @@ function NameFieldWithBlur() {
             />
             {showError ? (
                 <span role="alert" style={{ color: 'red' }}>
-                    {writeError?.message ?? meta.error}
+                    {writeError?.message ?? meta.errors[0]?.message}
                 </span>
             ) : null}
         </label>

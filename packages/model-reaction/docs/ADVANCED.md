@@ -280,7 +280,7 @@ demonstrates schema composition and DTO conversion.
   exceptions. Read `validationErrors[field]` or use
   `formatValidationErrors` from `model-reaction/validation` for a summary.
   Subscribe to typed error events for logging and always unsubscribe in cleanup.
-  Text bindings display `writeError?.message ?? meta.error` under `showError`.
+  Text bindings display `writeError?.message ?? meta.errors[0]?.message` under `showError`.
 
 ## Testing Application Models
 

@@ -52,15 +52,18 @@ export function shallow<T>(a: T, b: T): boolean {
         }
         return true;
     }
-    const ak = Object.keys(a as Record<string, unknown>);
-    const bk = Object.keys(b as Record<string, unknown>);
+    const enumerableKeys = (value: object) => Reflect.ownKeys(value).filter(
+        (key) => Object.prototype.propertyIsEnumerable.call(value, key)
+    );
+    const ak = enumerableKeys(a);
+    const bk = enumerableKeys(b);
     if (ak.length !== bk.length) return false;
     for (const k of ak) {
-        if (!Object.prototype.hasOwnProperty.call(b, k)) return false;
+        if (!Object.prototype.propertyIsEnumerable.call(b, k)) return false;
         if (
             !Object.is(
-                (a as Record<string, unknown>)[k],
-                (b as Record<string, unknown>)[k]
+                (a as Record<PropertyKey, unknown>)[k],
+                (b as Record<PropertyKey, unknown>)[k]
             )
         ) {
             return false;

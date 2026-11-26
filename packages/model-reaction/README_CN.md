@@ -186,7 +186,7 @@ function NameInput({ user }: { user: ModelReturn<{ name: string }> }) {
         aria-invalid={showError}
       />
       {meta.validating && <span>校验中...</span>}
-      {showError && <span role="alert">{writeError?.message ?? meta.error}</span>}
+      {showError && <span role="alert">{writeError?.message ?? meta.errors[0]?.message}</span>}
     </label>
   );
 }

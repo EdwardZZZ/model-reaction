@@ -265,7 +265,7 @@ describe('Field', () => {
                     {({ value, setValue, meta }) => (
                         <div>
                             <span data-testid="value">{value}</span>
-                            <span data-testid="error">{meta.error ?? ''}</span>
+                            <span data-testid="error">{meta.errors[0]?.message ?? ''}</span>
                             <button
                                 data-testid="set"
                                 onClick={() => setValue('me@example.com')}

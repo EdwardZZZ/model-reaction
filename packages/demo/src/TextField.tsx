@@ -38,7 +38,7 @@ export function TextField<T extends Record<string, any>>({
                 onChange={(e) => setDraft(e.target.value)}
                 onBlur={onBlur}
             />
-            {showError && <small role="alert" className="field-error">{writeError?.message ?? meta.error}</small>}
+            {showError && <small role="alert" className="field-error">{writeError?.message ?? meta.errors[0]?.message}</small>}
         </label>
     );
 }

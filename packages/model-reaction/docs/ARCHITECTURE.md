@@ -216,6 +216,7 @@ side-effect writeback cycles.
 | Dependency edges or reaction scheduling | `reaction/reaction-graph.ts`, `reaction/reaction-system.ts` |
 | Action eligibility and execution | `reaction/reaction-system.ts`, `reaction/action-executor.ts` |
 | React field state and subscriptions | `react/field-state.ts`, `react/draft-field.ts`, `react/selectors.ts` |
+| React field metadata overrides per binding | `react/field-meta-store.ts` |
 | DevTools hook, graph, and snapshots | `devtools.ts` |
 
 For public contract changes, check `src/index.ts`, both READMEs, and integration

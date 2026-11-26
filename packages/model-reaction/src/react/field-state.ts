@@ -6,6 +6,8 @@ import {
 } from 'react';
 import { ModelEvents, ValidationError } from '../types';
 import type { ModelFieldKey, ModelReturn } from '../types';
+import { shallow } from './selectors';
+import { createFieldMetaStore } from './field-meta-store';
 
 /**
  * Subscribe a component to a single field. The component re-renders only
@@ -32,8 +34,6 @@ export function useModelField<T extends Record<string, any>, K extends ModelFiel
 export interface FieldMeta {
     /** Validation errors for this field (empty array if none). */
     errors: readonly ValidationError[];
-    /** First error message, or null. Convenient for inline UI. */
-    error: string | null;
     /** True while an async setField is in flight from this hook. */
     validating: boolean;
     /** True if the field currently has unsaved/invalid data in dirtyData. */
@@ -43,44 +43,64 @@ export interface FieldMeta {
 /** Setter signature returned by `useModelFieldState`. */
 export type FieldSetter<V> = (value: V) => Promise<boolean>;
 
-/**
- * Receive a committed field value plus a setter and metadata in one hook.
- * Use this lower-level binding for non-text controls or custom UI policies:
- *
- * ```tsx
- * const [enabled, setEnabled, meta] = useModelFieldState(model, 'enabled');
- * <input
- *   type="checkbox"
- *   checked={enabled}
- *   onChange={(e) => setEnabled(e.target.checked)}
- *   disabled={meta.validating}
- * />
- * {meta.error && <span>{meta.error}</span>}
- * ```
- *
- * For controlled text inputs, prefer `useDraftField` so rejected or in-flight
- * edits remain visible without an application-managed intermediate value.
- *
- * `touched` / blur-gated error display is intentionally not provided —
- * it is a local UI concern, easily handled with a single `useState(false)`
- * in the consumer component.
- */
+type IsUnion<T, Whole = T> = T extends unknown ? [Whole] extends [T] ? false : true : never;
+
+/** Merge independent properties; wrap correlated union state in a nested property. */
+export type FieldMetaSetter<M extends object = object> = (
+    patch: true extends IsUnion<M> ? never : Partial<M> & { [P in keyof FieldMeta]?: never }
+) => void;
+
+/** Pure synchronous selector; reserved FieldMeta keys cannot be overridden. */
+export type FieldMetaSelector<T extends Record<string, any>, M extends object> =
+    (data: Readonly<T>) => M &
+        { [P in keyof FieldMeta]?: never } &
+        (M extends PromiseLike<unknown> ? never : unknown);
+
+/** Optional UI metadata; reserved FieldMeta keys cannot be overridden. */
+export interface UseModelFieldStateOptions<
+    T extends Record<string, any>,
+    M extends object = object,
+> {
+    /** Selector for this binding; see docs/REACT.md. */
+    meta?: FieldMetaSelector<T, M>;
+}
+
+/** Committed field binding with setters and metadata; see docs/REACT.md. */
+export function useModelFieldState<
+    T extends Record<string, any>, K extends ModelFieldKey<T>, M extends object,
+>(
+    model: ModelReturn<T>,
+    field: K,
+    options: Required<UseModelFieldStateOptions<T, M>>
+): [T[K], FieldSetter<T[K]>, FieldMeta & M, FieldMetaSetter<M>];
+export function useModelFieldState<
+    T extends Record<string, any>, K extends ModelFieldKey<T>, M extends object = object,
+>(
+    model: ModelReturn<T>,
+    field: K,
+    options?: UseModelFieldStateOptions<T, M>
+): [T[K], FieldSetter<T[K]>, FieldMeta & Partial<M>, FieldMetaSetter<M>];
 export function useModelFieldState<
     T extends Record<string, any>,
     K extends ModelFieldKey<T>,
+    M extends object = object,
 >(
     model: ModelReturn<T>,
-    field: K
-): [T[K], FieldSetter<T[K]>, FieldMeta] {
-    const value = useModelField(model, field);
+    field: K,
+    options: UseModelFieldStateOptions<T, M> = {}
+): [T[K], FieldSetter<T[K]>, FieldMeta & Partial<M>, FieldMetaSetter<M>] {
+    const selectMeta = options.meta;
+    const metaStore = useMemo(createFieldMetaStore, [model, field]);
 
-    const metaSubscribe = useCallback(
+    const subscribe = useCallback(
         (notify: () => void) => {
             const fieldName = String(field);
             const validationHandler = (e: { field?: string }): void => {
                 if (e.field === fieldName) notify();
             };
             const unsubscribers = [
+                metaStore.subscribe(notify),
+                model.on(ModelEvents.FIELD_CHANGE, notify),
                 model.on(ModelEvents.VALIDATION_ERROR, validationHandler),
                 model.on(ModelEvents.REACTION_ERROR, validationHandler),
                 model.on(ModelEvents.FIELD_VALIDATION_COMPLETE, validationHandler),
@@ -90,15 +110,18 @@ export function useModelFieldState<
             ];
             return () => unsubscribers.forEach((unsubscribe) => unsubscribe());
         },
-        [model, field]
+        [model, field, metaStore]
     );
-    const metaSnapshot = useMemo(() => {
-        let previous: {
-            errors: readonly ValidationError[];
-            dirty: boolean;
-        } | null = null;
+    const getSnapshot = useMemo(() => {
+        let cache: {
+            data: Readonly<T>;
+            patch: ReturnType<typeof metaStore.getSnapshot>;
+            snapshot: { value: T[K]; meta: Omit<FieldMeta, 'validating'> & Partial<M> };
+        } | undefined;
 
         return () => {
+            const data = model.data;
+            const patch = metaStore.getSnapshot();
             const errorMap = model.validationErrors;
             const errors = Object.prototype.hasOwnProperty.call(errorMap, field)
                 ? errorMap[String(field)]!
@@ -108,20 +131,33 @@ export function useModelFieldState<
                 field
             );
             if (
-                previous !== null &&
-                previous.errors === errors &&
-                previous.dirty === dirty
+                cache && cache.data === data && cache.patch === patch &&
+                cache.snapshot.meta.errors === errors &&
+                cache.snapshot.meta.dirty === dirty
             ) {
-                return previous;
+                return cache.snapshot;
             }
-            previous = { errors, dirty };
-            return previous;
+            const next = {
+                value: model.getField(field),
+                meta: {
+                    ...(cache?.data === data ? cache.snapshot.meta : selectMeta?.(data)),
+                    ...patch,
+                    errors,
+                    dirty,
+                } as Omit<FieldMeta, 'validating'> & Partial<M>,
+            };
+            const snapshot = cache &&
+                Object.is(cache.snapshot.value, next.value) &&
+                shallow(cache.snapshot.meta, next.meta)
+                ? cache.snapshot : next;
+            cache = { data, patch, snapshot };
+            return snapshot;
         };
-    }, [model, field]);
-    const { errors, dirty } = useSyncExternalStore(
-        metaSubscribe,
-        metaSnapshot,
-        metaSnapshot
+    }, [model, field, selectMeta, metaStore]);
+    const { value, meta: fieldMeta } = useSyncExternalStore(
+        subscribe,
+        getSnapshot,
+        getSnapshot
     );
 
     const [validationState, setValidationState] = useState(() => ({
@@ -130,8 +166,7 @@ export function useModelFieldState<
     }));
     const { session } = validationState;
     if (session.model !== model || session.field !== field) {
-        // React retries this render with a fresh session before committing.
-        // State keeps abandoned renders from changing the active session.
+        // Validation session isolation: docs/REACT.md.
         setValidationState({ session: { model, field }, count: 0 });
     }
     const validating =
@@ -141,32 +176,27 @@ export function useModelFieldState<
 
     const setter = useCallback<FieldSetter<T[K]>>(
         async (next) => {
-            setValidationState((current) =>
+            const changePending = (delta: number) => setValidationState((current) =>
                 current.session === session
-                    ? { session, count: current.count + 1 }
+                    ? { session, count: current.count + delta }
                     : current
             );
+            changePending(1);
             try {
                 return await model.setField(field, next);
             } finally {
-                setValidationState((current) =>
-                    current.session === session
-                        ? { session, count: current.count - 1 }
-                        : current
-                );
+                changePending(-1);
             }
         },
         [model, field, session]
     );
 
-    const meta: FieldMeta = {
-        errors,
-        error: errors[0]?.message ?? null,
+    const meta = {
+        ...fieldMeta,
         validating,
-        dirty,
-    };
+    } as FieldMeta & Partial<M>;
 
-    return [value, setter, meta];
+    return [value, setter, meta, metaStore.set];
 }
 
 const EMPTY_ERRORS: ValidationError[] = [];

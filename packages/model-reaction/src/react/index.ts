@@ -19,7 +19,10 @@ export {
     useModelField,
     useModelFieldState,
     type FieldMeta,
+    type FieldMetaSetter,
+    type FieldMetaSelector,
     type FieldSetter,
+    type UseModelFieldStateOptions,
 } from './field-state';
 export {
     useDraftField,

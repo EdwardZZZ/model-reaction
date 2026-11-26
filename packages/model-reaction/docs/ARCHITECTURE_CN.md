@@ -184,6 +184,7 @@ action 计数覆盖唯一待执行函数及已启动调用。reaction 不等待 
 | 依赖边或反应调度 | `reaction/reaction-graph.ts`、`reaction/reaction-system.ts` |
 | action 资格和执行 | `reaction/reaction-system.ts`、`reaction/action-executor.ts` |
 | React 字段状态与订阅 | `react/field-state.ts`、`react/draft-field.ts`、`react/selectors.ts` |
+| React 字段绑定各自的扩展元数据覆盖值 | `react/field-meta-store.ts` |
 | DevTools hook、字段图和快照 | `devtools.ts` |
 
 改动公开契约时同步检查 `src/index.ts`、两个 README 和集成测试；改动依赖图解释时，

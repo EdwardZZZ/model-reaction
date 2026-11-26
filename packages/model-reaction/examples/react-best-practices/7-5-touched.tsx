@@ -31,7 +31,7 @@ export function NameInput() {
                 onChange={(e) => setDraft(e.target.value)}
                 onBlur={onBlur}
             />
-            {showError && <span>{writeError?.message ?? meta.error}</span>}
+            {showError && <span>{writeError?.message ?? meta.errors[0]?.message}</span>}
         </label>
     );
 }

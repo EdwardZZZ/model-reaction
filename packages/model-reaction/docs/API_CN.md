@@ -552,8 +552,16 @@ const custom = formatValidationErrors(
   依赖旧值的前置条件移到业务写入入口，或显式提供业务比较基准。
   `validateAll()` 不再重复 transform dirty 值。
 - React `DraftField` 新增必需成员 `writeError: Error | null`；手工构造值的调用方
-  需要补齐。消息展示改为 `writeError?.message ?? meta.error`，`showError` 由 touched
+  需要补齐。消息展示改为 `writeError?.message ?? meta.errors[0]?.message`，`showError` 由 touched
   与任一错误来源共同决定，详见 [React 绑定](REACT_CN.md)。
+- React `FieldMeta.error` 已移除。首条消息通过 `meta.errors[0]?.message` 读取，
+  使用 `meta.errors.length > 0` 判断是否存在错误。
+- React `useModelFieldState` 在 tuple 第四项增加 `setMeta`。三项解构仍可使用，
+  显式 tuple 类型需补充 `FieldMetaSetter<M>`；手工构造 `DraftField` 和
+  `FieldRenderProps` 的值需补齐 `setMeta`。扩展更新仅作用于当前绑定，详见
+  [React 绑定](REACT_CN.md#按需扩展字段元数据)。
+- 可选配置返回的扩展属性也为可选。顶层联合元数据不能
+  patch，需要把关联状态移入单个嵌套属性。类型与生命周期迁移详见上面的 React 指南。
 - 字段结构判等和两个 selector Hook 保持原有契约。
 - 将 `action: fn` 改为 `action: [fn]`。宿主字段名与最新已提交值从
   `{ field, value }` 读取，其他字段通过 model 闭包读取。现有无参回调仍可使用；

@@ -29,12 +29,12 @@ export function PlanFieldDemo() {
                             onChange={(e) =>
                                 setValue(e.target.value as User['plan'])
                             }
-                            aria-invalid={!!meta.error}
+                            aria-invalid={meta.errors.length > 0}
                         >
                             <option value="free">Free</option>
                             <option value="pro">Pro</option>
                         </select>
-                        {meta.error && <span>{meta.error}</span>}
+                        {meta.errors.length > 0 && <span>{meta.errors[0]?.message}</span>}
                     </label>
                 )}
             </Field>

@@ -74,7 +74,7 @@ items. Returned Promises remain tracked. Never await the same model's
 [action queue](docs/API.md#action-queue).
 
 Use `useDraftField` for text inputs and show
-`writeError?.message ?? meta.error` under `showError`. Non-text controls can use
+`writeError?.message ?? meta.errors[0]?.message` under `showError`. Non-text controls can use
 `useModelFieldState`. Preserve the distinct subscription policies of
 `useModelSelector` and `useModelComputed`.
 The owner creates and disposes the model; components unsubscribe in cleanup.

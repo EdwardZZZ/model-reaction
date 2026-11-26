@@ -33,6 +33,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   It layers a local draft, blur-gated error display (`touched` / `onBlur` /
   `showError`), and a `format` option on top of `useModelFieldState`. See
   `docs/REACT.md` / `docs/REACT_CN.md`.
+- **React field metadata:** `options.meta` derives optional UI properties;
+  `useModelFieldState` now returns `[value, setValue, meta, setMeta]`.
+  `setMeta` merges local extension overrides and is also exposed by
+  `useDraftField` and `<Field>`. Optional selectors
+  produce optional extension properties; top-level unions are not patchable.
+  Enumerable symbol keys participate in updates and shallow equality.
+  Existing three-item destructuring
+  works; explicit tuple types and manually constructed binding objects need
+  the new member. Built-in metadata remains read-only. See
+  [React bindings](docs/REACT.md#optional-field-metadata).
 - **DevTools browser extension** for inspecting models at runtime: a live data
   tree (`data` / `dirtyData` / `errors`), the reaction dependency graph, and a
   change timeline. Registration is opt-in via a new `model-reaction/devtools`
@@ -115,7 +125,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reuses dirty values without applying transforms again.
 - **React migration:** `DraftField` adds required `writeError: Error | null`;
   `showError` now includes local write exceptions. Display
-  `writeError?.message ?? meta.error`, and update manually constructed bindings.
+  `writeError?.message ?? meta.errors[0]?.message`, and update manually constructed bindings.
+- **Breaking (React):** Remove `FieldMeta.error`; use `meta.errors[0]?.message`
+  for the first message and `meta.errors.length > 0` for error presence.
 - Action scheduling uses one Map of pending functions; each host still has
   one pending debounced computation. Pending functions and returned Promises
   are tracked without maintaining execution groups or action versions.

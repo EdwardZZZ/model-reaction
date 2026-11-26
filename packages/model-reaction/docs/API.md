@@ -635,9 +635,20 @@ These changes are breaking and require updating consumers:
   the business write entry point or provide an explicit business baseline.
   `validateAll()` does not transform dirty values again.
 - React `DraftField` adds required `writeError: Error | null`; update manually
-  constructed values and display `writeError?.message ?? meta.error`.
+  constructed values and display `writeError?.message ?? meta.errors[0]?.message`.
   `showError` is now gated by `touched` and either error source. See
   [React bindings](REACT.md).
+- React `FieldMeta.error` is removed. Read the first message through
+  `meta.errors[0]?.message` and check error presence with `meta.errors.length > 0`.
+- React `useModelFieldState` appends `setMeta` as its fourth tuple item.
+  Three-item destructuring remains valid; explicit tuple types must include
+  `FieldMetaSetter<M>`. Manually constructed `DraftField` and `FieldRenderProps`
+  values must include `setMeta`. Extension updates are local to each binding;
+  see [React bindings](REACT.md#optional-field-metadata).
+- Optional metadata configuration returns partial extension properties.
+  Top-level union metadata cannot be patched; move correlated state into one
+  nested property.
+  See the React guide above for the type and lifecycle migration.
 - Structural field equality and both selector Hooks remain unchanged.
 - Replace `action: fn` with `action: [fn]`. Read the owning field and its latest
   committed value from `{ field, value }`, and other fields through model

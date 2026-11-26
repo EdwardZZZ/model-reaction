@@ -135,6 +135,9 @@ async function verifyDeclarations() {
     const contracts = (await readFile(
       new URL('../src/__tests__/public-type-contracts.ts', import.meta.url), 'utf8',
     )).replaceAll("'../index'", "'model-reaction'");
+    const metaContracts = (await readFile(
+      new URL('../src/__tests__/react-meta-type-contracts.ts', import.meta.url), 'utf8',
+    )).replaceAll("'../index'", "'model-reaction'").replaceAll("'../react'", "'model-reaction/react'");
     const entryContracts = `
 import { createModel as createDevtoolsModel } from 'model-reaction/devtools';
 import { formatValidationErrors } from 'model-reaction/validation';
@@ -172,7 +175,9 @@ void verifyEntries;
     ]) {
       const source = path.join(temporary, `contracts${extension}`);
       await writeFile(source, contracts + entryContracts);
-      const program = ts.createProgram([source], {
+      const metaSource = path.join(temporary, `meta-contracts${extension}`);
+      await writeFile(metaSource, metaContracts);
+      const program = ts.createProgram([source, metaSource], {
         target: ts.ScriptTarget.ES2022,
         module,
         moduleResolution,

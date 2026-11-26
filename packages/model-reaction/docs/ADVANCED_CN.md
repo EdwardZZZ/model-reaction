@@ -267,7 +267,7 @@ Schema 推导反映运行时值：默认值会绕过校验，因此与 `type` �
 - 写入返回 `false` 表示校验失败，Promise reject 属于另一类异常。
   读取 `validationErrors[field]`，或从 `model-reaction/validation` 导入
   `formatValidationErrors` 汇总错误。用类型化错误事件记录日志，cleanup 中解绑。
-  文本绑定在 `showError` 时展示 `writeError?.message ?? meta.error`。
+  文本绑定在 `showError` 时展示 `writeError?.message ?? meta.errors[0]?.message`。
 
 ## 业务模型测试
 
