@@ -12,8 +12,8 @@ import {
     ValidationErrors,
 } from '../types';
 import { validateField } from '../validation/validate-field';
-import { cloneDefault } from './clone-default';
-import { deepEqual } from './deep-equal';
+import { cloneDefault } from './value/clone-default';
+import { deepEqual } from './value/deep-equal';
 import { EventEmitter } from './event-emitter';
 import { PendingTasks } from './pending-tasks';
 import {

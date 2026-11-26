@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ModelEvents } from '../types';
-import type { ModelFieldKey, ModelReturn } from '../types';
+import { ModelEvents } from '../../types';
+import type { ModelFieldKey, ModelReturn } from '../../types';
 import {
     useModelFieldState,
     type FieldMeta,

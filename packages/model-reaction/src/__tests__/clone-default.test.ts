@@ -1,4 +1,4 @@
-import { cloneDefault } from '../core/clone-default';
+import { cloneDefault } from '../core/value/clone-default';
 
 describe('cloneDefault', () => {
     test('allocates a clone map only for arrays and plain object graphs', () => {

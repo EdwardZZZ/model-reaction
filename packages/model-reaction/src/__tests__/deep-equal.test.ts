@@ -1,4 +1,4 @@
-import { deepEqual } from '../core/deep-equal';
+import { deepEqual } from '../core/value/deep-equal';
 import { createModel } from '../index';
 
 describe('deepEqual', () => {

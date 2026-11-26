@@ -23,12 +23,12 @@ export {
     type FieldMetaSelector,
     type FieldSetter,
     type UseModelFieldStateOptions,
-} from './field-state';
+} from './field/field-state';
 export {
     useDraftField,
     type DraftField,
     type UseDraftFieldOptions,
-} from './draft-field';
+} from './field/draft-field';
 export {
     ModelProvider,
     useModel,

@@ -30,7 +30,7 @@ export default tseslint.config(
     rules: {
       'no-restricted-imports': ['error', {
         patterns: [{
-          group: ['../core/**', '../reaction/**', '../devtools', '../devtools.ts'],
+          regex: '^(?:\\.\\./)+(?:core(?:/|$)|reaction(?:/|$)|devtools(?:\\.ts)?$)',
           message: 'React adapters must depend on the public model contract, not internal runtime modules.',
         }],
       }],
@@ -41,7 +41,7 @@ export default tseslint.config(
     rules: {
       'no-restricted-imports': ['error', {
         patterns: [{
-          group: ['../react/**', '../devtools', '../devtools.ts'],
+          regex: '^(?:\\.\\./)+(?:react(?:/|$)|devtools(?:\\.ts)?$)',
           message: 'Core runtime modules must not depend on UI adapters or DevTools.',
         }],
       }],

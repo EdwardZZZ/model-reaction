@@ -4,10 +4,9 @@ import {
     useState,
     useSyncExternalStore,
 } from 'react';
-import { ModelEvents, ValidationError } from '../types';
-import type { ModelFieldKey, ModelReturn } from '../types';
-import { shallow } from './selectors';
-import { createFieldMetaStore } from './field-meta-store';
+import { ModelEvents, ValidationError } from '../../types';
+import type { ModelFieldKey, ModelReturn } from '../../types';
+import { shallow } from '../selectors';
 
 /**
  * Subscribe a component to a single field. The component re-renders only
@@ -200,3 +199,31 @@ export function useModelFieldState<
 }
 
 const EMPTY_ERRORS: ValidationError[] = [];
+
+interface FieldMetaStore {
+    getSnapshot(): Readonly<Record<PropertyKey, unknown>>;
+    subscribe(notify: () => void): () => void;
+    set(patch: object): void;
+}
+
+/** Overrides for one mounted field binding. */
+function createFieldMetaStore(): FieldMetaStore {
+    let snapshot: Readonly<Record<PropertyKey, unknown>> = Object.freeze({});
+    const listeners = new Set<() => void>();
+    return {
+        getSnapshot: () => snapshot,
+        subscribe: (notify) => {
+            listeners.add(notify);
+            return () => { listeners.delete(notify); };
+        },
+        set: (patch) => {
+            const next = { ...snapshot, ...patch };
+            delete next.errors;
+            delete next.validating;
+            delete next.dirty;
+            if (shallow(snapshot, next)) return;
+            snapshot = Object.freeze(next);
+            listeners.forEach((notify) => notify());
+        },
+    };
+}

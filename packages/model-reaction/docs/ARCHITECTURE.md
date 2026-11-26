@@ -37,12 +37,14 @@ flowchart LR
 | `src/__tests__/` | Core behavior, React adapter, and integration tests | Integration tests also protect README examples |
 
 `core/write-preparation.ts` owns the prepared-write type and stateless preparation
-helpers; none are added to package exports. Default
-cloning and structural comparison stay in separate files under `core/` and share
-the internal `core/is-plain-object.ts` predicate for objects whose prototype is
+helpers; none are added to package exports. Default cloning and structural
+comparison stay in separate files under `core/value/` and share the internal
+`core/value/is-plain-object.ts` predicate for objects whose prototype is
 `Object.prototype` or `null`.
 `validation/index.ts` exports rule builders and implements the small error
 formatter. React and DevTools remain separate package entry points.
+Single-field bindings live in `react/field/`: `field-state.ts` owns field state
+and its private metadata store, while `draft-field.ts` handles draft input.
 `devtools.ts` keeps its hook types and helpers private. Tests observe registered
 instances through a capturing global hook instead of importing internal helpers.
 Selector cache and reporting helpers remain private within `react/selectors.ts`;
@@ -193,7 +195,7 @@ side-effect writeback cycles.
 - **UI boundaries:** local editing text and write exceptions belong in draft
   bindings; core dirty data contains failed model values. React and DevTools
   remain optional entry points, with no UI policy added to core state.
-  `DraftSession` stays in `react/draft-field.ts`; its completion listener is
+  `DraftSession` stays in `react/field/draft-field.ts`; its completion listener is
   registered in a microtask before the write's async validation resumes, so
   reentrant edits do not claim an earlier synchronous completion dispatch.
 
@@ -211,12 +213,12 @@ side-effect writeback cycles.
 | Change | Read first |
 | --- | --- |
 | Writes, dirty data, events, lifecycle | `core/model-manager.ts`, `core/write-preparation.ts` |
-| Default cloning and structural equality | `core/clone-default.ts`, `core/deep-equal.ts` |
+| Default cloning and structural equality | `core/value/clone-default.ts`, `core/value/deep-equal.ts` |
 | Validation order, timeout, and errors | `validation/validate-field.ts` |
 | Dependency edges or reaction scheduling | `reaction/reaction-graph.ts`, `reaction/reaction-system.ts` |
 | Action eligibility and execution | `reaction/reaction-system.ts`, `reaction/action-executor.ts` |
-| React field state and subscriptions | `react/field-state.ts`, `react/draft-field.ts`, `react/selectors.ts` |
-| React field metadata overrides per binding | `react/field-meta-store.ts` |
+| React field state and subscriptions | `react/field/field-state.ts`, `react/field/draft-field.ts`, `react/selectors.ts` |
+| React field metadata overrides per binding | `react/field/field-state.ts` |
 | DevTools hook, graph, and snapshots | `devtools.ts` |
 
 For public contract changes, check `src/index.ts`, both READMEs, and integration

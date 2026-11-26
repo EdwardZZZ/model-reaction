@@ -12,7 +12,7 @@ import {
     type FieldMetaSetter,
     type FieldSetter,
     type UseModelFieldStateOptions,
-} from './field-state';
+} from './field/field-state';
 
 /**
  * Internal context. Stored as `unknown` because a single Provider may host

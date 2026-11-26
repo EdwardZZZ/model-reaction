@@ -37,11 +37,13 @@ flowchart LR
 | `src/__tests__/` | 按核心行为、React 适配和集成场景组织测试 | 集成测试同时约束 README 示例契约 |
 
 `core/write-preparation.ts` 保存待写入字段类型和无状态准备函数，
-都不加入包的公开导出。默认值克隆和结构比较分别保留独立文件，归入 `core/`。
-两者共用内部的 `core/is-plain-object.ts`，将原型为 `Object.prototype` 或 `null`
+都不加入包的公开导出。默认值克隆和结构比较分别保留独立文件，归入 `core/value/`。
+两者共用内部的 `core/value/is-plain-object.ts`，将原型为 `Object.prototype` 或 `null`
 的对象识别为普通对象。
 `validation/index.ts` 导出规则构造器，并直接实现小型错误格式化函数。
 React 和 DevTools 也各自保持独立的发布入口。
+单字段绑定放在 `react/field/`：`field-state.ts` 管理字段状态和私有元数据存储，
+`draft-field.ts` 负责输入草稿。
 `devtools.ts` 的 hook 类型和辅助函数保持私有。测试通过全局 hook 捕获注册实例，
 不直接导入内部辅助函数。
 selector 缓存及上报辅助函数作为 `react/selectors.ts` 的私有实现；
@@ -162,7 +164,7 @@ action 计数覆盖唯一待执行函数及已启动调用。reaction 不等待 
   只有默认值不为 `undefined` 的非派生字段才启动初始化 reactions。
 - **UI 边界**：编辑文本与写入异常由 draft 绑定负责，核心 dirty data 保存失败的
   模型值。React 与 DevTools 保持可选入口，不把 UI 策略加入核心状态。
-  `DraftSession` 留在 `react/draft-field.ts`；完成事件监听在微任务中注册，
+  `DraftSession` 留在 `react/field/draft-field.ts`；完成事件监听在微任务中注册，
   早于本次写入的异步校验恢复，避免重入编辑认领前一次同步派发的完成事件。
 
 ## 依赖规则
@@ -179,12 +181,12 @@ action 计数覆盖唯一待执行函数及已启动调用。reaction 不等待 
 | 改动目标 | 首先阅读 |
 | --- | --- |
 | 字段写入、脏数据、事件、生命周期 | `core/model-manager.ts`、`core/write-preparation.ts` |
-| 默认值克隆和结构判等 | `core/clone-default.ts`、`core/deep-equal.ts` |
+| 默认值克隆和结构判等 | `core/value/clone-default.ts`、`core/value/deep-equal.ts` |
 | 字段校验顺序、超时和错误 | `validation/validate-field.ts` |
 | 依赖边或反应调度 | `reaction/reaction-graph.ts`、`reaction/reaction-system.ts` |
 | action 资格和执行 | `reaction/reaction-system.ts`、`reaction/action-executor.ts` |
-| React 字段状态与订阅 | `react/field-state.ts`、`react/draft-field.ts`、`react/selectors.ts` |
-| React 字段绑定各自的扩展元数据覆盖值 | `react/field-meta-store.ts` |
+| React 字段状态与订阅 | `react/field/field-state.ts`、`react/field/draft-field.ts`、`react/selectors.ts` |
+| React 字段绑定各自的扩展元数据覆盖值 | `react/field/field-state.ts` |
 | DevTools hook、字段图和快照 | `devtools.ts` |
 
 改动公开契约时同步检查 `src/index.ts`、两个 README 和集成测试；改动依赖图解释时，
