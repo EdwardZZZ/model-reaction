@@ -17,11 +17,11 @@
 | [深层依赖链](multi-record-deep-deps.ts) | 100 条记录、五层计算 | `pnpm --filter model-reaction run example:multi-record` |
 | [Schema 组合](schema-composition/runner.ts) | 精确枚举、独立默认值、顶层替换；[Recipe](SCHEMA_COMPOSITION_CN.md) | `pnpm --filter model-reaction run example:schema` |
 | [React 绑定](react-bindings.tsx) | 字段、selector、draft 与所有权 | `pnpm --filter model-reaction run example:react` |
-| [按需扩展字段元数据](react-field-meta.tsx) | 派生 UI 属性，并把 `setMeta` 传给业务函数 | `pnpm --filter model-reaction run example:react` |
+| [字段 UI 状态](react-field-ui.tsx) | 派生 `ui` 属性，并把 React state setter 传给业务函数 | `pnpm --filter model-reaction run example:react` |
 
 React 命令执行独立的 [SSR runner](react-bindings-runner.tsx)；导入组件文件不会运行它。
-元数据示例通过开关控制配送选项的显示和可用状态；runner 验证可编辑、禁用与隐藏
-三种状态。限制按钮把 `setMeta` 传给组件外的业务函数。
+字段 UI 示例通过开关控制配送选项的显示和可用状态；runner 验证可编辑、禁用与隐藏
+三种状态。限制按钮把本地 state setter 传给组件外的业务函数。
 
 ## 参考场景
 

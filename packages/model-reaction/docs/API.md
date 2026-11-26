@@ -640,15 +640,13 @@ These changes are breaking and require updating consumers:
   [React bindings](REACT.md).
 - React `FieldMeta.error` is removed. Read the first message through
   `meta.errors[0]?.message` and check error presence with `meta.errors.length > 0`.
-- React `useModelFieldState` appends `setMeta` as its fourth tuple item.
-  Three-item destructuring remains valid; explicit tuple types must include
-  `FieldMetaSetter<M>`. Manually constructed `DraftField` and `FieldRenderProps`
-  values must include `setMeta`. Extension updates are local to each binding;
-  see [React bindings](REACT.md#optional-field-metadata).
-- Optional metadata configuration returns partial extension properties.
-  Top-level union metadata cannot be patched; move correlated state into one
-  nested property.
-  See the React guide above for the type and lifecycle migration.
+- React field bindings expose only `errors`, `dirty`, and `validating` in `meta`.
+  If you used `options.meta`, `<Field meta>`, or `setMeta`, move those values
+  and setters to the field component. `useModelFieldState` returns three tuple
+  items; `DraftField<V>` and `FieldRenderProps<V>` have no `setMeta` member or
+  extension type arguments. Remove imports of `FieldMetaSelector`,
+  `FieldMetaSetter`, and `UseModelFieldStateOptions`.
+  See [Field UI state](REACT.md#field-ui-state).
 - Structural field equality and both selector Hooks remain unchanged.
 - Replace `action: fn` with `action: [fn]`. Read the owning field and its latest
   committed value from `{ field, value }`, and other fields through model

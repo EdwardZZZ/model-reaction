@@ -1,15 +1,10 @@
+import { useState } from 'react';
 import { createModel } from 'model-reaction';
-import { useModelFieldState, type FieldMetaSetter } from 'model-reaction/react';
+import { shallow, useModelComputed, useModelFieldState } from 'model-reaction/react';
 
-interface DeliveryMeta {
-    show: boolean;
-    disabled: boolean;
-    description: string;
-}
-
-/** A business function outside React can receive the field's metadata setter. */
-export function applyDeliveryRestriction(setMeta: FieldMetaSetter<DeliveryMeta>): void {
-    setMeta({ disabled: true, description: 'The courier cannot leave this parcel unattended.' });
+/** A business function can receive the field's UI state setter. */
+export function applyDeliveryRestriction(setRestriction: (message: string) => void): void {
+    setRestriction('The courier cannot leave this parcel unattended.');
 }
 
 export function createDeliveryModel() {
@@ -21,26 +16,26 @@ export function createDeliveryModel() {
 }
 
 /** The caller owns and disposes the model; see react-bindings-runner.tsx. */
-export function FieldMetaExample({
+export function FieldUiExample({
     model,
 }: {
     model: ReturnType<typeof createDeliveryModel>;
 }) {
     const [deliveryRequired, setDeliveryRequired] = useModelFieldState(model, 'deliveryRequired');
     const [readonly, setReadonly] = useModelFieldState(model, 'readonly');
-    const [leaveAtDoor, setLeaveAtDoor, meta, setMeta] = useModelFieldState(model, 'leaveAtDoor', {
-        meta: (data) => ({
-            show: data.deliveryRequired,
-            disabled: data.readonly,
-            description: data.readonly
-                ? 'Delivery options are locked.'
-                : 'The courier may leave the parcel at your door.',
-        }),
-    });
+    const [leaveAtDoor, setLeaveAtDoor] = useModelFieldState(model, 'leaveAtDoor');
+    const [restriction, setRestriction] = useState<string | null>(null);
+    const ui = useModelComputed(model, (data) => ({
+        show: data.deliveryRequired,
+        disabled: data.readonly || restriction !== null,
+        description: restriction ?? (data.readonly
+            ? 'Delivery options are locked.'
+            : 'The courier may leave the parcel at your door.'),
+    }), shallow);
 
     return (
         <fieldset>
-            <legend>Optional field metadata</legend>
+            <legend>Field UI state</legend>
             <label>
                 <input
                     type="checkbox"
@@ -57,20 +52,20 @@ export function FieldMetaExample({
                 />
                 Lock delivery options
             </label>
-            <button type="button" onClick={() => applyDeliveryRestriction(setMeta)}>
+            <button type="button" onClick={() => applyDeliveryRestriction(setRestriction)}>
                 Apply courier restriction
             </button>
-            {meta.show && (
+            {ui.show && (
                 <label>
                     <input
                         data-field="leaveAtDoor"
                         type="checkbox"
                         checked={leaveAtDoor}
-                        disabled={meta.disabled}
+                        disabled={ui.disabled}
                         onChange={(event) => void setLeaveAtDoor(event.target.checked)}
                     />
                     Leave at door
-                    <small>{meta.description}</small>
+                    <small>{ui.description}</small>
                 </label>
             )}
         </fieldset>

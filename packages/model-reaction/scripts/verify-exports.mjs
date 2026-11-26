@@ -135,13 +135,11 @@ async function verifyDeclarations() {
     const contracts = (await readFile(
       new URL('../src/__tests__/public-type-contracts.ts', import.meta.url), 'utf8',
     )).replaceAll("'../index'", "'model-reaction'");
-    const metaContracts = (await readFile(
-      new URL('../src/__tests__/react-meta-type-contracts.ts', import.meta.url), 'utf8',
-    )).replaceAll("'../index'", "'model-reaction'").replaceAll("'../react'", "'model-reaction/react'");
     const entryContracts = `
 import { createModel as createDevtoolsModel } from 'model-reaction/devtools';
 import { formatValidationErrors } from 'model-reaction/validation';
 import { useDraftField, useModelField, useModelFields, useModelFieldState, useModelSelector, useModelComputed, Field } from 'model-reaction/react';
+import type { DraftField, FieldMeta, FieldSetter } from 'model-reaction/react';
 import type { ModelFieldKey, ModelFieldName, ValidationErrors } from 'model-reaction';
 const devtools: typeof createModel = createDevtoolsModel;
 const root: typeof createDevtoolsModel = createModel;
@@ -152,15 +150,24 @@ function verifyEntries() {
   const errors: ValidationErrors = model.validationErrors;
   const field: number = useModelField(model, key);
   const fields: { 0: number } = useModelFields(model, [key]);
-  const state: number = useModelFieldState(model, key)[0];
-  const draft: number = useDraftField(model, key).committed;
+  const state: [number, FieldSetter<number>, FieldMeta] = useModelFieldState(model, key);
+  const draft: DraftField<number> = useDraftField(model, key, { format: (value) => value.toFixed() });
   const selected: number = useModelSelector(model, (data) => data[0], Object.is);
   const computed: number = useModelComputed(model, (data) => data[0] * 2, Object.is);
   // @ts-expect-error selector hooks have no debug argument
   useModelSelector(model, (data) => data[0], undefined, 'selected');
   // @ts-expect-error selector hooks have no debug argument
   useModelComputed(model, (data) => data[0], undefined, { fields: [0] });
-  Field({ model, name: key, children: ({ value }) => { const v: number = value; return v; } });
+  // @ts-expect-error business UI selectors are separate from field state
+  useModelFieldState(model, key, { meta: () => ({ disabled: true }) });
+  // @ts-expect-error draft bindings expose no UI metadata setter
+  void draft.setMeta;
+  Field({ model, name: key, children: ({ value, meta }) => {
+    const v: number = value;
+    return meta.validating ? null : v;
+  } });
+  // @ts-expect-error Field props do not accept a business UI selector
+  Field({ model, name: key, meta: () => ({ disabled: true }), children: () => null });
   formatValidationErrors(errors);
   // @ts-expect-error React fields share the string/number key contract
   useModelField(model, Symbol('field'));
@@ -175,9 +182,7 @@ void verifyEntries;
     ]) {
       const source = path.join(temporary, `contracts${extension}`);
       await writeFile(source, contracts + entryContracts);
-      const metaSource = path.join(temporary, `meta-contracts${extension}`);
-      await writeFile(metaSource, metaContracts);
-      const program = ts.createProgram([source, metaSource], {
+      const program = ts.createProgram([source], {
         target: ts.ScriptTarget.ES2022,
         module,
         moduleResolution,

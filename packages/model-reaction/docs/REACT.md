@@ -15,7 +15,7 @@ This page is the canonical React contract; README and examples link here.
 
 - [Hooks & Components](#hooks--components)
 - [Basic Example](#basic-example)
-- [Optional field metadata](#optional-field-metadata)
+- [Field UI state](#field-ui-state)
 - [Controlled Inputs Under Strict / Async Validation](#controlled-inputs-under-strict--async-validation)
 - [Model Lifecycle in React](#model-lifecycle-in-react)
 - [`useModelSelector` vs `useModelComputed`](#usemodelselector-vs-usemodelcomputed)
@@ -35,7 +35,7 @@ This page is the canonical React contract; README and examples link here.
 | `useModelComputed(model, selector, isEqual?)` | hook | Same shape as `useModelSelector`, but the subscription does not depend on selector identity. The current render's selector can close over `id`, `index`, and other props without `useCallback`. |
 | `useModelFields(model, fields)` | hook | Subscribe to several fields at once (shallow-compared). |
 | `useDraftField(model, field, options?)` | hook | **Recommended text-input binding** with a local draft, `touched`, error gating, and model validation. |
-| `useModelFieldState(model, field, options?)` | hook | Lower-level committed-value binding with `[value, setValue, meta, setMeta]`; use for non-text controls or custom policies. |
+| `useModelFieldState(model, field)` | hook | Lower-level committed-value binding with `[value, setValue, meta]`; use for non-text controls or custom policies. |
 | `shallow` | function | Shallow equality helper for object/array selectors. |
 | `<ModelProvider model>` | component | Provide a model via context. |
 | `useModel<T>()` | hook | Read the model from the nearest provider. |
@@ -167,127 +167,42 @@ function Snapshot() {
 
 A complete sample lives at [`examples/react-bindings.tsx`](../examples/react-bindings.tsx).
 
-## Optional field metadata
+## Field UI state
 
-`FieldMeta` contains `errors`, `validating`, and `dirty`. Read the first error
-message with `meta.errors[0]?.message`.
+`useModelFieldState`, `useDraftField`, and `<Field>` expose the same `FieldMeta`:
+`errors`, `validating`, and `dirty`. Read the first error message with
+`meta.errors[0]?.message`.
 
-Add business UI properties only where needed through `options.meta`; no schema declaration
-or default `show` / `disabled` properties are required:
-
-```tsx
-const [value, setValue, meta, setMeta] = useModelFieldState(model, 'address', {
-    meta: (data) => ({
-        show: data.deliveryRequired,
-        disabled: data.readonly,
-        placeholder: 'Delivery address',
-    }),
-});
-// meta has the inferred type:
-// FieldMeta & { show: boolean; disabled: boolean; placeholder: string }
-
-// In an event handler or business callback:
-setMeta({ disabled: true }); // merge; preserves other extension properties
-```
-
-For a complete example with switches that control visibility and availability,
-see [react-field-meta.tsx](../examples/react-field-meta.tsx). Run
-`pnpm --filter model-reaction run example:react` to verify its editable,
-disabled, and hidden states through SSR.
-
-`setMeta` synchronously merges a partial object into the current binding's
-extension metadata. Bindings keep separate overrides even when they use the
-same model, field and selector. Overrides reset on unmount or when the model or
-field changes. To drive multiple bindings from the same UI state, keep that
-state in a common parent or an application store and derive metadata from it.
-
-Patched properties take precedence over later selector results. Unpatched
-properties continue to derive from committed data. An empty patch does
-nothing; `undefined` stores that value when the property's type allows it,
-rather than removing an override. Nested values are replaced, not deep-merged.
-Own enumerable string and symbol properties participate in copying and
-shallow comparison. Non-enumerable properties are not metadata.
-
-Top-level union metadata can be read, but `FieldMetaSetter<M>` rejects patches
-when `M` is a union: a partial merge could invalidate a discriminant and its
-associated values. Put correlated state in one nested property instead:
+Keep business properties such as `show`, `disabled`, and `placeholder` in a
+separate `ui` object in the component or field module. Derive them from
+committed data with `useModelComputed`, and use React state for manual
+overrides:
 
 ```tsx
-type Status = { kind: 'text'; text: string } | { kind: 'count'; count: number };
-const [, , meta, setMeta] = useModelFieldState(model, 'address', {
-    meta: (): { status: Status } => ({ status: { kind: 'text', text: 'Ready' } }),
-});
-setMeta({ status: { kind: 'count', count: 2 } }); // replaces the whole branch
+import { useState } from 'react';
+import { shallow, useModelComputed, useModelFieldState } from 'model-reaction/react';
+
+// Inside the field component:
+const [value, setValue, meta] = useModelFieldState(model, 'address');
+const [disabledOverride, setDisabledOverride] = useState<boolean>();
+const ui = useModelComputed(model, (data) => ({
+    show: data.deliveryRequired,
+    disabled: disabledOverride ?? data.readonly,
+    placeholder: 'Delivery address',
+}), shallow);
 ```
 
-Pass the setter to a business function to update metadata outside a component:
+Call `setDisabledOverride(true)` in an event handler, or pass the setter to a
+business function as in [the delivery example](../examples/react-field-ui.tsx).
+UI state follows its owner: lift it to a common parent when several fields
+share it, or change the owner's React `key` if switching model or field should
+reset it. These properties are UI state; they do not change model writes,
+validation, or reactions.
 
-```tsx
-import type { FieldMetaSetter } from 'model-reaction/react';
-
-function disableAddress(
-    setMeta: FieldMetaSetter<{ show: boolean; disabled: boolean; placeholder: string }>
-) {
-    setMeta({ disabled: true, placeholder: 'Delivery unavailable' });
-}
-
-// In a component event handler:
-disableAddress(setMeta);
-```
-
-No core model setter is added: extension overrides live in the React adapter
-and do not enter `data`, `dirtyData`, or serialized model state. Call setters
-from events, effects, or business callbacks; keep render and selectors pure.
-The setter reference stays stable while the binding keeps the same model and field.
-For metadata with no model dependencies, an initial selector can return a
-constant object, such as `meta: () => ({ disabled: false })`.
-
-The selector must be synchronous and pure, return an object, and read model
-values from its `Readonly<T>` argument. It derives from committed `model.data`;
-failed inputs do not change it. Inline selectors can read the current render's
-props. Field-state bindings always provide base metadata and subscribe to
-committed field changes and field validation events through one subscription.
-The value and metadata share a render-local snapshot cache. Selected properties
-are reused while both committed data and the selector reference are unchanged;
-an inline selector is reevaluated on a new render so it can read current props.
-Shallow-equal extension results do not trigger a re-render when the value and
-base metadata are unchanged.
-Nested objects and arrays compare by reference, so keep those values stable
-when their contents are unchanged. Adding, replacing or removing a selector
-does not rebuild subscriptions or reset overrides.
-
-When `meta` is definitely present, the return type includes the complete
-extension `M`. If it is omitted or its presence is conditional, the extension
-is `Partial<M>`, even with an explicit `M`; read potentially missing properties
-with a guard or `?.`. For reusable options, `satisfies
-UseModelFieldStateOptions<T, M>` preserves a required `meta` property, whereas
-an annotation of that optional-options type conservatively allows absence.
-
-The extension is merged with the base metadata. TypeScript rejects reserved
-`FieldMeta` keys in selectors and patches; runtime setters ignore these keys,
-and the base values always win. Extensions affect
-UI rendering only: `show` and `disabled` do not alter writes, validation, or
-reactions. `UseModelFieldStateOptions<T, M>`, `FieldMetaSelector<T, M>`
-and `FieldMetaSetter<M>` are exported for reusable
-configuration and business callbacks.
-
-`useDraftField(model, field, { meta: (data) => ({ ... }) })` accepts the same
-selector alongside `format`. `<Field model={model} name="address"
-meta={(data) => ({ show: data.deliveryRequired })}>` passes the extended metadata
-to its children. Both expose `setMeta` alongside `meta`. Their return types
-preserve the inferred extension through `DraftField<V, M, R>` and
-`FieldRenderProps<V, M, R>`: `M` controls writes and `R` the readable properties.
-`R` defaults to `M`; optional configurations return `R = Partial<M>`.
-`FieldProps<T, K, M>` allows optional configuration and therefore gives its
-children partial metadata; a required `meta` prop selects the full-metadata
-component overload. Existing generic arguments remain valid; when supplying
-explicit model and field generics, also supply the third generic for an extension (for example,
-`<Field<FormData, 'address', { show: boolean }>`).
-
-Existing three-item destructuring still works. Explicit three-item tuple
-annotations must add `FieldMetaSetter<M>` as the fourth item. Manually
-constructed `DraftField` and `FieldRenderProps` values must add the required
-`setMeta` member.
+If you used `options.meta`, the `<Field meta>` prop, or `setMeta`, move the
+selector and overrides into the field component as shown above, and read
+`ui.disabled` in place of `meta.disabled`. Use the first three tuple items with
+`useModelFieldState` and remove extension-specific type arguments.
 
 `validating` tracks this binding's outstanding `setValue` calls. Overlapping
 calls keep it true until all finish; writes through the model or another
@@ -346,7 +261,7 @@ function UsernameInput({ model }: { model: ModelReturn<{ username: string }> }) 
 }
 ```
 
-`useDraftField(model, field, options?)` returns `{ draft, setDraft, meta, setMeta, writeError,
+`useDraftField(model, field, options?)` returns `{ draft, setDraft, meta, writeError,
 touched, onBlur, showError, committed }`:
 
 - `draft` / `setDraft` — the local editing text and its updater; wire them to
@@ -355,7 +270,6 @@ touched, onBlur, showError, committed }`:
   don't re-implement it per input.
 - `meta` / `committed` — the underlying `useModelFieldState` metadata and the
   last committed value.
-- `setMeta` — merge extension metadata for this binding.
 - `writeError: Error | null` — the latest edit's setter or cleanup exception.
   It is local to this editing session, separate from model validation errors.
 - `options.format` — how a committed/pending value renders as text on reseed
@@ -739,10 +653,10 @@ and call `dispose()` in `finally`. Do not share a model between requests.
 The client owner above initially renders nothing because effects do not run
 on the server.
 
-Field bindings keep validation session identity in React state: switching
-model/field retries the render before commit, and abandoned Suspense renders
-leave the active session intact. Metadata snapshot caches are local to the
-selector's render; they do not publish an uncommitted selector to other bindings.
+React state tracks pending writes for the current binding. Switching the model
+or field resets the count. If a switch suspends and is abandoned, the committed
+binding stays active. Selector hooks cache the selector from their own
+render, so an abandoned render cannot replace the committed selector.
 
 The [CLI runner](../examples/react-bindings-runner.tsx) performs an SSR smoke
 check; mounted subscription and StrictMode behavior are covered in

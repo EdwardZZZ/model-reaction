@@ -43,8 +43,9 @@ comparison stay in separate files under `core/value/` and share the internal
 `Object.prototype` or `null`.
 `validation/index.ts` exports rule builders and implements the small error
 formatter. React and DevTools remain separate package entry points.
-Single-field bindings live in `react/field/`: `field-state.ts` owns field state
-and its private metadata store, while `draft-field.ts` handles draft input.
+Single-field bindings live in `react/field/`: `field-state.ts` subscribes to
+committed values and validation results, and tracks pending writes in React
+state. `draft-field.ts` handles draft input.
 `devtools.ts` keeps its hook types and helpers private. Tests observe registered
 instances through a capturing global hook instead of importing internal helpers.
 Selector cache and reporting helpers remain private within `react/selectors.ts`;
@@ -218,7 +219,7 @@ side-effect writeback cycles.
 | Dependency edges or reaction scheduling | `reaction/reaction-graph.ts`, `reaction/reaction-system.ts` |
 | Action eligibility and execution | `reaction/reaction-system.ts`, `reaction/action-executor.ts` |
 | React field state and subscriptions | `react/field/field-state.ts`, `react/field/draft-field.ts`, `react/selectors.ts` |
-| React field metadata overrides per binding | `react/field/field-state.ts` |
+| Application field UI state | [React UI recipe](REACT.md#field-ui-state) |
 | DevTools hook, graph, and snapshots | `devtools.ts` |
 
 For public contract changes, check `src/index.ts`, both READMEs, and integration

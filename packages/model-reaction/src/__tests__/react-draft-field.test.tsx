@@ -487,6 +487,34 @@ describe('useDraftField', () => {
         model.dispose();
     });
 
+    it('gates errors by their presence even when the first message is empty', async () => {
+        const model = createModel({
+            name: {
+                type: 'string',
+                default: 'Ada',
+                validator: [{
+                    type: 'required',
+                    message: '',
+                    validate: (value) => value.length > 0,
+                }],
+            },
+        });
+        const { result, unmount } = renderHook(() => useDraftField(model, 'name'));
+        try {
+            await act(async () => { await model.setField('name', ''); });
+            expect(result.current.meta.errors[0]?.message).toBe('');
+            expect(result.current.showError).toBe(false);
+            act(() => result.current.onBlur());
+            expect(result.current.showError).toBe(true);
+            await act(async () => { await model.setField('name', 'Grace'); });
+            expect(result.current.meta.errors).toEqual([]);
+            expect(result.current.showError).toBe(false);
+        } finally {
+            unmount();
+            model.dispose();
+        }
+    });
+
     it('starts a fresh draft session when the model changes', async () => {
         const first = makeSignup();
         const second = makeSignup();

@@ -9,9 +9,7 @@ import type { ModelFieldKey, ModelReturn } from '../types';
 import {
     useModelFieldState,
     type FieldMeta,
-    type FieldMetaSetter,
     type FieldSetter,
-    type UseModelFieldStateOptions,
 } from './field/field-state';
 
 /**
@@ -57,24 +55,21 @@ export function useModel<T extends Record<string, any>>(): ModelReturn<T> {
 }
 
 /** Render-prop arguments passed to `<Field>`'s children. */
-export interface FieldRenderProps<V, M extends object = object, R extends object = M> {
+export interface FieldRenderProps<V> {
     value: V;
     setValue: FieldSetter<V>;
-    meta: FieldMeta & R;
-    setMeta: FieldMetaSetter<M>;
+    meta: FieldMeta;
 }
 
 /** Props for `<Field>`. */
 export interface FieldProps<
     T extends Record<string, any>,
     K extends ModelFieldKey<T>,
-    M extends object = object,
-    R extends object = Partial<M>,
-> extends UseModelFieldStateOptions<T, M> {
+> {
     name: K;
     /** Optional override; defaults to the model from `<ModelProvider>`. */
     model?: ModelReturn<T>;
-    children: (props: FieldRenderProps<T[K], M, R>) => ReactNode;
+    children: (props: FieldRenderProps<T[K]>) => ReactNode;
 }
 
 /**
@@ -96,18 +91,9 @@ export interface FieldProps<
  * ```
  */
 export function Field<
-    T extends Record<string, any>, K extends ModelFieldKey<T>, M extends object,
->(
-    props: FieldProps<T, K, M, M> & Required<UseModelFieldStateOptions<T, M>>
-): ReactElement;
-export function Field<
-    T extends Record<string, any>, K extends ModelFieldKey<T>, M extends object = object,
->(props: FieldProps<T, K, M>): ReactElement;
-export function Field<
     T extends Record<string, any>,
     K extends ModelFieldKey<T>,
-    M extends object = object,
->(props: FieldProps<T, K, M, M>): ReactElement {
+>(props: FieldProps<T, K>): ReactElement {
     const ctxModel = useContext(ModelContext) as ModelReturn<T> | null;
     const model = props.model ?? ctxModel;
     if (!model) {
@@ -115,7 +101,6 @@ export function Field<
             '[model-reaction] <Field> requires either a `model` prop or a surrounding <ModelProvider>.'
         );
     }
-    const [value, setValue, meta, setMeta] = useModelFieldState<T, K, M>(model, props.name, props);
-    // Overloads guarantee complete metadata only when a selector is present.
-    return props.children({ value, setValue, meta: meta as FieldMeta & M, setMeta }) as ReactElement;
+    const [value, setValue, meta] = useModelFieldState(model, props.name);
+    return props.children({ value, setValue, meta }) as ReactElement;
 }

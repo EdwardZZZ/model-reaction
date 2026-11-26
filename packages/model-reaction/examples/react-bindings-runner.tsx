@@ -2,7 +2,7 @@ import { strict as assert } from 'node:assert';
 import { renderToString } from 'react-dom/server';
 import { ModelProvider } from 'model-reaction/react';
 import { CartContents, createCartModel, createTaxModel } from './react-bindings';
-import { createDeliveryModel, FieldMetaExample } from './react-field-meta';
+import { createDeliveryModel, FieldUiExample } from './react-field-ui';
 
 async function runExample(): Promise<void> {
     const cart = createCartModel();
@@ -28,8 +28,8 @@ async function runExample(): Promise<void> {
         console.log(renderToString(<ModelProvider model={cart}><CartContents /></ModelProvider>));
         await inferred.setField('tax', 200);
 
-        console.log('=== Optional Field Metadata SSR Example ===');
-        const renderDelivery = () => renderToString(<FieldMetaExample model={delivery} />);
+        console.log('=== Field UI State SSR Example ===');
+        const renderDelivery = () => renderToString(<FieldUiExample model={delivery} />);
         const editable = renderDelivery();
         assert.match(editable, /data-field="leaveAtDoor"/);
         assert.doesNotMatch(editable, /disabled=""/);

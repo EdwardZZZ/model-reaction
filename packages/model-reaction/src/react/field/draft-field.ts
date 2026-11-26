@@ -1,12 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ModelEvents } from '../../types';
 import type { ModelFieldKey, ModelReturn } from '../../types';
-import {
-    useModelFieldState,
-    type FieldMeta,
-    type FieldMetaSetter,
-    type UseModelFieldStateOptions,
-} from './field-state';
+import { useModelFieldState, type FieldMeta } from './field-state';
 
 /**
  * Render a committed/pending value as input text (hydration path only, never
@@ -43,15 +38,13 @@ function asWriteError(error: unknown): Error {
 }
 
 /** What {@link useDraftField} hands back to a controlled input. */
-export interface DraftField<V, M extends object = object, R extends object = M> {
+export interface DraftField<V> {
     /** Text shown in the input; updates on every keystroke regardless of validity. */
     draft: string;
     /** Reflect an edit locally, then validate-then-commit it. Wire to `onChange`. */
     setDraft: (next: string) => void;
     /** Model-side metadata for this field (errors, validating, dirty). */
-    meta: FieldMeta & R;
-    /** Merge extension metadata in this binding. */
-    setMeta: FieldMetaSetter<M>;
+    meta: FieldMeta;
     /** Latest edit's write exception, kept locally rather than in model errors. */
     writeError: Error | null;
     /** True once the input has been blurred at least once. */
@@ -65,11 +58,7 @@ export interface DraftField<V, M extends object = object, R extends object = M> 
 }
 
 /** Options for {@link useDraftField}. */
-export interface UseDraftFieldOptions<
-    V,
-    T extends Record<string, any> = Record<string, any>,
-    M extends object = object,
-> extends UseModelFieldStateOptions<T, M> {
+export interface UseDraftFieldOptions<V> {
     /**
      * How a committed/pending value becomes input text on reseed. Defaults to
      * `String`. Override to keep a format the model doesn't store — e.g. a cents
@@ -107,29 +96,14 @@ interface DraftSession<V> {
  * the `format` option: see docs/REACT.md "Field-type contract".
  */
 export function useDraftField<
-    T extends Record<string, any>, K extends ModelFieldKey<T>, M extends object,
->(
-    model: ModelReturn<T>,
-    field: K,
-    options: UseDraftFieldOptions<T[K], T, M> & Required<UseModelFieldStateOptions<T, M>>
-): DraftField<T[K], M>;
-export function useDraftField<
-    T extends Record<string, any>, K extends ModelFieldKey<T>, M extends object = object,
->(
-    model: ModelReturn<T>,
-    field: K,
-    options?: UseDraftFieldOptions<T[K], T, M>
-): DraftField<T[K], M, Partial<M>>;
-export function useDraftField<
     T extends Record<string, any>,
     K extends ModelFieldKey<T>,
-    M extends object = object,
 >(
     model: ModelReturn<T>,
     field: K,
-    options: UseDraftFieldOptions<T[K], T, M> = {}
-): DraftField<T[K], M, Partial<M>> {
-    const [committed, setValue, meta, setMeta] = useModelFieldState<T, K, M>(model, field, options);
+    options: UseDraftFieldOptions<T[K]> = {}
+): DraftField<T[K]> {
+    const [committed, setValue, meta] = useModelFieldState(model, field);
 
     const formatRef = useRef<(value: T[K]) => string>(options.format ?? String);
     // Publish only committed renders, before reconciliation; see docs/REACT.md.
@@ -227,5 +201,5 @@ export function useDraftField<
     const onBlur = useCallback(() => setTouched(true), []);
     const showError = Boolean(touched && (writeError || meta.errors.length > 0));
 
-    return { draft, setDraft: edit, meta, setMeta, writeError, touched, onBlur, showError, committed };
+    return { draft, setDraft: edit, meta, writeError, touched, onBlur, showError, committed };
 }

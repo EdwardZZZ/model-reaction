@@ -17,13 +17,13 @@ Run each command from the repository root.
 | [Deep dependency chain](multi-record-deep-deps.ts) | Five layers across 100 records | `pnpm --filter model-reaction run example:multi-record` |
 | [Schema composition](schema-composition/runner.ts) | Exact enums, independent defaults, replacements; [recipe](SCHEMA_COMPOSITION.md) | `pnpm --filter model-reaction run example:schema` |
 | [React bindings](react-bindings.tsx) | Fields, selectors, draft, and ownership | `pnpm --filter model-reaction run example:react` |
-| [Optional field metadata](react-field-meta.tsx) | Derive UI properties and pass `setMeta` to a business function | `pnpm --filter model-reaction run example:react` |
+| [Field UI state](react-field-ui.tsx) | Derive `ui` properties and pass a React state setter to a business function | `pnpm --filter model-reaction run example:react` |
 
 The React command executes [its SSR runner](react-bindings-runner.tsx).
 Importing the component file does not execute the runner.
-The metadata example has switches for delivery visibility and editing;
+The field UI example has switches for delivery visibility and editing;
 the runner verifies its editable, disabled, and hidden states. Its restriction
-button passes `setMeta` to a function outside the component.
+button passes a local state setter to a function outside the component.
 
 ## Reference Recipes
 

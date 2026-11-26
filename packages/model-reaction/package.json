@@ -33,6 +33,7 @@
     "dist",
     "docs",
     "examples",
+    "!examples/tsconfig.json",
     "AGENTS.md",
     "CHANGELOG.md",
     "README.md",

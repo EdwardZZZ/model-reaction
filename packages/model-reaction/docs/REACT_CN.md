@@ -13,7 +13,7 @@
 
 - [Hooks 与组件](#hooks-与组件)
 - [基本示例](#基本示例)
-- [按需扩展字段元数据](#按需扩展字段元数据)
+- [字段 UI 状态](#字段-ui-状态)
 - [严格 / 异步校验下的受控输入](#严格--异步校验下的受控输入)
 - [React 中的 Model 生命周期](#react-中的-model-生命周期)
 - [`useModelSelector` vs `useModelComputed`](#usemodelselector-vs-usemodelcomputed)
@@ -33,7 +33,7 @@
 | `useModelComputed(model, selector, isEqual?)` | hook | 与 `useModelSelector` 形参相同，但订阅不依赖 selector 引用；当前 render 的 selector 可直接闭包 `id`、`index` 等 props，无需 `useCallback` |
 | `useModelFields(model, fields)` | hook | 一次订阅多个字段（浅比较） |
 | `useDraftField(model, field, options?)` | hook | **默认推荐的文本输入绑定**，包含本地 draft、`touched`、错误门控和 model 校验 |
-| `useModelFieldState(model, field, options?)` | hook | 更低层的 committed value 绑定，返回 `[value, setValue, meta, setMeta]`；用于非文本控件或自定义策略 |
+| `useModelFieldState(model, field)` | hook | 更低层的 committed value 绑定，返回 `[value, setValue, meta]`；用于非文本控件或自定义策略 |
 | `shallow` | 函数 | 用于对象/数组选择器的浅比较工具 |
 | `<ModelProvider model>` | 组件 | 通过 Context 注入 model |
 | `useModel<T>()` | hook | 读取最近 Provider 中的 model |
@@ -163,111 +163,36 @@ function Snapshot() {
 
 完整示例见 [`examples/react-bindings.tsx`](../examples/react-bindings.tsx)。
 
-## 按需扩展字段元数据
+## 字段 UI 状态
 
-`FieldMeta` 包含 `errors`、`validating` 和 `dirty`。首条错误消息通过
-`meta.errors[0]?.message` 读取。
+`useModelFieldState`、`useDraftField` 和 `<Field>` 提供相同的 `FieldMeta`：
+`errors`、`validating` 和 `dirty`。首条错误消息通过 `meta.errors[0]?.message` 读取。
 
-需要业务 UI 属性时，通过 `options.meta` 按需添加，无需在 schema 中声明，也没有默认的 `show` /
-`disabled` 属性：
-
-```tsx
-const [value, setValue, meta, setMeta] = useModelFieldState(model, 'address', {
-    meta: (data) => ({
-        show: data.deliveryRequired,
-        disabled: data.readonly,
-        placeholder: 'Delivery address',
-    }),
-});
-// meta 自动推导为：
-// FieldMeta & { show: boolean; disabled: boolean; placeholder: string }
-
-// 在事件处理函数或业务回调中：
-setMeta({ disabled: true }); // 合并更新，保留其他扩展属性
-```
-
-完整示例见 [react-field-meta.tsx](../examples/react-field-meta.tsx)，通过开关控制
-显示与可用状态。运行 `pnpm --filter model-reaction run example:react`，可用 SSR
-验证可编辑、禁用与隐藏三种状态。
-
-`setMeta` 将一个局部对象同步合并到当前绑定的扩展元数据中。即使多个绑定使用同一个
-model、字段和 selector，覆盖值也各自独立；组件卸载或切换 model、字段时重置。
-如果多个绑定需要由同一份 UI 状态驱动，可以把状态放在共同的父组件或应用 store 中，
-再据此派生元数据。
-
-已写入属性优先于后续 selector 的结果，其他属性继续从已提交数据派生。
-空对象不产生更新；属性类型允许时，`undefined` 会存储该值，不会移除覆盖。
-嵌套值整体替换，不做深合并。自有可枚举的字符串键和 symbol 键都参与复制与浅比较；
-不可枚举属性不属于元数据。
-
-顶层联合类型的元数据可以读取，但 `M` 为联合类型时，`FieldMetaSetter<M>` 禁止
-patch，避免局部合并破坏判别字段与关联值的关系。将关联状态放进单个嵌套属性即可：
+把 `show`、`disabled`、`placeholder` 等业务属性放在组件或字段模块的 `ui` 对象中。
+用 `useModelComputed` 从已提交的数据派生，需要手动覆盖时用 React state：
 
 ```tsx
-type Status = { kind: 'text'; text: string } | { kind: 'count'; count: number };
-const [, , meta, setMeta] = useModelFieldState(model, 'address', {
-    meta: (): { status: Status } => ({ status: { kind: 'text', text: 'Ready' } }),
-});
-setMeta({ status: { kind: 'count', count: 2 } }); // 整体替换这个分支
+import { useState } from 'react';
+import { shallow, useModelComputed, useModelFieldState } from 'model-reaction/react';
+
+// 在字段组件内：
+const [value, setValue, meta] = useModelFieldState(model, 'address');
+const [disabledOverride, setDisabledOverride] = useState<boolean>();
+const ui = useModelComputed(model, (data) => ({
+    show: data.deliveryRequired,
+    disabled: disabledOverride ?? data.readonly,
+    placeholder: 'Delivery address',
+}), shallow);
 ```
 
-把 setter 传给业务函数，即可在组件外更新元数据：
+在事件处理函数里调用 `setDisabledOverride(true)`，或像 [配送示例](../examples/react-field-ui.tsx)
+一样把 setter 传给业务函数。UI 状态由组件管理：多个字段要共享时，放到共同的父组件；
+切换 model 或字段时如果需要重置，可以更换持有状态组件的 React `key`。
+这些 UI 属性不会改变 model 的写入、校验或 reaction。
 
-```tsx
-import type { FieldMetaSetter } from 'model-reaction/react';
-
-function disableAddress(
-    setMeta: FieldMetaSetter<{ show: boolean; disabled: boolean; placeholder: string }>
-) {
-    setMeta({ disabled: true, placeholder: 'Delivery unavailable' });
-}
-
-// 在组件事件处理函数中：
-disableAddress(setMeta);
-```
-
-核心 model 不增加 setter：扩展覆盖值保存在 React 适配层，不进入 `data`、
-`dirtyData` 或序列化模型状态。在事件、effect 或业务回调中调用 setter，
-保持 render 和 selector 纯净。同一绑定的 model 和字段不变时，setter 引用稳定。
-不依赖模型数据的元数据可用常量 selector 提供初值，例如
-`meta: () => ({ disabled: false })`。
-
-selector 必须是同步纯函数，返回对象，并从 `Readonly<T>` 参数读取模型值。
-它根据已提交的 `model.data` 派生，失败输入不会改变它。内联 selector 可以读取当前
-render 的 props。字段状态绑定始终提供基础元数据，并订阅已提交字段的变化及字段
-校验事件，字段值和元数据共用一组订阅及 render 内的快照缓存。
-已提交数据和 selector 引用均未变时，复用已选出的属性；内联 selector 在新 render
-中会重新求值，以便读取当前 props。
-字段值与基础元数据未变、扩展结果浅比较相等时，不会触发重渲染。
-嵌套对象和数组按引用比较，内容不变时应保持引用稳定。
-添加、更换或移除 selector 不会重建订阅，也不会重置覆盖值。
-
-确定提供 `meta` 时，返回类型包含完整扩展 `M`。省略 `meta` 或条件性提供时，
-即使显式指定 `M`，扩展读取类型也为 `Partial<M>`，需要判断属性是否存在或使用
-`?.`。可复用配置使用 `satisfies UseModelFieldStateOptions<T, M>` 可以保留必需的
-`meta` 属性；直接标注为这一可选配置类型时，返回类型会保守地允许属性缺省。
-
-扩展结果与基础元数据合并。TypeScript 禁止 selector 或更新对象包含保留的
-`FieldMeta` 属性；运行时 setter 忽略这些属性，也始终保留基础属性的真实值。
-扩展仅影响 UI 渲染；`show` 和 `disabled`
-不会改变写入、校验或 reaction 行为。可复用配置的类型
-`UseModelFieldStateOptions<T, M>`、`FieldMetaSelector<T, M>`
-与业务回调的 `FieldMetaSetter<M>` 从 React 入口导出。
-
-`useDraftField(model, field, { meta: (data) => ({ ... }) })` 可在 `format` 之外
-接收同样的 selector。`<Field model={model} name="address"
-meta={(data) => ({ show: data.deliveryRequired })}>` 会把扩展元数据传给 children。
-两者都在 `meta` 之外提供 `setMeta`。
-返回类型通过 `DraftField<V, M, R>` 和 `FieldRenderProps<V, M, R>` 保留推导出的扩展：
-`M` 约束写入，`R` 描述可读属性。`R` 默认为 `M`；可选配置返回 `R = Partial<M>`。
-`FieldProps<T, K, M>` 允许可选配置，因此 children 接收可选扩展；
-必需的 `meta` prop 会匹配完整元数据的组件重载。
-原有泛型参数仍然有效；显式指定模型和字段泛型时，扩展需要同时指定第三个泛型，
-例如 `<Field<FormData, 'address', { show: boolean }>`。
-
-原有三项解构仍可使用。显式声明三项 tuple 类型的调用方需要增加第四项
-`FieldMetaSetter<M>`；手工构造 `DraftField` 和 `FieldRenderProps` 的调用方需要补齐
-新增的必需成员 `setMeta`。
+如果此前使用了 `options.meta`、`<Field meta>` 或 `setMeta`，按上面的方式把 selector
+和覆盖值移到字段组件，用 `ui.disabled` 替代 `meta.disabled`。`useModelFieldState`
+只解构前三项，移除扩展专用的泛型参数。
 
 `validating` 追踪当前绑定尚未结束的 `setValue` 调用。多个调用重叠时，全部结束后
 才变为 false；通过 model 或其他绑定发起的写入不计入其中。
@@ -319,13 +244,12 @@ function UsernameInput({ model }: { model: ModelReturn<{ username: string }> }) 
 }
 ```
 
-`useDraftField(model, field, options?)` 返回 `{ draft, setDraft, meta, setMeta, writeError, touched,
+`useDraftField(model, field, options?)` 返回 `{ draft, setDraft, meta, writeError, touched,
 onBlur, showError, committed }`：
 
 - `draft` / `setDraft` —— 本地编辑文本及其更新器；接到输入框的 `value` / `onChange`。
 - `touched` / `onBlur` / `showError` —— 失焦门控的错误展示，免得每个输入框各写一遍。
 - `meta` / `committed` —— 底层 `useModelFieldState` 的元数据与最后提交的值。
-- `setMeta` —— 合并更新当前绑定的扩展元数据。
 - `writeError: Error | null` —— 当前最新编辑的 setter 或收尾异常，只属于本地编辑会话，
   与模型校验错误分开。
 - `options.format` —— 回填时已提交/待定值如何渲染成文本（默认 `String`），见下方字段类型契约。
@@ -662,9 +586,9 @@ Hooks 基于 `useSyncExternalStore`。SSR 每个请求创建独立 model，等�
 不要跨请求共享 model。上面的客户端 owner 在服务器上初次渲染为空，
 因为服务器不会运行 effects。
 
-字段绑定将校验会话标识保存在 React state 中：切换 model/字段时，在提交前重试
-render；被放弃的 Suspense render 不会改变当前活动会话。元数据快照缓存属于
-对应 selector 的 render，不会把尚未提交的 selector 发布给其他绑定。
+React state 追踪当前绑定尚未结束的写入。切换 model 或字段会重置计数；如果切换时
+渲染因 Suspense 挂起并被放弃，已提交的绑定仍然有效。
+selector Hooks 使用各自 render 的 selector，被放弃的 render 不会替换已提交的 selector。
 
 [CLI runner](../examples/react-bindings-runner.tsx) 执行 SSR 冒烟检查；
 挂载后的订阅与 StrictMode 行为由 [Provider 测试](../src/__tests__/react-provider.test.tsx)

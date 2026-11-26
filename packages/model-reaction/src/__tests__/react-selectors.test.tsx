@@ -514,10 +514,21 @@ describe('shallow', () => {
         expect(shallow([1, 2, 3], [1, 2, 4])).toBe(false);
     });
 
+    it('compares enumerable symbol keys using the same policy as object spread', () => {
+        const key = Symbol('value');
+        const other = Symbol('value');
+        expect(shallow({ [key]: true }, { [key]: true })).toBe(true);
+        expect(shallow({ [key]: true }, { [key]: false })).toBe(false);
+        expect(shallow({ [key]: true }, { [other]: true })).toBe(false);
+        expect(shallow({ [key]: true }, {})).toBe(false);
+        const hidden = Object.defineProperty({}, key, { value: true, enumerable: false });
+        expect(shallow(hidden, {})).toBe(true);
+        expect(shallow({ [key]: true }, hidden)).toBe(false);
+    });
+
     it('returns false for mismatched types and null vs object', () => {
         expect(shallow([1] as unknown as object, { 0: 1 })).toBe(false);
         expect(shallow(null as unknown as object, { a: 1 })).toBe(false);
         expect(shallow({ a: 1 }, null as unknown as object)).toBe(false);
     });
 });
-

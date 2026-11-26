@@ -151,6 +151,43 @@ describe('useModelFields', () => {
 // ---------------------------------------------------------------------------
 
 describe('useModelFieldState', () => {
+    it('provides base metadata without rendering for unrelated changes', async () => {
+        const model = createModel({
+            address: { type: 'string', default: 'Home' },
+            note: { type: 'string', default: 'Other' },
+        });
+        let renders = 0;
+        const { result, unmount } = renderHook(() => {
+            renders++;
+            return useModelFieldState(model, 'address');
+        });
+        try {
+            expect(result.current[2]).toEqual({ errors: [], validating: false, dirty: false });
+            const before = renders;
+            await act(async () => { await model.setField('note', 'Changed'); });
+            expect(renders).toBe(before);
+        } finally {
+            unmount();
+            model.dispose();
+        }
+    });
+
+    it.each(['__proto__', 'constructor'] as const)('tracks validation for the %s field', async (field) => {
+        const name = { type: 'string' as const, default: 'Home', validator: [ValidationRules.required] };
+        const model = createModel({ ['__proto__']: name, constructor: name });
+        const { result, unmount } = renderHook(() => useModelFieldState(model, field));
+        try {
+            expect(result.current[2].errors).toEqual([]);
+            await act(async () => { await model.setField(field, ''); });
+            expect(result.current[0]).toBe('Home');
+            expect(result.current[2].errors).toHaveLength(1);
+            expect(result.current[2].dirty).toBe(true);
+        } finally {
+            unmount();
+            model.dispose();
+        }
+    });
+
     it('tracks numeric field errors, dirty clearing and outside recovery', async () => {
         const model = createModel({
             0: { type: 'string', default: 'before', validator: [ValidationRules.required] },

@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+- **React field metadata extensions:** `useModelFieldState` returns
+  `[value, setValue, meta]` with only `errors`, `dirty`, and `validating` in
+  `meta`. The `meta` option and prop, `setMeta`, and extension types are removed.
+  Use [field UI state](docs/REACT.md#field-ui-state) to migrate existing extensions.
+
 ### Internal
 - Track each write through its enclosing batch or scheduled reaction, and
   share the same field validation and commit pipeline.
@@ -42,7 +48,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Existing three-item destructuring
   works; explicit tuple types and manually constructed binding objects need
   the new member. Built-in metadata remains read-only. See
-  [React bindings](docs/REACT.md#optional-field-metadata).
+  [Field UI state](docs/REACT.md#field-ui-state) for the current alternative.
 - **DevTools browser extension** for inspecting models at runtime: a live data
   tree (`data` / `dirtyData` / `errors`), the reaction dependency graph, and a
   change timeline. Registration is opt-in via a new `model-reaction/devtools`
