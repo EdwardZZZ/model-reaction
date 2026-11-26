@@ -1,11 +1,4 @@
-// Schema and value inference
-
-/**
- * Return from `reaction.computed` to skip the current reaction without
- * validating or committing its target field, running its `action`, or
- * triggering downstream reactions.
- */
-export const SKIP_REACTION = Symbol.for('model-reaction.SKIP_REACTION');
+// Schema
 
 /** Pure validation rule; never await this model's global waiting methods. */
 export interface Validator {
@@ -15,6 +8,13 @@ export interface Validator {
     /** Skip this validator when the predicate returns false. */
     condition?: (data: Record<string, any>) => boolean;
 }
+
+/**
+ * Return from `reaction.computed` to skip the current reaction without
+ * validating or committing its target field, running its `action`, or
+ * triggering downstream reactions.
+ */
+export const SKIP_REACTION = Symbol.for('model-reaction.SKIP_REACTION');
 
 /** Return tracked work; never await this model's settled/validateAll. See docs/API.md. */
 export type ReactionAction<T = any> = (context: {
@@ -41,37 +41,6 @@ export interface Reaction<T = any, V = T> {
 }
 
 /**
- * Value type `reaction.computed` must return for each `type` tag. Enum
- * members live in `values`, which this per-tag lookup cannot see, so enum
- * results are not checked.
- */
-interface FieldValueMap {
-    string: string;
-    number: number;
-    boolean: boolean;
-    object: object;
-    array: readonly unknown[];
-    date: Date;
-    enum: unknown;
-}
-
-type FieldType = keyof FieldValueMap;
-
-interface TypedFieldSchema<K extends FieldType, V> {
-    /** Type metadata used for inference and tooling; not runtime validation. */
-    type: K;
-    validator?: Validator[];
-    /** Initial value, seeded without validation. */
-    default?: unknown;
-    /** Literal set used to infer enum values; validators enforce membership. */
-    values?: readonly unknown[];
-    /** One computation per field; side effects remain an action array. */
-    reaction?: Reaction<FieldValueMap[K], V>;
-    /** Transform input before validation. */
-    transform?: (value: any) => any;
-}
-
-/**
  * Field definition, discriminated by `type`: `reaction.computed` must return
  * the matching {@link FieldValueMap} value or {@link SKIP_REACTION}.
  * `FieldSchema<'number'>` selects a single variant. Action values default to
@@ -81,55 +50,17 @@ export type FieldSchema<K extends FieldType = FieldType, V = unknown> = {
     [P in K]: TypedFieldSchema<P, V>;
 }[K];
 
-type AnyFieldSchema = FieldSchema<FieldType, any>;
-
-/** Supported API keys; events use their string representation. */
-export type ModelFieldKey<T> = keyof T & (string | number);
-export type ModelFieldName<T> = `${ModelFieldKey<T>}`;
-
 /** Explicit T is the caller's value contract and supplies each action's value type. */
 export type Model<T = Record<string, any>> = {
     [K in keyof T]-?: FieldSchema<FieldType, T[K]>;
 } & Record<symbol, never>;
 
-/** Empty defaults keep their existing open array/object inference. */
-type InferArrayItem<S extends AnyFieldSchema> = S extends {
-    default: readonly (infer Item)[];
-}
-    ? [Item] extends [never]
-        ? unknown
-        : Item
-    : unknown;
-
-type InferObjectShape<S extends AnyFieldSchema> = S extends {
-    default: infer Value extends Record<string, unknown>;
-}
-    ? keyof Value extends never
-        ? Record<string, unknown>
-        : Value
-    : Record<string, unknown>;
-
-type InferTaggedValue<S extends AnyFieldSchema> =
-    S['type'] extends 'array' ? InferArrayItem<S>[] :
-    S['type'] extends 'object' ? InferObjectShape<S> :
-    S['type'] extends 'enum' ?
-        S extends { values: readonly (infer Value)[] }
-            ? Value
-            : unknown :
-    FieldValueMap[S['type']];
-
-type InferComputedValue<R> = R extends Reaction
-    ? Exclude<ReturnType<R['computed']>, typeof SKIP_REACTION>
-    : never;
+// Value inference
 
 /** Tag-derived values plus all declared computed results, excluding skipped writes. */
 export type InferFieldType<S extends AnyFieldSchema> = S extends AnyFieldSchema
     ? InferTaggedValue<S> |
         ('reaction' extends keyof S ? InferComputedValue<S['reaction']> : never)
-    : never;
-
-type InferDefault<S extends AnyFieldSchema> = S extends AnyFieldSchema
-    ? 'default' extends keyof S ? S['default'] : undefined
     : never;
 
 /**
@@ -197,6 +128,10 @@ export interface ModelEventMap<T = Record<string, any>> {
 
 // Model instance API
 
+/** Supported API keys; events use their string representation. */
+export type ModelFieldKey<T> = keyof T & (string | number);
+export type ModelFieldName<T> = `${ModelFieldKey<T>}`;
+
 export interface ModelOptions {
     /** Async validation timeout in milliseconds. */
     asyncValidationTimeout?: number;
@@ -234,3 +169,72 @@ export interface ModelReturn<T = Record<string, any>> {
         isEqual?: (a: R, b: R) => boolean
     ) => () => void;
 }
+
+// Schema type helpers
+
+/**
+ * Value type `reaction.computed` must return for each `type` tag. Enum
+ * members live in `values`, which this per-tag lookup cannot see, so enum
+ * results are not checked.
+ */
+interface FieldValueMap {
+    string: string;
+    number: number;
+    boolean: boolean;
+    object: object;
+    array: readonly unknown[];
+    date: Date;
+    enum: unknown;
+}
+
+type FieldType = keyof FieldValueMap;
+
+interface TypedFieldSchema<K extends FieldType, V> {
+    /** Type metadata used for inference and tooling; not runtime validation. */
+    type: K;
+    validator?: Validator[];
+    /** Initial value, seeded without validation. */
+    default?: unknown;
+    /** Literal set used to infer enum values; validators enforce membership. */
+    values?: readonly unknown[];
+    /** One computation per field; side effects remain an action array. */
+    reaction?: Reaction<FieldValueMap[K], V>;
+    /** Transform input before validation. */
+    transform?: (value: any) => any;
+}
+
+type AnyFieldSchema = FieldSchema<FieldType, any>;
+
+/** Empty defaults keep their existing open array/object inference. */
+type InferArrayItem<S extends AnyFieldSchema> = S extends {
+    default: readonly (infer Item)[];
+}
+    ? [Item] extends [never]
+        ? unknown
+        : Item
+    : unknown;
+
+type InferObjectShape<S extends AnyFieldSchema> = S extends {
+    default: infer Value extends Record<string, unknown>;
+}
+    ? keyof Value extends never
+        ? Record<string, unknown>
+        : Value
+    : Record<string, unknown>;
+
+type InferTaggedValue<S extends AnyFieldSchema> =
+    S['type'] extends 'array' ? InferArrayItem<S>[] :
+    S['type'] extends 'object' ? InferObjectShape<S> :
+    S['type'] extends 'enum' ?
+        S extends { values: readonly (infer Value)[] }
+            ? Value
+            : unknown :
+    FieldValueMap[S['type']];
+
+type InferComputedValue<R> = R extends Reaction
+    ? Exclude<ReturnType<R['computed']>, typeof SKIP_REACTION>
+    : never;
+
+type InferDefault<S extends AnyFieldSchema> = S extends AnyFieldSchema
+    ? 'default' extends keyof S ? S['default'] : undefined
+    : never;
