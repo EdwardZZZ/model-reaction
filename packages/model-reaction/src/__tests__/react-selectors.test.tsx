@@ -11,11 +11,50 @@ import {
     type OrderState,
 } from './react-test-helpers';
 
+class SelectionBoundary extends React.Component<
+    { children: React.ReactNode; onError: (error: Error) => void },
+    { error: Error | null }
+> {
+    state = { error: null as Error | null };
+    static getDerivedStateFromError(error: Error) { return { error }; }
+    componentDidCatch(error: Error) { this.props.onError(error); }
+    render() {
+        return this.state.error
+            ? <span role="alert">{this.state.error.message}</span>
+            : this.props.children;
+    }
+}
+
 // ---------------------------------------------------------------------------
 // useModelSelector — basic behaviour
 // ---------------------------------------------------------------------------
 
 describe('useModelSelector', () => {
+    it('filters equal selections before notifying React', async () => {
+        const cart = makeCart();
+        const subscribe = cart.subscribe;
+        const notifications = jest.fn();
+        jest.spyOn(cart, 'subscribe').mockImplementation((selector, callback, isEqual) =>
+            subscribe(selector, (value, previous) => {
+                notifications();
+                callback(value, previous);
+            }, isEqual)
+        );
+        const selector = (data: Cart) => data.qty;
+        const { result, unmount } = renderHook(() => useModelSelector(cart, selector));
+        try {
+            await act(async () => { await cart.setField('coupon', 'X'); });
+            expect(notifications).not.toHaveBeenCalled();
+            expect(result.current).toBe(1);
+            await act(async () => { await cart.setField('qty', 2); });
+            expect(notifications).toHaveBeenCalledTimes(1);
+            expect(result.current).toBe(2);
+        } finally {
+            unmount();
+            cart.dispose();
+        }
+    });
+
     it('subscribes to derived value and re-renders only when it changes', async () => {
         const cart = makeCart();
         let renderCount = 0;
@@ -393,6 +432,44 @@ describe.each([
     { name: 'useModelSelector', useSelection: useModelSelector },
     { name: 'useModelComputed', useSelection: useModelComputed },
 ])('$name — shared snapshot behaviour', ({ useSelection }) => {
+    it.each(['selector', 'equality'] as const)(
+        'sends subscription-time %s failures to the render error boundary',
+        async (failureAt) => {
+            const cart = makeCart();
+            const failure = new Error(`${failureAt} failed`);
+            const caught = jest.fn();
+            const errors = jest.spyOn(console, 'error').mockImplementation(() => {});
+            const selector = (data: Cart) => {
+                if (failureAt === 'selector' && data.qty === 2) throw failure;
+                return data.qty;
+            };
+            const isEqual = (a: number, b: number) => {
+                if (failureAt === 'equality' && (a === 2 || b === 2)) throw failure;
+                return Object.is(a, b);
+            };
+            function Value() {
+                return <span>{useSelection(cart, selector, isEqual)}</span>;
+            }
+            const { getByText, getByRole, unmount } = render(
+                <SelectionBoundary onError={caught}><Value /></SelectionBoundary>
+            );
+            try {
+                expect(getByText('1')).toBeTruthy();
+                await act(async () => { await cart.setField('qty', 2); });
+                expect(cart.data.qty).toBe(2);
+                expect(getByRole('alert').textContent).toBe(failure.message);
+                expect(caught).toHaveBeenCalledWith(failure);
+                expect(errors.mock.calls.some(([message]) =>
+                    String(message).includes('[EventEmitter]')
+                )).toBe(false);
+            } finally {
+                unmount();
+                cart.dispose();
+                errors.mockRestore();
+            }
+        }
+    );
+
     it('switches models and cleans up the previous subscription', async () => {
         const first = makeCart();
         const second = makeCart();

@@ -32,9 +32,6 @@ formModel.on('field:change', (data) => {
 
 formModel.on('validation:complete', (data) => {
   console.log(`验证完成: ${data.isValid ? '通过' : '失败'}`);
-  if (data.isValid) {
-    formModel.setField('submitStatus', 'submitted');
-  }
 });
 
 // 运行示例
@@ -53,7 +50,11 @@ async function runExample() {
   await formModel.setField('email', 'john.doe@example.com');
 
   // 验证表单
-  await formModel.validateAll();
+  const valid = await formModel.validateAll();
+  if (valid) {
+    // 后续写入单独等待；模型校验通过不代表服务端已接受提交。
+    await formModel.setField('submitStatus', 'validated');
+  }
 
   // 清理资源
   formModel.dispose();

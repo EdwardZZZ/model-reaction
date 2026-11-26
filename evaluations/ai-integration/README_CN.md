@@ -6,7 +6,8 @@
 首次交付通过 28/36（77.8%），两轮修复内最终通过 34/36（94.4%）。
 未通过的两次均属于 AI-11；配置、复核裁决与覆盖边界见
 [结果摘要](SUMMARY_CN.md)。完整报告与取证保存在 Git 忽略的本地 `runs/`，不随克隆交付。
-运行方式见 [执行说明](EXECUTION_CN.md)；任务提示与评分器保持冻结。
+运行方式见 [执行说明](EXECUTION_CN.md)。历史任务提示、fixture、检查、参考解和
+实测结果保持不变；运行器已修复状态一致性、产物选择和评分隔离，并非未改动的历史评分器。
 
 包含 Schema Recipe 的独立重采样也已完成：首次 32/36（88.9%），最终
 35/36（97.2%），AI-11 三次均首次通过。两轮对比见 [结果摘要](SUMMARY_CN.md)。
@@ -23,12 +24,27 @@
 [React 绑定](../../packages/model-reaction/docs/REACT_CN.md)、
 [高级用法](../../packages/model-reaction/docs/ADVANCED_CN.md)和
 [贡献约定](../../packages/model-reaction/AGENTS.md)制定。
-这些文档仍拥有公开契约；本清单仅固定任务输入与验收要求。
+这些链接指向当前 checkout 的契约。复现本历史清单时应读取指定源码 checkout
+中的文档，不能用当前 2.0 文档替代；本清单固定历史任务输入与验收要求。
 
 该提交的包版本为 `1.2.0`，文档还包含 unreleased 变更。
 **版本号不能单独标识本次评测对象，也不能据此推定 npm 上同版本包的行为。**
 首次执行时从指定源码构建并打包，记录源码 commit、工作区差异、tarball SHA-256、
 包内文档指纹以及消费项目锁文件。评测安装这份 tarball，不使用源码路径映射。
+
+使用 `prepare(output, sourceRepo)`（或 CLI 的第二个参数）选择上述提交的独立
+checkout。当前 2.0 包在任何构建或安装前即被拒绝。版本校验只是必要条件：
+仍须核对源码 commit/diff 并校准全部 12 份参考解。当前 API 的实验需要另立版本，
+不可原地改写 v1 参考解。清单记录实际 `package_version` 和 `tarball_name`；
+旧清单根据历史版本推导文件名。新实验必须使用全新的取证目录。
+
+当前静态/类型检查、编译和运行验收都在 `codex sandbox -P evaluation` worker
+内执行，不调用 AI。启动或权限探针失败记为 `BLOCKED`，不回退到无沙箱执行。
+worker 默认拒绝访问，只授权自身项目、可信工具链与检查代码、已核实的 Node/
+系统路径；拒绝参考解、其他尝试和宿主秘密，清理环境变量并关闭网络。
+检查与提交共享运行时，且可以在其中读取：**并非隐藏检查，也不能证明能抵御恶意篡改**。
+此边界保护宿主文件系统、环境与网络访问，不保证恶意运行时下的评分完整性。
+历史评分在宿主进程中执行，不能作为新边界的验证证据。详见 [执行限制](EXECUTION_CN.md)。
 
 本目录不在 npm 包的 `files` 范围内。任务卡中的“验收”和“典型误用”仅供评测者使用，
 不随包交付，也不作为 agent 的初始上下文。
@@ -374,7 +390,7 @@ FAIL 是有效尝试且计入分母，包括超出 agent 时间预算。BLOCKED 
 ```text
 suite_version, task_id, repeat_id, prompt_language, prompt_hash
 starter_hash, evaluator_hash, reference_check
-source_commit, source_diff_hash, package_version, tarball_sha256, docs_hash
+source_commit, source_diff_hash, package_version, tarball_name, tarball_sha256, docs_hash
 consumer_lock_hash, node_version, package_manager_version
 typescript_version, react_version, test_tool_versions
 agent_product, agent_model, agent_config_hash, tool_policy_hash

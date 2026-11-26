@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Plain-object defaults preserve enumerable own Symbol properties and null
+  prototypes; symbol-only value changes now commit and notify dependents.
+- React selector/equality failures reach error boundaries. Changing a draft
+  field's model or key cannot overwrite edits started by layout or child effects.
+- DevTools instance IDs are shared across module copies; failed registrations
+  release subscriptions. Map, Set, RegExp, Symbol properties, and unreadable
+  values retain useful bounded representations.
+- Conditional-validation documentation declares its condition field. Click-based
+  submission recipes prevent accidental native form submission.
+
+### Changed
+
+- **Breaking (types):** `Reaction<Computed, Value = Computed>` separates computed
+  output and action context. Inferred schemas provide `unknown` action values;
+  narrow them before use, or supply explicit `createModel<T>` field types.
+  Pre-annotated `Model<T>` schemas now require that explicit type argument.
+  Standalone typed reactions and no-argument callbacks remain supported.
+  TypeScript 5.4+ is required. Runtime scheduling is unchanged.
+  See [action types and migration](docs/API.md#action-queue).
+
 ### Removed
 - **React field metadata extensions:** `useModelFieldState` returns
   `[value, setValue, meta]` with only `errors`, `dirty`, and `validating` in

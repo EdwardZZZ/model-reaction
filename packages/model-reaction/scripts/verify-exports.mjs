@@ -126,6 +126,62 @@ await verifyActionArray(cjsRoot.createModel, 'CommonJS root');
 await verifyActionArray(esmDevtools.createModel, 'ESM DevTools');
 await verifyActionArray(cjsDevtools.createModel, 'CommonJS DevTools');
 
+async function verifyMixedDevtools() {
+  const hookKey = '__MODEL_REACTION_DEVTOOLS_HOOK__';
+  const previousHook = Object.getOwnPropertyDescriptor(globalThis, hookKey);
+  try {
+    for (const disposeFirst of [0, 1]) {
+      const registered = new Map();
+      const subscriptions = new Map();
+      const changes = [];
+      const hook = Object.freeze({
+        register(instance) {
+          registered.set(instance.id, instance);
+          subscriptions.set(instance.id, instance.subscribe((change) => {
+            changes.push({ id: instance.id, value: change.value });
+          }));
+        },
+        unregister(id) {
+          subscriptions.get(id)?.();
+          subscriptions.delete(id);
+          registered.delete(id);
+        },
+      });
+      const descriptors = Object.getOwnPropertyDescriptors(hook);
+      Object.defineProperty(globalThis, hookKey, { value: hook, configurable: true });
+      const models = [];
+      try {
+        models.push(esmDevtools.createModel({ value: { type: 'number', default: 1 } }));
+        models.push(cjsDevtools.createModel({ value: { type: 'number', default: 2 } }));
+        const ids = [...registered.keys()];
+        assert.equal(registered.size, 2, 'mixed ESM/CommonJS models have distinct IDs');
+        assert.ok(ids.every(Number.isSafeInteger), 'DevTools wire IDs remain numeric');
+        await models[0].setField('value', 11);
+        await models[1].setField('value', 22);
+        assert.deepEqual(changes, [{ id: ids[0], value: 11 }, { id: ids[1], value: 22 }]);
+        models[disposeFirst].dispose();
+        const remaining = 1 - disposeFirst;
+        assert.deepEqual([...registered.keys()], [ids[remaining]], 'disposal preserves the other module');
+        await models[remaining].setField('value', 33);
+        assert.deepEqual(changes.at(-1), { id: ids[remaining], value: 33 });
+        assert.equal(registered.get(ids[remaining]).getSnapshot().data.value, 33);
+        models[remaining].dispose();
+        assert.equal(registered.size, 0);
+        assert.equal(subscriptions.size, 0);
+        assert.deepEqual(Object.getOwnPropertyDescriptors(hook), descriptors, 'user hook is unchanged');
+      } finally {
+        models.forEach((model) => model.dispose());
+        subscriptions.forEach((unsubscribe) => unsubscribe());
+      }
+    }
+  } finally {
+    if (previousHook) Object.defineProperty(globalThis, hookKey, previousHook);
+    else delete globalThis[hookKey];
+  }
+}
+
+await verifyMixedDevtools();
+
 async function verifyDeclarations() {
   const packageRoot = fileURLToPath(new URL('../', import.meta.url));
   const temporary = await mkdtemp(path.join(tmpdir(), 'model-reaction-declarations-'));

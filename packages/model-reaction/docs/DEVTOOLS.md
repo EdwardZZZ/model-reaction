@@ -206,8 +206,11 @@ Refresh the inspected page and reopen DevTools to restore that context.
   values, names (including anonymous selector source), and observed input lists share these limits. Input lists are capped
   at 100; field names that exceed the remaining budget are omitted, never clipped
   into different identities. The banner also covers omitted derived arrows. Shared objects in sibling branches
-  remain readable; true cycles are marked. Unreadable derived values show a marker
+  remain readable; true cycles are marked. Unreadable values show a marker
   while preserving the rest of the snapshot.
+- `Map` keys and values, `Set` items, and `RegExp` source/flags retain their type
+  and contents under the same budgets. Object entries include enumerable own
+  Symbol properties, displayed with their Symbol label.
 
 ## The DevTools hook contract
 
@@ -250,6 +253,9 @@ The agent still refreshes on committed changes for older instances without
 The extension's page agent implements the global hook. The DevTools entry also
 passes the model object when registering; the agent associates its identity
 through a WeakMap. That object never enters extension messages.
+Instance IDs are shared across module copies in the same page, including ESM
+and CommonJS. A failed registration releases its subscriptions and identity
+association; disposing one model cannot remove another model's registration.
 The two React derived Hooks call `updateDerived` directly in post-commit effects,
 using a distinct token per Hook. `selection: null` removes the observation on
 unmount or model switch. Older hooks without this method skip reporting; the

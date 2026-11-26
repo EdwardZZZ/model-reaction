@@ -262,6 +262,9 @@ onBlur, showError, committed }`：
 `"3.50"`。外部提交回填 draft 时使用 `format`；若本地校验调用仍在进行，会在这些
 调用完成后同步外部更新。旧调用不会覆盖较新的编辑，也不会影响切换后的 model/字段会话。
 
+切换 model 或字段时，会在 effect 能编辑新会话之前重置 draft、touched 和写入异常。
+由 layout effect 或子组件 effect 发起的新编辑，也会在后续提交中保留输入文本。
+
 字段绑定支持 `useDraftField(model, 0)` 这样的数字 Schema key，事件过滤使用其
 字符串表示。从 `field:change` 监听中重入编辑也会保留新编辑的原始文本。
 `setDraft` 立即更新本地文本并开始模型写入；完成事件监听在当前派发结束后的微任务
@@ -474,6 +477,9 @@ const summary = useModelComputed(
 `shallow` 只比较一层，嵌套对象按引用比较。自定义 equality 是可选项，也不会省掉
 下一次结果的计算。两者都不保证每次 commit 或 render 恰好调用 selector 一次：
 订阅和快照读取都可能求值。selector 应保持纯函数，昂贵派生先测量再添加缓存。
+
+selector 或比较函数处理已提交快照时抛出的异常，会进入 React 渲染流程，
+可由错误边界处理。订阅阶段的异常不会静默地让界面继续显示旧选择结果。
 
 ## 派生值的副作用
 

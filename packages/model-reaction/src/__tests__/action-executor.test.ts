@@ -1,4 +1,4 @@
-import { createModel, Reaction, ReactionAction, SKIP_REACTION } from '../index';
+import { createModel, ModelEvents, Reaction, ReactionAction, SKIP_REACTION } from '../index';
 import { ActionExecutor } from '../reaction/action-executor';
 import { PendingTasks } from '../core/pending-tasks';
 
@@ -119,7 +119,7 @@ describe('actions after computation settles', () => {
             const barrier = deferred<boolean>();
             const started = deferred();
             const action = jest.fn();
-            const latest: Reaction<number> = {
+            const latest: Reaction<number, unknown> = {
                 fields: ['first', 'second'],
                 computed: ({ second }) => {
                     if (second === undefined) return 1;
@@ -388,10 +388,57 @@ describe('actions after computation settles', () => {
         }
     );
 
+    test.each([null, undefined, 'pending'])(
+        'reads a queued action value after a direct host write of %s',
+        async (replacement) => {
+            const gate = deferred<boolean>();
+            const started = deferred();
+            const observed: unknown[] = [];
+            const errors = jest.fn();
+            const model = own(createModel<{
+                source: number | undefined;
+                slow: number | undefined;
+                target: number | null | undefined | string;
+            }>({
+                source: { type: 'number' },
+                slow: {
+                    type: 'number',
+                    validator: [{
+                        type: 'gate', message: '',
+                        validate: () => { started.resolve(); return gate.promise; },
+                    }],
+                },
+                target: {
+                    type: 'number', default: null,
+                    reaction: {
+                        fields: ['source'], computed: () => 2,
+                        action: [({ value }) => {
+                            if (typeof value === 'number') value.toFixed();
+                            observed.push(value);
+                        }],
+                    },
+                },
+            }));
+            model.on(ModelEvents.REACTION_ERROR, errors);
+            const slow = model.setField('slow', 1);
+            await started.promise;
+            await model.setField('source', 1);
+            await drain();
+            expect(model.data.target).toBe(2);
+            expect(observed).toEqual([]);
+            expect(await model.setField('target', replacement)).toBe(true);
+            gate.resolve(true);
+            await slow;
+            await model.settled();
+            expect(observed).toEqual([replacement]);
+            expect(errors).not.toHaveBeenCalled();
+        }
+    );
+
     test('keeps a queued action after a direct host write and reads the latest committed value', async () => {
         const gate = deferred<boolean>();
         const started = deferred();
-        const observed: Array<{ field: string; value: number }> = [];
+        const observed: Array<{ field: string; value: unknown }> = [];
         const model = own(createModel({
             source: { type: 'number' },
             slow: {
@@ -669,7 +716,7 @@ describe('actions after computation settles', () => {
             values.push([value, model.data.computed]);
         });
         const model = own(
-            createModel({
+            createModel<{ source: number; computed: number; target: number }>({
                 source: { type: 'number', default: 1 },
                 computed: { type: 'number', default: 99 },
                 target: {
@@ -787,7 +834,7 @@ describe('actions after computation settles', () => {
         const action = jest.fn(() => {
             values.push([model.data.first, model.data.second]);
         });
-        const shared: Reaction<number> = {
+        const shared: Reaction<number, unknown> = {
             fields: ['source'],
             computed: ({ source }) => source * 2,
             action: [action],

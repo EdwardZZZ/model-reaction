@@ -5,31 +5,36 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "ts-node: 当前文件",
+            "name": "tsx: 当前文件",
             "request": "launch",
             "runtimeArgs": [
-                "--project",
-                "${workspaceFolder}/tsconfig.json",
+                "--tsconfig",
+                "${workspaceFolder}/packages/model-reaction/tsconfig.examples.json",
                 "${file}"
             ],
-            "runtimeExecutable": "ts-node",
+            "runtimeExecutable": "${workspaceFolder}/packages/model-reaction/node_modules/.bin/tsx",
             "skipFiles": [
                 "<node_internals>/**"
             ],
             "type": "node",
-            "cwd": "${workspaceFolder}"
+            "cwd": "${workspaceFolder}/packages/model-reaction"
         },
         {
             "type": "node",
             "request": "launch",
-            "name": "ts-node: 基本示例",
-            "runtimeExecutable": "ts-node",
+            "name": "tsx: 基本示例",
+            "runtimeExecutable": "${workspaceFolder}/packages/model-reaction/node_modules/.bin/tsx",
+            "runtimeArgs": [
+                "--tsconfig",
+                "${workspaceFolder}/packages/model-reaction/tsconfig.examples.json"
+            ],
             "skipFiles": [
                 "<node_internals>/**"
             ],
-            "program": "${workspaceFolder}/examples/basic-usage.ts",
+            "program": "${workspaceFolder}/packages/model-reaction/examples/basic-usage.ts",
+            "cwd": "${workspaceFolder}/packages/model-reaction",
             "outFiles": [
-                "${workspaceFolder}/**/*.js"
+                "${workspaceFolder}/packages/model-reaction/**/*.js"
             ]
         }
     ]

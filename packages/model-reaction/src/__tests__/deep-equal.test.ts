@@ -50,6 +50,67 @@ describe('deepEqual', () => {
         expect(deepEqual({ a: { b: 1 } }, { a: { b: 2 } })).toBe(false);
     });
 
+    test('compares enumerable symbol values recursively', () => {
+        const token = Symbol('token');
+        const original = { label: 'same', [token]: { list: [1, 2] } };
+
+        expect(deepEqual(original, { label: 'same', [token]: { list: [1, 2] } })).toBe(true);
+        expect(deepEqual(original, { label: 'same', [token]: { list: [1, 3] } })).toBe(false);
+    });
+
+    test('detects symbol additions, removals, and distinct symbols with the same description', () => {
+        const token = Symbol('token');
+        const other = Symbol('token');
+
+        expect(deepEqual({}, { [token]: undefined })).toBe(false);
+        expect(deepEqual({ [token]: undefined }, {})).toBe(false);
+        expect(deepEqual({ [token]: 1 }, { [other]: 1 })).toBe(false);
+        expect(deepEqual({ [token]: 1 }, { token: 1 })).toBe(false);
+    });
+
+    test('ignores symbol insertion order', () => {
+        const first = Symbol('first');
+        const second = Symbol('second');
+
+        expect(deepEqual(
+            { [first]: { count: 1 }, [second]: 2 },
+            { [second]: 2, [first]: { count: 1 } }
+        )).toBe(true);
+    });
+
+    test('does not read non-enumerable string or symbol properties', () => {
+        const hidden = Symbol('hidden');
+        const readHidden = jest.fn(() => {
+            throw new Error('non-enumerable properties must not be read');
+        });
+        const original = Object.defineProperties({ visible: 1 }, {
+            hidden: { get: readHidden },
+            [hidden]: { get: readHidden },
+        });
+
+        expect(deepEqual(original, { visible: 1 })).toBe(true);
+        expect(deepEqual({ visible: 1 }, original)).toBe(true);
+        expect(readHidden).not.toHaveBeenCalled();
+    });
+
+    test('does not match an enumerable symbol against a non-enumerable own symbol', () => {
+        const first = Symbol('first');
+        const second = Symbol('second');
+        const a = Object.defineProperty({ [first]: 1 }, second, { value: 1 });
+        const b = Object.defineProperty({ [second]: 1 }, first, { value: 1 });
+
+        expect(deepEqual(a, b)).toBe(false);
+        expect(deepEqual(b, a)).toBe(false);
+    });
+
+    test('compares own __proto__ values as data', () => {
+        const original = { ['__proto__']: { count: 1 } };
+
+        expect(deepEqual(original, { ['__proto__']: { count: 1 } })).toBe(true);
+        expect(deepEqual(original, { ['__proto__']: { count: 2 } })).toBe(false);
+        expect(deepEqual(original, { constructor: { count: 1 } })).toBe(false);
+    });
+
     test('should handle mixed types and edge cases', () => {
         expect(deepEqual([], {})).toBe(false);
         expect(deepEqual({}, null)).toBe(false);
@@ -124,12 +185,111 @@ describe('deepEqual', () => {
         expect(deepEqual(g, h)).toBe(true);
     });
 
+    test('compares shared symbol values structurally without mistaking them for cycles', () => {
+        const token = Symbol('token');
+        const shared = { count: 1 };
+        const original = { named: shared, [token]: shared };
+
+        expect(deepEqual(original, { named: { count: 1 }, [token]: { count: 1 } })).toBe(true);
+        expect(deepEqual(original, { named: { count: 1 }, [token]: { count: 2 } })).toBe(false);
+    });
+
+    test('guards cycles through symbol keys using the existing reference-identity policy', () => {
+        const self = Symbol('self');
+        const a: Record<PropertyKey, unknown> = {};
+        const b: Record<PropertyKey, unknown> = {};
+        a[self] = a;
+        b[self] = b;
+
+        expect(deepEqual(a, a)).toBe(true);
+        expect(deepEqual(a, b)).toBe(false);
+    });
+
     test('compares null-prototype objects by their own fields', () => {
         const a = Object.assign(Object.create(null), { value: { count: 1 } });
         const b = Object.assign(Object.create(null), { value: { count: 1 } });
         expect(deepEqual(a, b)).toBe(true);
         expect(deepEqual(a, { value: { count: 1 } })).toBe(true);
         expect(deepEqual(a, { value: { count: 2 } })).toBe(false);
+    });
+
+    test('compares symbols on null-prototype dictionaries without making prototypes significant', () => {
+        const token = Symbol('token');
+        const dictionary = { [token]: { count: 1 } };
+        Object.setPrototypeOf(dictionary, null);
+
+        expect(deepEqual(dictionary, { [token]: { count: 1 } })).toBe(true);
+        expect(deepEqual({ [token]: { count: 1 } }, dictionary)).toBe(true);
+        expect(deepEqual(dictionary, { [token]: { count: 2 } })).toBe(false);
+    });
+
+    test('commits symbol-only changes and notifies events, selectors, and downstream reactions', async () => {
+        const token = Symbol('token');
+        type Value = { label: string; [token]?: { count: number } };
+        const computed = jest.fn(({ value }: Record<string, Value>) => value?.[token]?.count ?? 0);
+        const action = jest.fn();
+        const model = createModel<{ value: Value; count: number | undefined }>({
+            value: { type: 'object', default: { label: 'same' } },
+            count: {
+                type: 'number',
+                reaction: { fields: ['value'], computed, action: [action] },
+            },
+        });
+        try {
+            await model.settled();
+            expect(model.data.count).toBe(0);
+            computed.mockClear();
+            action.mockClear();
+            const onChange = jest.fn();
+            const onSelection = jest.fn();
+            model.on('field:change', onChange);
+            model.subscribe((data) => data.value[token]?.count ?? 0, onSelection);
+
+            for (const count of [1, 2, 0]) {
+                const previous = model.data;
+                const previousCount = previous.count;
+                const next: Value = count
+                    ? { label: 'same', [token]: { count } }
+                    : { label: 'same' };
+
+                expect(await model.setField('value', next)).toBe(true);
+                await model.settled();
+
+                expect(model.getField('value')).toBe(next);
+                expect(model.data).not.toBe(previous);
+                expect(model.data.count).toBe(count);
+                expect(previous.count).toBe(previousCount);
+                expect(onChange).toHaveBeenCalledTimes(2);
+                expect(onChange).toHaveBeenCalledWith({ field: 'value', value: next });
+                expect(onChange).toHaveBeenCalledWith({ field: 'count', value: count });
+                expect(onSelection).toHaveBeenCalledTimes(1);
+                expect(onSelection).toHaveBeenCalledWith(count, previousCount);
+                expect(computed).toHaveBeenCalledTimes(1);
+                expect(action).toHaveBeenCalledTimes(1);
+                expect(action).toHaveBeenCalledWith({ field: 'count', value: count });
+
+                onChange.mockClear();
+                onSelection.mockClear();
+                computed.mockClear();
+                action.mockClear();
+                const committed = model.data;
+                const equal: Value = count
+                    ? { [token]: { count }, label: 'same' }
+                    : { label: 'same' };
+
+                expect(await model.setField('value', equal)).toBe(true);
+                await model.settled();
+
+                expect(model.data).toBe(committed);
+                expect(model.getField('value')).toBe(next);
+                expect(onChange).not.toHaveBeenCalled();
+                expect(onSelection).not.toHaveBeenCalled();
+                expect(computed).not.toHaveBeenCalled();
+                expect(action).not.toHaveBeenCalled();
+            }
+        } finally {
+            model.dispose();
+        }
     });
 
     class OpaqueValue {

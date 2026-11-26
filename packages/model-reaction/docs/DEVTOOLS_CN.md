@@ -172,7 +172,9 @@ React 面板）及注册面板的 DevTools 页面打包进 `packages/devtools/di
   面板显示快照截断提示，派生值、名称（包含匿名 selector 源码）及观测到的来源列表也受此限制。来源列表最多 100 项；
   超出剩余预算的字段名会被省略，不截断成其他名称；派生连线省略也由该提示覆盖。
   兄弟分支中的共享对象仍可读取，
-  真正的循环引用会被标记。派生值无法读取时显示标记，保留其余快照。
+  真正的循环引用会被标记。无法读取的值显示标记，保留其余快照。
+- `Map` 的键值、`Set` 的元素、`RegExp` 的源码与 flags 保留类型和内容，
+  并遵守相同预算。对象条目包含可枚举的自有 Symbol 属性，以 Symbol 标签显示。
 
 ## DevTools Hook 契约
 
@@ -210,6 +212,8 @@ type SelectorObserver = <T extends Record<string, any>, R>(
 agent 仍会在已提交变更后刷新。注销或释放时移除两种订阅。
 扩展的 page-agent 实现全局 hook。DevTools 入口注册时同时提供 model 对象，
 agent 通过 WeakMap 关联模型身份；该对象不进入扩展消息。
+同一页面的多个模块副本（包含 ESM 和 CommonJS）共享实例 ID 分配。
+注册失败会释放已建立的订阅和身份关联；释放一个模型不会注销另一个模型。
 两个 React 派生 Hook 在提交后的 effect 中直接调用 `updateDerived`，
 每个 Hook 使用独立 token，`selection: null` 表示卸载或切换模型后的移除通知。
 旧版 hook 没有该方法时跳过上报；未注册或已注销模型的上报由 agent 忽略。

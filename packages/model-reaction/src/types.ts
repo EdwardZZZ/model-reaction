@@ -23,10 +23,10 @@ export type ReactionAction<T = any> = (context: {
 }) => void | PromiseLike<void>;
 
 /**
- * @typeParam T Value type for `computed` and the action context. The `any`
- * default leaves a bare `Reaction` unchecked, so it fits any field.
+ * @typeParam T Computed result type.
+ * @typeParam V Latest committed action value; defaults to T for standalone reactions.
  */
-export interface Reaction<T = any> {
+export interface Reaction<T = any, V = T> {
     /** Top-level model fields whose values are passed to `computed`. */
     fields: string[];
     /**
@@ -37,7 +37,7 @@ export interface Reaction<T = any> {
      */
     computed: (values: Record<string, any>) => T | typeof SKIP_REACTION;
     /** Side effects deduplicated by reference and called after computation settles; see docs/API.md. */
-    action?: ReactionAction<T>[];
+    action?: ReactionAction<V>[];
 }
 
 /**
@@ -57,7 +57,7 @@ interface FieldValueMap {
 
 type FieldType = keyof FieldValueMap;
 
-interface TypedFieldSchema<K extends FieldType> {
+interface TypedFieldSchema<K extends FieldType, V> {
     /** Type metadata used for inference and tooling; not runtime validation. */
     type: K;
     validator?: Validator[];
@@ -66,7 +66,7 @@ interface TypedFieldSchema<K extends FieldType> {
     /** Literal set used to infer enum values; validators enforce membership. */
     values?: readonly unknown[];
     /** One computation per field; side effects remain an action array. */
-    reaction?: Reaction<FieldValueMap[K]>;
+    reaction?: Reaction<FieldValueMap[K], V>;
     /** Transform input before validation. */
     transform?: (value: any) => any;
 }
@@ -74,23 +74,26 @@ interface TypedFieldSchema<K extends FieldType> {
 /**
  * Field definition, discriminated by `type`: `reaction.computed` must return
  * the matching {@link FieldValueMap} value or {@link SKIP_REACTION}.
- * `FieldSchema<'number'>` selects a single variant.
+ * `FieldSchema<'number'>` selects a single variant. Action values default to
+ * unknown because tags alone do not constrain defaults or direct writes.
  */
-export type FieldSchema<K extends FieldType = FieldType> = {
-    [P in K]: TypedFieldSchema<P>;
+export type FieldSchema<K extends FieldType = FieldType, V = unknown> = {
+    [P in K]: TypedFieldSchema<P, V>;
 }[K];
+
+type AnyFieldSchema = FieldSchema<FieldType, any>;
 
 /** Supported API keys; events use their string representation. */
 export type ModelFieldKey<T> = keyof T & (string | number);
 export type ModelFieldName<T> = `${ModelFieldKey<T>}`;
 
-/** Explicit T is the caller's value contract; Model checks keys and type tags only. */
+/** Explicit T is the caller's value contract and supplies each action's value type. */
 export type Model<T = Record<string, any>> = {
-    [K in keyof T]-?: FieldSchema;
+    [K in keyof T]-?: FieldSchema<FieldType, T[K]>;
 } & Record<symbol, never>;
 
 /** Empty defaults keep their existing open array/object inference. */
-type InferArrayItem<S extends FieldSchema> = S extends {
+type InferArrayItem<S extends AnyFieldSchema> = S extends {
     default: readonly (infer Item)[];
 }
     ? [Item] extends [never]
@@ -98,7 +101,7 @@ type InferArrayItem<S extends FieldSchema> = S extends {
         : Item
     : unknown;
 
-type InferObjectShape<S extends FieldSchema> = S extends {
+type InferObjectShape<S extends AnyFieldSchema> = S extends {
     default: infer Value extends Record<string, unknown>;
 }
     ? keyof Value extends never
@@ -106,7 +109,7 @@ type InferObjectShape<S extends FieldSchema> = S extends {
         : Value
     : Record<string, unknown>;
 
-type InferTaggedValue<S extends FieldSchema> =
+type InferTaggedValue<S extends AnyFieldSchema> =
     S['type'] extends 'array' ? InferArrayItem<S>[] :
     S['type'] extends 'object' ? InferObjectShape<S> :
     S['type'] extends 'enum' ?
@@ -120,12 +123,12 @@ type InferComputedValue<R> = R extends Reaction
     : never;
 
 /** Tag-derived values plus all declared computed results, excluding skipped writes. */
-export type InferFieldType<S extends FieldSchema> = S extends FieldSchema
+export type InferFieldType<S extends AnyFieldSchema> = S extends AnyFieldSchema
     ? InferTaggedValue<S> |
         ('reaction' extends keyof S ? InferComputedValue<S['reaction']> : never)
     : never;
 
-type InferDefault<S extends FieldSchema> = S extends FieldSchema
+type InferDefault<S extends AnyFieldSchema> = S extends AnyFieldSchema
     ? 'default' extends keyof S ? S['default'] : undefined
     : never;
 
@@ -134,7 +137,7 @@ type InferDefault<S extends FieldSchema> = S extends FieldSchema
  * include `undefined`; widened optional defaults retain their declared type.
  * Array/object defaults, computed results and enum values retain their shapes.
  */
-export type InferModelData<S extends Record<string, FieldSchema>> = {
+export type InferModelData<S extends Record<string, AnyFieldSchema>> = {
     [K in keyof S]: InferFieldType<S[K]> | Exclude<InferDefault<S[K]>, InferFieldType<S[K]>>;
 };
 

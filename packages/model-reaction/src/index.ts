@@ -41,12 +41,12 @@ export function createModel<S extends Record<string, FieldSchema> & Record<symbo
     schema: S,
     options?: ModelOptions
 ): ModelReturn<InferModelData<S>>;
-export function createModel<T extends Record<string, any>>(
-    schema: Model<T>,
+export function createModel<T extends Record<string, any> = never>(
+    schema: [T] extends [never] ? never : Model<NoInfer<T>>,
     options?: ModelOptions
 ): ModelReturn<T>;
 export function createModel(
-    schema: Record<string, FieldSchema>,
+    schema: Record<string, FieldSchema<FieldSchema['type'], any>>,
     options: ModelOptions = {}
 ): ModelReturn<Record<string, any>> {
     return new ModelManager<Record<string, any>>(schema, options);

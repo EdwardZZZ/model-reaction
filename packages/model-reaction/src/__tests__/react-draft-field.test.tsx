@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { act, render, renderHook } from '@testing-library/react';
 import { createModel, ModelEvents } from '../index';
 import { ValidationRules } from '../validation';
-import { useDraftField, useModelFields } from '../react';
+import { useDraftField, useModelFields, type DraftField } from '../react';
 import type { ModelReturn } from '../types';
 
 // ---------------------------------------------------------------------------
@@ -66,6 +66,151 @@ describe('useDraftField', () => {
                 validator: [ValidationRules.min(0)],
             },
         });
+
+    const makeSwitchModel = (
+        a: number,
+        validate: (value: number) => boolean | Promise<boolean>
+    ) => createModel({
+        a: {
+            type: 'number', default: a, transform: Number,
+            validator: [{ type: 'controlled', message: 'invalid', validate }],
+        },
+        b: {
+            type: 'number', default: 2, transform: Number,
+            validator: [{ type: 'controlled', message: 'invalid', validate }],
+        },
+    });
+
+    describe.each(['field', 'model'] as const)('%s switch', (identity) => {
+        it.each(['layout', 'child-passive'] as const)(
+            'preserves new-session edits and blur from a %s effect through validation',
+            async (phase) => {
+                let release!: (valid: boolean) => void;
+                const validate = (value: number) => value === 3.5
+                    ? new Promise<boolean>((resolve) => { release = resolve; })
+                    : true;
+                const first = makeSwitchModel(1, validate);
+                const second = makeSwitchModel(2, validate);
+                const target = identity === 'model' ? second : first;
+                const targetField = identity === 'field' ? 'b' : 'a';
+                let current!: DraftField<number>;
+                const initialSession = jest.fn();
+                function Child({ binding, switched }: { binding: DraftField<number>; switched: boolean }) {
+                    const { setDraft, onBlur } = binding;
+                    React.useEffect(() => {
+                        if (phase === 'child-passive' && switched) {
+                            setDraft('003.50');
+                            onBlur();
+                        }
+                    }, [switched, setDraft, onBlur]);
+                    return <input readOnly value={binding.draft} />;
+                }
+                function Input({ model, field }: { model: typeof first; field: 'a' | 'b' }) {
+                    const binding = useDraftField(model, field);
+                    const { setDraft, onBlur } = binding;
+                    const switched = model !== first || field !== 'a';
+                    React.useLayoutEffect(() => { current = binding; });
+                    React.useLayoutEffect(() => {
+                        if (!switched) return;
+                        initialSession(binding.draft, binding.touched, binding.writeError);
+                        if (phase === 'layout') {
+                            setDraft('003.50');
+                            onBlur();
+                        }
+                    }, [switched, setDraft, onBlur]);
+                    return <Child binding={binding} switched={switched} />;
+                }
+                const { rerender, getByRole, unmount } = render(
+                    <React.StrictMode><Input model={first} field="a" /></React.StrictMode>
+                );
+                try {
+                    act(() => { current.onBlur(); });
+                    rerender(<React.StrictMode><Input model={target} field={targetField} /></React.StrictMode>);
+                    expect(current.draft).toBe('003.50');
+                    expect((getByRole('textbox') as HTMLInputElement).value).toBe('003.50');
+                    expect(initialSession).toHaveBeenCalledWith('2', false, null);
+                    expect(current.touched).toBe(true);
+                    expect(current.committed).toBe(2);
+                    expect(current.meta.validating).toBe(true);
+                    await act(async () => {
+                        release(true);
+                        await target.settled();
+                    });
+                    expect(target.getField(targetField)).toBe(3.5);
+                    expect(current.committed).toBe(3.5);
+                    expect(current.draft).toBe('003.50');
+                    expect(current.touched).toBe(true);
+                    expect(current.meta.validating).toBe(false);
+                    await act(async () => { await target.setField(targetField, 42); });
+                    expect(current.draft).toBe('42');
+                } finally {
+                    unmount();
+                    release?.(true);
+                    await target.settled();
+                    first.dispose();
+                    second.dispose();
+                }
+            }
+        );
+
+        it('keeps the active draft session when a switch render is abandoned', async () => {
+            let release!: (valid: boolean) => void;
+            const first = makeSwitchModel(1, (value) => value === 3.5
+                ? new Promise<boolean>((resolve) => { release = resolve; })
+                : true);
+            const second = makeSwitchModel(2, () => true);
+            const suspended = new Promise<void>(() => {});
+            const attempts = jest.fn();
+            let switchSession!: (switched: boolean) => void;
+            let current!: DraftField<number>;
+            function Input({ switched }: { switched: boolean }) {
+                const model = switched && identity === 'model' ? second : first;
+                const field = switched && identity === 'field' ? 'b' : 'a';
+                const binding = useDraftField(model, field);
+                React.useLayoutEffect(() => { current = binding; });
+                if (switched) {
+                    attempts();
+                    throw suspended;
+                }
+                return <input readOnly value={binding.draft} />;
+            }
+            function App() {
+                const [switched, setSwitched] = useState(false);
+                switchSession = setSwitched;
+                return <React.Suspense fallback="loading"><Input switched={switched} /></React.Suspense>;
+            }
+            const { getByRole, unmount } = render(<React.StrictMode><App /></React.StrictMode>);
+            try {
+                act(() => {
+                    current.setDraft('003.50');
+                    current.onBlur();
+                });
+                act(() => { React.startTransition(() => switchSession(true)); });
+                expect(attempts).toHaveBeenCalled();
+                expect((getByRole('textbox') as HTMLInputElement).value).toBe('003.50');
+                expect(current.meta.validating).toBe(true);
+                await act(async () => {
+                    release(true);
+                    await first.settled();
+                });
+                act(() => { switchSession(false); });
+                expect(current.draft).toBe('003.50');
+                expect(current.committed).toBe(3.5);
+                expect(current.touched).toBe(true);
+                expect(current.meta.validating).toBe(false);
+                await act(async () => { await first.setField('a', 42); });
+                expect(current.draft).toBe('42');
+                expect(second.getField('a')).toBe(2);
+                expect(first.getField('b')).toBe(2);
+            } finally {
+                unmount();
+                release?.(true);
+                await first.settled();
+                first.dispose();
+                second.dispose();
+            }
+        });
+    });
 
     it.each([new Error('cannot transform'), 'cannot transform', null])(
         'keeps rejected text and exposes a local writeError for %p',

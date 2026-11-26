@@ -339,6 +339,66 @@ describe('model-reaction/devtools createModel', () => {
         });
 
         describe('defensive registration', () => {
+            test.each([0, 1])('keeps independent module copies registered when disposing model %i first', async (disposeFirst) => {
+                const loadCopy = (): typeof createModel => {
+                    let copy!: typeof createModel;
+                    jest.isolateModules(() => {
+                        copy = jest.requireActual<typeof devtoolsEntry>('../devtools').createModel;
+                    });
+                    return copy;
+                };
+                const registered = new Map<number, DevtoolsModelInstance>();
+                const subscriptions = new Map<number, () => void>();
+                const changes: Array<{ id: number; change: DevtoolsChange }> = [];
+                const hook = Object.freeze({
+                    register(instance: DevtoolsModelInstance) {
+                        registered.set(instance.id, instance);
+                        subscriptions.set(instance.id, instance.subscribe((change) => {
+                            changes.push({ id: instance.id, change });
+                        }));
+                    },
+                    unregister(id: number) {
+                        subscriptions.get(id)?.();
+                        subscriptions.delete(id);
+                        registered.delete(id);
+                    },
+                });
+                const descriptors = Object.getOwnPropertyDescriptors(hook);
+                (globalThis as Record<string, unknown>)[DEVTOOLS_HOOK_KEY] = hook;
+                const firstCopy = loadCopy();
+                const secondCopy = loadCopy();
+                const models = [
+                    firstCopy({ value: { type: 'number', default: 1 } }),
+                    secondCopy({ value: { type: 'number', default: 2 } }),
+                ];
+                try {
+                    expect(registered.size).toBe(2);
+                    const ids = [...registered.keys()];
+                    expect(ids.every(Number.isSafeInteger)).toBe(true);
+                    expect(ids[0]).not.toBe(ids[1]);
+                    await models[0]!.setField('value', 11);
+                    await models[1]!.setField('value', 22);
+                    expect(changes.map(({ id, change }) => [id, change.value]))
+                        .toEqual([[ids[0], 11], [ids[1], 22]]);
+                    models[disposeFirst]!.dispose();
+                    const remaining = 1 - disposeFirst;
+                    expect([...registered.keys()]).toEqual([ids[remaining]]);
+                    await models[remaining]!.setField('value', 33);
+                    expect(changes.at(-1)).toEqual({
+                        id: ids[remaining],
+                        change: { field: 'value', value: 33, timestamp: expect.any(Number) },
+                    });
+                    expect(registered.get(ids[remaining]!)!.getSnapshot().data.value).toBe(33);
+                    models[remaining]!.dispose();
+                    expect(registered.size).toBe(0);
+                    expect(subscriptions.size).toBe(0);
+                    expect(Object.getOwnPropertyDescriptors(hook)).toEqual(descriptors);
+                } finally {
+                    models.forEach((model) => model.dispose());
+                    subscriptions.forEach((unsubscribe) => unsubscribe());
+                }
+            });
+
             test('assigns a unique id and forwards each model to register', () => {
                 const registered = installHook();
                 const first = createModel({});

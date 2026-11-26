@@ -44,6 +44,8 @@ JavaScript 的字符串表示。例如 `{ 0: ... }` 使用 `setField(0, value)`�
 
 ### 数据类型推导
 
+TypeScript 使用方需要 TypeScript 5.4 或更高版本。
+
 未显式传入类型参数时，每个字段的读值类型由类型标签、默认值及声明的 `computed`
 返回值共同决定。数组/对象默认值保留元素或属性类型，computed 返回不同形状时加入
 联合类型，排除 `SKIP_REACTION`。缺少 default 时加入 `undefined`，派生字段也一样，
@@ -96,7 +98,9 @@ Schema 是模型实例的静态配置，应在调用 `createModel` 前完成组�
 reaction 索引和 DevTools 元数据在创建时建立，而部分写入配置会在后续读取，
 因此修改可能只影响实例的一部分。
 
-默认值克隆与 Schema 所有权是两件事。数组和普通对象会递归克隆，并处理循环引用；
+默认值克隆与 Schema 所有权是两件事。数组和普通对象会递归克隆，并处理循环引用。
+普通对象保留原型（`Object.prototype` 或 `null`）以及可枚举的自有字符串和 Symbol 属性；
+这些属性也参与结构判等。
 `Date`、`RegExp`、类实例等非普通对象仍按引用共享，作为不可变叶子使用。
 这不代表库保存了完整的 Schema 或值快照。模型值通过 `setField` / `setFields`
 更新，不能原地修改 `schema[field].default` 或共享的默认值叶子。
@@ -227,7 +231,8 @@ total: {
 ```
 
 检查是严格的：即使数据类型允许，`null` 和 `undefined` 也会报错。单独定义的
-reaction 可以用 `Reaction<T>` 声明返回值类型，此时它只能用于该类型的字段。
+reaction 接入自动推断的 Schema 时可用 `Reaction<T, unknown>` 声明返回值类型，
+computed 结果仍须匹配字段标签。
 不带类型参数的 `Reaction`（即 `Reaction<any>`）不做检查，派生值可能为 null 时
 用它绕过：
 
@@ -256,7 +261,8 @@ const label: Reaction = {
 import { createModel } from 'model-reaction';
 import type { ReactionAction } from 'model-reaction';
 
-const saveTotal: ReactionAction<number> = async ({ value }) => {
+const saveTotal: ReactionAction<unknown> = async ({ value }) => {
+  if (typeof value !== 'number') return;
   const { price, quantity } = model.data;
   await saveAmount({ price, quantity, total: value }); // 业务提供的函数
 };
@@ -283,7 +289,7 @@ type ReactionAction<T = any> = (context: {
   field: string;
   value: T;
 }) => void | PromiseLike<void>;
-// Reaction<T>.action?: ReactionAction<T>[]
+// Reaction<Computed, Value = Computed>.action?: ReactionAction<Value>[]
 ```
 
 `field` 是 action 所属的宿主字段。例如 `price → total`，`total.action` 收到
@@ -292,7 +298,14 @@ type ReactionAction<T = any> = (context: {
 每次调用捕获自己的值，后续写入不会自动更新该上下文。对象值保留模型中的引用，
 不能原地修改。
 
-`Reaction<T>` 保留 interface，T 同时约束 `computed` 与 action 的 `value`。
+`Reaction<Computed, Value = Computed>` 保留 interface，将计算结果与 action 值类型分开。
+单独使用 `Reaction<number>` 仍表示数字计算与数字 action。在自动推断的 Schema 中，
+action 的 `value` 为 `unknown`：仅凭字段标签无法覆盖任意默认值、可选字段及后续
+直接写入。使用前先收窄类型；此路径的可复用 reaction 可写作 `Reaction<number, unknown>`。
+
+显式 `createModel<T>(schema)` 中，各 action 使用宿主字段的 `T[K]`，包含 null 和可选成员。
+带类型的字段片段可用 `FieldSchema<Tag, Value>` 声明相同的 action 契约。
+窄类型回调不能替你推断显式模型重载；需要提供 `T` 并遵守其值类型契约。
 不带泛型的 `ReactionAction` 不检查值类型。现有无参函数仍可使用，忽略上下文即可。
 其他字段通过 model 闭包读取；参数与闭包读取都不会增加依赖，需要触发重跑的字段
 仍须声明在 `fields` 中。
@@ -476,6 +489,7 @@ import { ValidationRules, Rule } from 'model-reaction/validation';
 
 ```typescript
 createModel({
+  hasDiscount: { type: 'boolean', default: false },
   discountCode: {
     type: 'string',
     default: '',
@@ -561,7 +575,12 @@ const custom = formatValidationErrors(
   `useModelFieldState` 返回三项；`DraftField<V>` 和 `FieldRenderProps<V>` 不再有
   `setMeta` 成员或扩展泛型参数。移除 `FieldMetaSelector`、`FieldMetaSetter` 和
   `UseModelFieldStateOptions` 的导入。详见 [字段 UI 状态](REACT_CN.md#字段-ui-状态)。
-- 字段结构判等和两个 selector Hook 保持原有契约。
+- 普通对象结构判等包含可枚举的自有 Symbol 属性；两个 selector Hook 保留不同的订阅策略。
+- **Action 类型：**自动推断 Schema 中的回调参数由标签类型改为 `unknown`。
+  使用前收窄 `value`，或显式传入包含完整字段类型的 `createModel<T>`。
+  自动推断路径中的可复用 reaction 使用 `Reaction<Computed, unknown>`；
+  单独的 `Reaction<T>` 仍可搭配类型匹配的显式模型。使用预先标注的 `Model<T>`
+  Schema 时，需要显式传入类型参数。TypeScript 最低版本为 5.4。
 - 将 `action: fn` 改为 `action: [fn]`。宿主字段名与最新已提交值从
   `{ field, value }` 读取，其他字段通过 model 闭包读取。现有无参回调仍可使用；
   直接调用者需要遍历数组并向每项传入 `{ field, value }`。

@@ -53,6 +53,127 @@ describe('serializeValue', () => {
         });
     });
 
+    test('preserves Map keys, Set members, and RegExp source and flags after JSON transport', () => {
+        const value = new Map<unknown, unknown>([
+            [{ id: 1 }, new Set(['paid', 42])],
+            ['pattern', /invoice/gi],
+        ]);
+        expect(JSON.parse(JSON.stringify(serializeValue(value)))).toEqual({
+            t: 'map',
+            entries: [
+                [
+                    { t: 'object', entries: [['id', { t: 'primitive', v: 1 }]] },
+                    { t: 'set', items: [{ t: 'primitive', v: 'paid' }, { t: 'primitive', v: 42 }] },
+                ],
+                [{ t: 'primitive', v: 'pattern' }, { t: 'regexp', source: 'invoice', flags: 'gi' }],
+            ],
+        });
+        expect(serializeValue(new Map())).toEqual({ t: 'map', entries: [] });
+        expect(serializeValue(new Set())).toEqual({ t: 'set', items: [] });
+    });
+
+    test('detects Map and Set cycles without treating shared members as circular', () => {
+        const shared = { count: 1 };
+        const map = new Map<unknown, unknown>([[shared, shared]]);
+        const set = new Set<unknown>([map]);
+        map.set(map, set);
+        const json = JSON.stringify(serializeValue(map));
+        expect(json.match(/"t":"object"/g)).toHaveLength(2);
+        expect(json.match(/"t":"circular"/g)).toHaveLength(2);
+        expect(json).toContain('"t":"set"');
+    });
+
+    test.each(['map', 'set'] as const)('bounds %s depth and breadth', (kind) => {
+        const values = [1, 2, 3, 4];
+        const value = kind === 'map'
+            ? new Map(values.map((n) => [n, n]))
+            : new Set(values);
+        const result = serializeValue(value, { ...DEFAULT_SERIALIZE_OPTIONS, maxItems: 2 });
+        expect(JSON.stringify(result)).toContain('2 more item(s)');
+        expect(JSON.stringify(result).match(/"t":"primitive"/g)).toHaveLength(kind === 'map' ? 4 : 2);
+        expect(JSON.stringify(serializeValue(value, { ...DEFAULT_SERIALIZE_OPTIONS, maxDepth: 0 })))
+            .toContain('max depth 0 reached');
+    });
+
+    test('replaces unreadable leaves while retaining their readable siblings', () => {
+        const unreadable = { get value() { throw new Error('not loaded'); }, healthy: 7 };
+        expect(serializeValue(unreadable)).toEqual({
+            t: 'object',
+            entries: [
+                ['value', { t: 'truncated', note: 'value could not be inspected' }],
+                ['healthy', { t: 'primitive', v: 7 }],
+            ],
+        });
+        const revoked = Proxy.revocable({}, {});
+        revoked.revoke();
+        expect(serializeValue(revoked.proxy)).toEqual({
+            t: 'truncated', note: 'value could not be inspected',
+        });
+        const array = [0, 7];
+        Object.defineProperty(array, 0, { get() { throw new Error('not loaded'); } });
+        expect(serializeValue(array)).toEqual({
+            t: 'array',
+            items: [
+                { t: 'truncated', note: 'value could not be inspected' },
+                { t: 'primitive', v: 7 },
+            ],
+        });
+    });
+
+    test('contains unreadable collection keys and members without losing later entries', () => {
+        const revoked = Proxy.revocable({}, {});
+        revoked.revoke();
+        const marker = { t: 'truncated', note: 'value could not be inspected' };
+        expect(serializeValue(new Map<unknown, unknown>([
+            [revoked.proxy, 7], ['healthy', 42],
+        ]))).toEqual({
+            t: 'map',
+            entries: [
+                [marker, { t: 'primitive', v: 7 }],
+                [{ t: 'primitive', v: 'healthy' }, { t: 'primitive', v: 42 }],
+            ],
+        });
+        expect(serializeValue(new Set([revoked.proxy, 7]))).toEqual({
+            t: 'set', items: [marker, { t: 'primitive', v: 7 }],
+        });
+    });
+
+    test('does not inspect a Map value when its key exhausts the node budget', () => {
+        const read = jest.fn(() => 'unneeded');
+        const value = Object.defineProperty({}, 'payload', { enumerable: true, get: read });
+        expect(serializeValue(new Map([[{ id: 1 }, value]]), {
+            ...DEFAULT_SERIALIZE_OPTIONS, maxNodes: 5,
+        })).toEqual({ t: 'map', entries: [], note: 'serialization budget exhausted' });
+        expect(read).not.toHaveBeenCalled();
+    });
+
+    test('shares node and byte budgets across collection keys, values, and unreadable leaves', () => {
+        const text = '\0'.repeat(20_000);
+        const unreadable = { get value() { throw new Error('not loaded'); } };
+        const shared = new Set([unreadable, text]);
+        const values = [
+            new Map(Array.from({ length: 100 }, (_, i) => [i, shared])),
+            new Set(Array.from({ length: 100 }, (_, i) => new Map([[i, text]]))),
+            new RegExp('a'.repeat(20_000), 'gi'),
+        ];
+        for (const maxBytes of [256, 512, 2048, 262144]) {
+            for (const maxNodes of [1, 2, 3, 5, 10, 2000]) {
+                const options = { ...DEFAULT_SERIALIZE_OPTIONS, maxBytes, maxNodes };
+                for (const value of values) {
+                    const json = JSON.stringify(serializeValue(value, options));
+                    expect(Buffer.byteLength(json)).toBeLessThanOrEqual(maxBytes);
+                    expect(json.match(/"t":/g)!.length).toBeLessThanOrEqual(maxNodes);
+                    const snapshot = serializeSnapshot({
+                        data: { value }, dirtyData: { value }, errors: {},
+                        derivedValues: [{ id: 1, kind: 'useModelSelector', value }],
+                    }, options);
+                    expect(Buffer.byteLength(JSON.stringify(snapshot))).toBeLessThanOrEqual(maxBytes);
+                    expect(snapshot.truncated).toBe(true);
+                }
+            }
+        }
+    });
+
     test('nested object and array', () => {
         const result = serializeValue({ a: [1, 'x'], b: { c: true } });
         expect(result).toEqual({
@@ -77,6 +198,32 @@ describe('serializeValue', () => {
                 ],
             ],
         });
+    });
+
+    test('includes only own enumerable symbol keys in nested objects within the item budget', () => {
+        const own = Symbol('own');
+        const hidden = Symbol('hidden');
+        const inherited = Symbol('inherited');
+        const readExcluded = jest.fn(() => { throw new Error('must not inspect'); });
+        const prototype = Object.defineProperty({}, inherited, { enumerable: true, get: readExcluded });
+        const value = Object.assign(Object.create(prototype), { visible: 1, [own]: 2 });
+        Object.defineProperty(value, hidden, { get: readExcluded });
+        expect(serializeValue(value)).toEqual({
+            t: 'object',
+            entries: [
+                ['visible', { t: 'primitive', v: 1 }],
+                ['Symbol(own)', { t: 'primitive', v: 2 }],
+            ],
+        });
+        expect(readExcluded).not.toHaveBeenCalled();
+        expect(serializeValue(value, { ...DEFAULT_SERIALIZE_OPTIONS, maxItems: 1 })).toEqual({
+            t: 'object',
+            entries: [
+                ['visible', { t: 'primitive', v: 1 }],
+                ['…', { t: 'truncated', note: 'object keys truncated' }],
+            ],
+        });
+        expect(serializeRecord(value)).toEqual({ visible: { t: 'primitive', v: 1 } });
     });
 
     test('detects direct cycles', () => {
@@ -172,6 +319,16 @@ describe('serializeValue', () => {
 });
 
 describe('serializeRecord', () => {
+    test('contains a throwing field getter without dropping healthy fields', () => {
+        expect(serializeRecord({
+            get unreadable() { throw new Error('not loaded'); },
+            healthy: 7,
+        })).toEqual({
+            unreadable: { t: 'truncated', note: 'value could not be inspected' },
+            healthy: { t: 'primitive', v: 7 },
+        });
+    });
+
     test('serializes each value of a record', () => {
         expect(serializeRecord({ a: 1, b: 'two' })).toEqual({
             a: { t: 'primitive', v: 1 },
@@ -242,7 +399,30 @@ describe('serializeSnapshot', () => {
         expect(snapshot.derivedValues[0].value).toEqual({ t: 'number', v: 'NaN' });
         expect(snapshot.derivedValues[1].value).toEqual({ t: 'undefined' });
         expect(snapshot.derivedValues[2].value.entries[0][1]).toEqual({ t: 'circular' });
-        expect(snapshot.derivedValues[3].value).toEqual({ t: 'truncated', note: 'value could not be inspected' });
+        expect(snapshot.derivedValues[3].value).toEqual({
+            t: 'object',
+            entries: [['value', { t: 'truncated', note: 'value could not be inspected' }]],
+        });
+        expect(snapshot.truncated).toBe(true);
+    });
+
+    test('isolates unreadable committed and dirty values with the same fallback as observations', () => {
+        const value = { get unloaded() { throw new Error('not loaded'); }, readable: 1 };
+        const snapshot = serializeSnapshot({
+            data: { value, healthy: 7 }, dirtyData: { value }, errors: {},
+            derivedValues: [{ id: 1, kind: 'useModelSelector', value }],
+        });
+        const expected = {
+            t: 'object',
+            entries: [
+                ['unloaded', { t: 'truncated', note: 'value could not be inspected' }],
+                ['readable', { t: 'primitive', v: 1 }],
+            ],
+        };
+        expect(snapshot.data.value).toEqual(expected);
+        expect(snapshot.dirtyData.value).toEqual(expected);
+        expect(snapshot.derivedValues![0]!.value).toEqual(expected);
+        expect(snapshot.data.healthy).toEqual({ t: 'primitive', v: 7 });
         expect(snapshot.truncated).toBe(true);
     });
 

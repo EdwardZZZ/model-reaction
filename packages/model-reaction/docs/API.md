@@ -47,6 +47,8 @@ Symbol fields are unsupported and rejected by the schema types.
 
 ### Data type inference
 
+TypeScript consumers require TypeScript 5.4 or newer.
+
 Without an explicit type argument, each field's read type combines its type
 tag, its default, and its declared `computed` results. Array/object defaults
 retain their element/property types; a different computed shape adds a union
@@ -112,7 +114,9 @@ some write-time configuration is read later, so mutation can affect only part
 of an instance.
 
 Default cloning is separate from schema ownership. Arrays and plain objects
-are recursively cloned, with cycle handling; `Date`, `RegExp`, class instances,
+are recursively cloned, with cycle handling. Plain objects retain their prototype
+(`Object.prototype` or `null`) and enumerable own string and Symbol properties;
+those properties also participate in structural comparison. `Date`, `RegExp`, class instances,
 and other non-plain objects remain shared references treated as immutable
 leaves. This is not a complete schema or value snapshot. Update model values
 through `setField` / `setFields`, without modifying `schema[field].default` or shared
@@ -270,7 +274,8 @@ total: {
 
 The check is strict: `null` and `undefined` are rejected even when the data
 type allows them. A standalone reaction can declare its result type with
-`Reaction<T>`; it then fits only fields of that type. A bare `Reaction` (that
+`Reaction<T, unknown>` for an inferred schema; its computed result must match
+the field tag. A bare `Reaction` (that
 is, `Reaction<any>`) is unchecked and is the escape hatch for nullable derived
 values:
 
@@ -301,7 +306,8 @@ updates; `settled()` still waits for its returned Promise.
 import { createModel } from 'model-reaction';
 import type { ReactionAction } from 'model-reaction';
 
-const saveTotal: ReactionAction<number> = async ({ value }) => {
+const saveTotal: ReactionAction<unknown> = async ({ value }) => {
+  if (typeof value !== 'number') return;
   const { price, quantity } = model.data;
   await saveAmount({ price, quantity, total: value }); // application-provided function
 };
@@ -328,7 +334,7 @@ type ReactionAction<T = any> = (context: {
   field: string;
   value: T;
 }) => void | PromiseLike<void>;
-// Reaction<T>.action?: ReactionAction<T>[]
+// Reaction<Computed, Value = Computed>.action?: ReactionAction<Value>[]
 ```
 
 `field` is the field that owns the action: for `price → total`, `total.action`
@@ -339,9 +345,19 @@ in the argument. Each call captures its own value; later writes do not update
 that context. Object values retain their model reference and must not be
 mutated in place.
 
-`Reaction<T>` remains an interface; its `T` constrains both `computed` and the
-action's `value`. A bare `ReactionAction` leaves the value unchecked. Existing
-no-argument functions remain valid and can ignore the context. Read other
+`Reaction<Computed, Value = Computed>` remains an interface and separates the
+computed result from the action value. `Reaction<number>` still describes a
+standalone number computation and number action. In an inferred schema, action
+`value` is `unknown`: a type tag alone cannot describe arbitrary defaults,
+optional fields, or later direct writes. Narrow it before use; reusable
+reactions for this path can use `Reaction<number, unknown>`.
+
+With an explicit `createModel<T>(schema)`, each action receives `T[K]` for its
+owning field, including nullable and optional members. `FieldSchema<Tag, Value>`
+can declare that same action contract for a typed fragment. A narrow callback
+cannot infer the explicit model overload for you; supply `T` and uphold its
+documented value contract. A bare `ReactionAction` leaves the value unchecked.
+Existing no-argument functions remain valid and can ignore the context. Read other
 fields through a model closure; neither context nor closure reads add
 dependencies. Declare trigger fields in `fields`.
 
@@ -549,6 +565,7 @@ helpers that return a **new** rule, leaving the original untouched:
 
 ```typescript
 createModel({
+  hasDiscount: { type: 'boolean', default: false },
   discountCode: {
     type: 'string',
     default: '',
@@ -647,7 +664,14 @@ These changes are breaking and require updating consumers:
   extension type arguments. Remove imports of `FieldMetaSelector`,
   `FieldMetaSetter`, and `UseModelFieldStateOptions`.
   See [Field UI state](REACT.md#field-ui-state).
-- Structural field equality and both selector Hooks remain unchanged.
+- Plain-object structural equality includes enumerable own Symbol properties.
+  Both selector Hooks retain their distinct subscription policies.
+- **Action types:** inferred schema callbacks now receive `unknown` instead of
+  a tag-only value. Narrow `value` or use an explicit `createModel<T>` with the
+  complete field types. Reusable inferred-schema reactions use
+  `Reaction<Computed, unknown>`; standalone `Reaction<T>` remains supported
+  with an explicit matching model. Pass the type argument when using a
+  pre-annotated `Model<T>` schema. TypeScript 5.4+ is required.
 - Replace `action: fn` with `action: [fn]`. Read the owning field and its latest
   committed value from `{ field, value }`, and other fields through model
   closures. Existing no-argument callbacks remain valid. Direct callers must

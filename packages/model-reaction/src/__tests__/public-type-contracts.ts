@@ -1,5 +1,5 @@
 import { createModel, SKIP_REACTION } from '../index';
-import type { FieldSchema, InferFieldType, InferModelData, ModelEventMap } from '../index';
+import type { FieldSchema, InferFieldType, InferModelData, ModelEventMap, ReactionAction } from '../index';
 
 type Equal<A, B> =
     (<T>() => T extends A ? 1 : 2) extends
@@ -75,4 +75,61 @@ export function verifyPublicTypeContracts(create: typeof createModel): void {
     };
     void invalidDeclarations;
     model.dispose();
+
+    const actionSchema = create({
+        source: { type: 'number', default: 1 },
+        nullable: {
+            type: 'number', default: null,
+            reaction: { fields: ['source'], computed: () => 2, action: [({ value }) => {
+                expectType<Equal<typeof value, unknown>>();
+                if (typeof value === 'number') value.toFixed();
+            }] },
+        },
+        optional: {
+            type: 'number',
+            reaction: { fields: ['source'], computed: () => 2, action: [({ value }) => {
+                expectType<Equal<typeof value, unknown>>();
+                void value;
+            }] },
+        },
+        arbitrary: {
+            type: 'number', default: 'pending',
+            reaction: { fields: ['source'], computed: () => 2, action: [({ value }) => {
+                expectType<Equal<typeof value, unknown>>();
+                void value;
+            }] },
+        },
+    });
+    expectType<Equal<typeof actionSchema.data.nullable, number | null>>();
+    expectType<Equal<typeof actionSchema.data.optional, number | undefined>>();
+    expectType<Equal<typeof actionSchema.data.arbitrary, number | string>>();
+    actionSchema.dispose();
+
+    const explicit = create<{ source: number; target: number | null | undefined }>({
+        source: { type: 'number', default: 1 },
+        target: {
+            type: 'number', default: null,
+            reaction: { fields: ['source'], computed: () => 2, action: [({ value }) => {
+                expectType<Equal<typeof value, number | null | undefined>>();
+                if (value != null) value.toFixed();
+            }] },
+        },
+    });
+    explicit.dispose();
+
+    const invalidActions = () => {
+        const onlyNumber: ReactionAction<number> = ({ value }) => { value.toFixed(); };
+        // @ts-expect-error a narrow callback cannot infer away a nullable default
+        create({ target: { type: 'number', default: null, reaction: {
+            fields: [], computed: () => 2, action: [onlyNumber],
+        } } });
+        create<{ target: number | null }>({
+            target: { type: 'number', default: null, reaction: {
+                fields: [], computed: () => 2,
+                // @ts-expect-error explicit field values include null
+                action: [onlyNumber],
+            } },
+        });
+    };
+    void invalidActions;
 }

@@ -1,13 +1,18 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { json, read, sha, suite, treeHash, write } from './lib/environment.mjs';
+import { json, read, sha, suite, tarballName, treeHash, writeNew as write } from './lib/environment.mjs';
 import { tasks, prompt } from './lib/tasks.mjs';
+import { assertResultStatus } from './lib/result-status.mjs';
 
 const output = path.resolve(process.argv[2] ?? path.join(suite, 'runs/baseline-v1'));
+for (const file of ['RESULTS.json', 'REPORT.md', 'REPORT_CN.md']) {
+  assert.ok(!fs.existsSync(path.join(output, file)), `Report exists; do not overwrite historical evidence: ${file}`);
+}
 const manifest = json(path.join(output, 'manifest.json'));
 const review = json(path.join(output, 'review.json'));
-assert.equal(sha(fs.readFileSync(path.join(output, 'model-reaction-1.2.0.tgz'))), manifest.environment.tarball_sha256);
+const artifact = tarballName(manifest.environment);
+assert.equal(sha(fs.readFileSync(path.join(output, artifact))), manifest.environment.tarball_sha256);
 assert.equal(sha(read(path.join(output, 'consumer-package-lock.json'))), manifest.environment.consumer_lock_hash);
 assert.equal(sha(read(path.join(output, 'source.diff'))), manifest.environment.source_diff_hash);
 for (const [file, hash] of Object.entries(manifest.source_files)) {
@@ -21,6 +26,8 @@ for (const task of tasks) {
     const resultFile = fs.existsSync(path.join(output, relative, 'reviewed-result.json')) ? 'reviewed-result.json' : 'result.json';
     const result = json(path.join(output, relative, resultFile));
     const automated = json(path.join(output, relative, 'result.json'));
+    assertResultStatus(result, id);
+    assertResultStatus(automated, `${id} automated`);
     if (result.adjudication) {
       assert.equal(sha(read(path.join(output, 'review-tool-sources/initial-review-types.mjs'))), result.adjudication.semantic_inspector_sha256);
       assert.equal(sha(read(path.join(suite, 'continue-reviewed.mjs'))), result.adjudication.continuation_runner_sha256);
@@ -33,13 +40,19 @@ for (const task of tasks) {
     assert.equal(result.evaluator_hash, sha(manifest.calibration.checks_hash + manifest.calibration.grader_hash));
     const stages = result.stages.map(stage => {
       const directory = `${relative}/stage-${stage.stage}`;
-      assert.equal(treeHash(path.join(output, directory, 'submission')), stage.acceptance.source_hash, `Snapshot mismatch: ${directory}`);
+      if (stage.acceptance.source_hash !== null) {
+        assert.equal(treeHash(path.join(output, directory, 'submission')), stage.acceptance.source_hash, `Snapshot mismatch: ${directory}`);
+      } else {
+        assert.equal(stage.acceptance.sandbox, 'BLOCKED', `Unverified snapshot without blocked sandbox: ${directory}`);
+        assert.equal(stage.status, 'BLOCKED');
+      }
       const checked = json(path.join(output, directory, 'grade.json'));
       assert.deepEqual(checked, stage.acceptance);
       return {
         stage: stage.stage, status: stage.status,
         compile: checked.compile, runtime: checked.runtime, constraints: checked.constraints,
-        source_hash: checked.source_hash, active_duration_ms: stage.agent.active_duration_ms,
+        source_hash: checked.source_hash, snapshot_verified: checked.source_hash !== null,
+        active_duration_ms: stage.agent.active_duration_ms,
         evaluator_duration_ms: checked.evaluator_duration_ms, tool_calls: stage.agent.tool_calls,
         token_usage: stage.agent.token_usage, system_prompt_hash: stage.agent.system_prompt_hash,
         automated_status: stage.automated_status ?? stage.acceptance.status,
@@ -47,6 +60,7 @@ for (const task of tasks) {
         timed_out: stage.agent.timed_out, completed: stage.agent.completed,
         submission_path: `${directory}/submission`,
         diagnostic_paths: ['compile.log', 'runtime.log', 'constraints.log',
+          ...(checked.sandbox ? ['sandbox.json'] : []),
           ...(stage.manual_constraints ? ['manual-constraints.log', 'manual-types.json'] : [])].map(f => `${directory}/${f}`),
         events_path: `${directory}/events.jsonl`, stderr_path: `${directory}/stderr.log`,
         failure_tags: audit.stages?.[stage.stage]?.failure_tags ?? [],
@@ -200,9 +214,10 @@ ${review.manual_scope_en}
 - Agent: Codex CLI 0.163.0, \`gpt-6-luna\`, medium reasoning, Chinese prompts; 600 seconds initial + two 300-second repair budgets.
 - Runtime: Node ${env.node_version}, npm ${env.package_manager_version}; TypeScript ${env.dependencies.typescript}, React/React DOM ${env.dependencies.react}, jsdom ${env.dependencies.jsdom}, Testing Library ${env.dependencies['@testing-library/react']}, fake-timers ${env.dependencies['@sinonjs/fake-timers']}.
 - Twelve task processes ran concurrently; repeats and repairs within each task ran sequentially. Every attempt had a fresh project and session. Repair rounds resumed that session.
-- Native filesystem policy hid this repository, reference solutions, other attempts and known agent history; fixed files and dependencies were read-only, network disabled. Default host filesystem access remained read-only, so this is controlled isolation, not a hermetic machine image.
+- Agent sessions use the recorded native filesystem policy; their default host access is read-only. Current grading uses a separate bounded, deny-by-default native CLI worker with sanitized environment, fresh home, read-only toolchain/checks, and network disabled. A failed startup/denial probe is BLOCKED without unsandboxed fallback. Check each stage's sandbox evidence; these protections do not retroactively apply to historical host-executed grades.
+- Runtime checks execute alongside submissions and are readable inside the worker. They are not hidden or proof against adversarial tampering; this boundary protects host filesystem, environment and network access. Manual review remains required.
 - All 12 reference solutions passed before sampling. CLI preflight and deterministic permission probes passed. Earlier setup failures remain in preflight evidence and are excluded from the 36 business attempts.
-- [Frozen manifest](manifest.json), [calibration](calibration.json), [consumer lock](consumer-package-lock.json), [target package](model-reaction-1.2.0.tgz), [source diff](source.diff), [structured results](RESULTS.json), [manual review](review.json).
+- [Frozen manifest](manifest.json), [calibration](calibration.json), [consumer lock](consumer-package-lock.json), [target package](${artifact}), [source diff](source.diff), [structured results](RESULTS.json), [manual review](review.json).
 - Every stage retains its prompt, source snapshot, raw agent events/stderr, compiler output, runtime output, constraint output and grade. Per-attempt links below lead to the complete stage records. Hashes and metric provenance are included in RESULTS.json.
 
 ## Cost
@@ -260,9 +275,10 @@ ${review.manual_scope_cn}
 - Agent：Codex CLI 0.163.0，\`gpt-6-luna\`，medium 推理，中文提示；首次 600 秒、最多两轮各 300 秒修复。
 - 环境：Node ${env.node_version}、npm ${env.package_manager_version}；TypeScript ${env.dependencies.typescript}、React/React DOM ${env.dependencies.react}、jsdom ${env.dependencies.jsdom}、Testing Library ${env.dependencies['@testing-library/react']}、fake-timers ${env.dependencies['@sinonjs/fake-timers']}。
 - 12 个任务进程并行；同一任务的三次重复与各次修复串行。每次尝试拥有全新项目和会话，修复恢复本次会话。
-- CLI 原生权限策略隐藏本仓库、参考解、其他尝试和已知 agent 历史目录；固定文件与依赖只读，网络关闭。宿主其他路径默认为只读，因此这是受控隔离，并非完整封闭的机器镜像。
+- Agent 会话使用记录的 CLI 原生权限，宿主默认只读。当前评分使用独立、有时间与输出上限、默认拒绝访问的原生 CLI worker，清理环境变量、使用全新 home、只读工具链与检查并关闭网络。启动或拒绝访问探针失败时记 BLOCKED，不回退到无沙箱执行。逐阶段检查 sandbox 取证；这些保护不能追溯应用到历史宿主进程评分。
+- 运行断言与提交代码共享运行时，worker 内可以读取检查文件；它们并非隐藏检查，也不能证明能抵御恶意篡改。此边界保护宿主文件系统、环境和网络访问，仍需人工复核。
 - 正式采样前 12 份参考解全部通过；真实 CLI 工具与确定性权限探针通过。早期环境探测失败保留在 preflight 证据中，不计入 36 次业务尝试。
-- [冻结清单](manifest.json)、[参考解校准](calibration.json)、[消费项目锁文件](consumer-package-lock.json)、[目标包](model-reaction-1.2.0.tgz)、[源码差异](source.diff)、[结构化结果](RESULTS.json)、[代码复核](review.json)。
+- [冻结清单](manifest.json)、[参考解校准](calibration.json)、[消费项目锁文件](consumer-package-lock.json)、[目标包](${artifact})、[源码差异](source.diff)、[结构化结果](RESULTS.json)、[代码复核](review.json)。
 - 每阶段保留提示、源码快照、agent 原始事件/stderr、编译输出、运行输出、约束输出及评分。下方每次尝试链接可定位全部阶段；RESULTS.json 记录文件哈希与指标来源。
 
 ## 交付成本

@@ -18,7 +18,7 @@ interface ValueTreeProps {
 }
 
 export function ValueTree({ value, label, depth = 0 }: ValueTreeProps): ReactElement {
-    if (value.t === 'object' || value.t === 'array') {
+    if (value.t === 'object' || value.t === 'array' || value.t === 'map' || value.t === 'set') {
         return <BranchNode value={value} label={label} depth={depth} />;
     }
     return (
@@ -34,16 +34,17 @@ function BranchNode({
     label,
     depth = 0,
 }: {
-    value: Extract<SerializedValue, { t: 'object' | 'array' }>;
+    value: Extract<SerializedValue, { t: 'object' | 'array' | 'map' | 'set' }>;
     label?: string | undefined;
     depth?: number | undefined;
 }): ReactElement {
     // Collapse deep nodes by default to keep large trees readable.
     const [open, setOpen] = useState(depth < 1);
-    const isArray = value.t === 'array';
-    const children = isArray ? value.items : value.entries;
+    const isSequence = value.t === 'array' || value.t === 'set';
+    const children = isSequence ? value.items : value.entries;
     const count = children.length;
-    const summary = isArray ? `Array(${count})` : `Object{${count}}`;
+    const summary = value.t === 'object' ? `Object{${count}}`
+        : `${{ array: 'Array', map: 'Map', set: 'Set' }[value.t]}(${count})`;
 
     return (
         <div className="mrd-tree-branch" style={{ paddingLeft: depth * 12 }}>
@@ -61,13 +62,22 @@ function BranchNode({
                 <span className="mrd-tree-summary">{summary}</span>
             </div>
             {open &&
-                (isArray
+                (isSequence
                     ? value.items.map((item, i) => (
                           <ValueTree key={i} value={item} label={String(i)} depth={depth + 1} />
                       ))
-                    : value.entries.map(([key, child]) => (
-                          <ValueTree key={key} value={child} label={key} depth={depth + 1} />
+                    : value.t === 'map' ? value.entries.map(([key, child], i) => (
+                          <div key={i}>
+                              <ValueTree value={key} label={`${i} key`} depth={depth + 1} />
+                              <ValueTree value={child} label={`${i} value`} depth={depth + 1} />
+                          </div>
+                      ))
+                    : value.entries.map(([key, child], i) => (
+                          <ValueTree key={`${i}:${key}`} value={child} label={key} depth={depth + 1} />
                       )))}
+            {open && value.t === 'map' && value.note !== undefined && (
+                <ValueTree value={{ t: 'truncated', note: value.note }} depth={depth + 1} />
+            )}
         </div>
     );
 }
@@ -89,6 +99,8 @@ function LeafValue({ value }: { value: SerializedValue }): ReactElement {
             return <span className="mrd-val-number">{value.v}n</span>;
         case 'date':
             return <span className="mrd-val-date">{value.v}</span>;
+        case 'regexp':
+            return <span className="mrd-val-special">RegExp /{value.source}/{value.flags}</span>;
         case 'function':
             return <span className="mrd-val-function">ƒ {value.name}()</span>;
         case 'symbol':
@@ -97,9 +109,11 @@ function LeafValue({ value }: { value: SerializedValue }): ReactElement {
             return <span className="mrd-val-special">[Circular]</span>;
         case 'truncated':
             return <span className="mrd-val-special">… {value.note}</span>;
-        // Object/array are handled by BranchNode; keep the switch exhaustive.
+        // Collections are handled by BranchNode; keep the switch exhaustive.
         case 'object':
         case 'array':
+        case 'map':
+        case 'set':
             return <span className="mrd-val-special">{value.t}</span>;
     }
 }

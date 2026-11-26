@@ -27,7 +27,7 @@ Coding agent 可以先阅读 [AGENTS.md](AGENTS.md) 获取精简规则。
 
 ## 安装
 
-需要 Node.js 18 或更高版本。
+需要 Node.js 18 或更高版本；TypeScript 使用方需要 TypeScript 5.4 或更高版本。
 
 ```bash
 npm install model-reaction          # 仅核心

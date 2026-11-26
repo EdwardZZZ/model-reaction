@@ -8,7 +8,9 @@ Both unresolved attempts are AI-11. See the [results summary](SUMMARY.md) for
 configuration, adjudication and coverage limits. Full reports and evidence remain
 in local Git-ignored `runs/` and are not included in clones.
 The [execution guide](EXECUTION.md) documents the runner.
-Task prompts and the grader remain frozen.
+Historical task prompts, fixtures, checks, references and measured results are
+preserved. The harness has since changed for status consistency, artifact
+selection and sandboxed grading; it is not the unchanged historical grader.
 
 Independent resampling with the Schema Recipe is also complete: first delivery
 32/36 (88.9%), final 35/36 (97.2%), with all three AI-11 attempts passing first.
@@ -28,7 +30,9 @@ This suite follows source commit `8678594c9f0b6f828d97258f6b01a4aaf0f785fa` and 
 [React bindings](../../packages/model-reaction/docs/REACT.md),
 [advanced usage](../../packages/model-reaction/docs/ADVANCED.md), and
 [agent guide](../../packages/model-reaction/AGENTS.md).
-Those documents continue to own public contracts; this suite fixes task inputs and acceptance criteria.
+Those links show the current checkout's contracts. For this historical suite,
+read the documents in the pinned source checkout, not current 2.0 documentation.
+This suite fixes the historical task inputs and acceptance criteria.
 
 The package version at that commit is `1.2.0`, while its documentation includes
 unreleased changes. **The version number alone does not identify this evaluation
@@ -36,6 +40,25 @@ target or establish the behavior of the same version on npm.**
 Before sampling, build and pack the specified source and record its commit,
 working-tree diff, tarball SHA-256, bundled documentation fingerprint, and consumer lockfile.
 Install that tarball in the evaluation projects; do not map imports to source files.
+
+Use `prepare(output, sourceRepo)` (or the CLI's second argument) with a separate
+checkout at the commit above. The current 2.0 package is rejected before any
+build/install. The version guard is necessary, not sufficient: record and verify
+the source commit/diff and calibrate all 12 references. A current-API experiment
+needs a separately versioned suite; do not update these v1 references in place.
+Manifests record the actual `package_version` and `tarball_name`; old manifests
+derive the filename from their historical version. Use fresh evidence directories.
+
+Current grading uses `codex sandbox -P evaluation`, without AI calls, for all
+static/type inspection, compilation and runtime acceptance. Startup/permission
+failure is `BLOCKED`, never an unsandboxed retry. The default-deny worker exposes
+only its project, trusted toolchain/check code, and verified Node/system paths;
+references, other attempts and host secrets are denied, the environment is
+sanitized, and network is disabled. Checks share the submission's runtime and
+are readable there: they are **not hidden or proof against adversarial tampering**.
+This boundary protects host filesystem/environment/network access, not grading
+integrity against a hostile runtime. Historical grades ran on the host and do
+not establish this new boundary. See [execution limits](EXECUTION.md).
 
 This directory is outside the npm package's `files` list. Acceptance criteria and
 failure patterns below are evaluator material, excluded from both the package
@@ -451,7 +474,7 @@ Record at least:
 ```text
 suite_version, task_id, repeat_id, prompt_language, prompt_hash
 starter_hash, evaluator_hash, reference_check
-source_commit, source_diff_hash, package_version, tarball_sha256, docs_hash
+source_commit, source_diff_hash, package_version, tarball_name, tarball_sha256, docs_hash
 consumer_lock_hash, node_version, package_manager_version
 typescript_version, react_version, test_tool_versions
 agent_product, agent_model, agent_config_hash, tool_policy_hash

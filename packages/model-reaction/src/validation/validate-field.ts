@@ -7,7 +7,7 @@ import {
 /** Sequential first-error validation; the model owns error freshness and storage. */
 export async function validateField(
     options: {
-        schema: FieldSchema;
+        schema: FieldSchema<FieldSchema['type'], any>;
         value: unknown;
         field: string;
         timeout: number;

@@ -1,4 +1,5 @@
 import { isPlainObject } from './is-plain-object';
+import { ownEnumerableKeys } from './own-enumerable-keys';
 
 /**
  * Deep structural equality check.
@@ -69,16 +70,16 @@ export function deepEqual(
         // Map, Set and class instances must be replaced by a new reference.
         if (!isPlainObject(a) || !isPlainObject(b)) return false;
 
-        const keysA = Object.keys(a as Record<string, unknown>);
-        const keysB = Object.keys(b as Record<string, unknown>);
+        const keysA = ownEnumerableKeys(a);
+        const keysB = ownEnumerableKeys(b);
         if (keysA.length !== keysB.length) return false;
 
         for (const key of keysA) {
             if (
-                !Object.prototype.hasOwnProperty.call(b, key) ||
+                !Object.prototype.propertyIsEnumerable.call(b, key) ||
                 !deepEqual(
-                    (a as Record<string, unknown>)[key],
-                    (b as Record<string, unknown>)[key],
+                    (a as Record<PropertyKey, unknown>)[key],
+                    (b as Record<PropertyKey, unknown>)[key],
                     seen
                 )
             ) {

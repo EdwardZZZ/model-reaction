@@ -1,4 +1,5 @@
 import { cloneDefault } from '../core/value/clone-default';
+import { createModel } from '../index';
 
 describe('cloneDefault', () => {
     test('allocates a clone map only for arrays and plain object graphs', () => {
@@ -114,13 +115,80 @@ describe('cloneDefault', () => {
             expect(clone.nested).not.toBe(original.nested);
         });
 
+        test('deeply clones enumerable symbol values using the original symbol keys', () => {
+            const token = Symbol('token');
+            const original = { label: 'same', [token]: { list: [1, 2] } };
+            const clone = cloneDefault(original);
+
+            expect(clone[token]).toEqual({ list: [1, 2] });
+            expect(clone[token]).not.toBe(original[token]);
+            expect(Object.getOwnPropertySymbols(clone)).toEqual([token]);
+            expect(Object.prototype.propertyIsEnumerable.call(clone, token)).toBe(true);
+            clone[token].list.push(3);
+            expect(original[token].list).toEqual([1, 2]);
+        });
+
+        test('does not read or copy non-enumerable string or symbol properties', () => {
+            const hidden = Symbol('hidden');
+            const readHidden = jest.fn(() => {
+                throw new Error('non-enumerable properties must not be read');
+            });
+            const original = Object.defineProperties({ visible: 1 }, {
+                hidden: { get: readHidden },
+                [hidden]: { get: readHidden },
+            });
+            const clone = cloneDefault(original);
+
+            expect(clone).toEqual({ visible: 1 });
+            expect(Object.prototype.hasOwnProperty.call(clone, 'hidden')).toBe(false);
+            expect(Object.getOwnPropertySymbols(clone)).toEqual([]);
+            expect(readHidden).not.toHaveBeenCalled();
+        });
+
         test('clones an object created with Object.create(null)', () => {
             const original = Object.create(null) as Record<string, unknown>;
             original.a = 1;
             const clone = cloneDefault(original);
 
+            expect(Object.getPrototypeOf(clone)).toBeNull();
             expect(clone.a).toBe(1);
             expect(clone).not.toBe(original);
+            expect(clone.constructor).toBeUndefined();
+            expect(clone.toString).toBeUndefined();
+            expect('constructor' in clone).toBe(false);
+        });
+
+        test('preserves nested null-prototype dictionaries and their own __proto__ values', () => {
+            const dictionary = { ['__proto__']: { list: [1] } };
+            Object.setPrototypeOf(dictionary, null);
+            const clone = cloneDefault({ dictionary });
+
+            expect(Object.getPrototypeOf(clone.dictionary)).toBeNull();
+            expect(Object.prototype.hasOwnProperty.call(clone.dictionary, '__proto__')).toBe(true);
+            expect(clone.dictionary.__proto__).not.toBe(dictionary.__proto__);
+            clone.dictionary.__proto__.list.push(2);
+            expect(dictionary.__proto__.list).toEqual([1]);
+        });
+
+        test('keeps null-prototype field defaults isolated without changing outer snapshots', () => {
+            const dictionary = { entry: { count: 1 } };
+            Object.setPrototypeOf(dictionary, null);
+            const schema = { dictionary: { type: 'object' as const, default: dictionary } };
+            const first = createModel(schema);
+            const second = createModel(schema);
+            try {
+                const value = first.getField('dictionary');
+                expect(Object.getPrototypeOf(value)).toBeNull();
+                expect(Object.getPrototypeOf(second.data.dictionary)).toBeNull();
+                expect(Object.getPrototypeOf(first.data)).toBe(Object.prototype);
+                expect('constructor' in value).toBe(false);
+                expect('toString' in value).toBe(false);
+                expect(value.entry).not.toBe(dictionary.entry);
+                expect(value.entry).not.toBe(second.data.dictionary.entry);
+            } finally {
+                first.dispose();
+                second.dispose();
+            }
         });
     });
 
@@ -207,6 +275,15 @@ describe('cloneDefault', () => {
             expect(clone[0]).not.toBe(shared);
             expect(clone[0]).toBe(clone[1]);
         });
+
+        test('preserves sharing between string and symbol properties', () => {
+            const token = Symbol('token');
+            const shared = { count: 1 };
+            const clone = cloneDefault({ named: shared, [token]: shared });
+
+            expect(clone[token]).toBe(clone.named);
+            expect(clone[token]).not.toBe(shared);
+        });
     });
 
     // -------------------------------------------------------------------------
@@ -251,6 +328,17 @@ describe('cloneDefault', () => {
             expect(clone[0]).toBe(1);
             expect(clone[1]).toBe(clone);
         });
+
+        test('preserves a cycle reached through a symbol property', () => {
+            const self = Symbol('self');
+            const original: Record<PropertyKey, unknown> = { name: 'root' };
+            original[self] = original;
+
+            const clone = cloneDefault(original);
+
+            expect(clone).not.toBe(original);
+            expect(clone[self]).toBe(clone);
+        });
     });
 
     // -------------------------------------------------------------------------
@@ -259,18 +347,22 @@ describe('cloneDefault', () => {
 
     describe('cross-instance isolation', () => {
         test('two clones of the same source do not share mutable state', () => {
-            const source = { tags: ['x'], meta: { n: 1 } };
+            const token = Symbol('token');
+            const source = { tags: ['x'], meta: { n: 1 }, [token]: { n: 1 } };
 
             const cloneA = cloneDefault(source);
             const cloneB = cloneDefault(source);
 
             cloneA.tags.push('y');
             cloneA.meta.n = 99;
+            cloneA[token].n = 99;
 
             expect(cloneB.tags).toEqual(['x']);
             expect(cloneB.meta.n).toBe(1);
             expect(source.tags).toEqual(['x']);
             expect(source.meta.n).toBe(1);
+            expect(cloneB[token].n).toBe(1);
+            expect(source[token].n).toBe(1);
         });
     });
 });

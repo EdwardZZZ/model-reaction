@@ -77,6 +77,13 @@ interface DraftSession<V> {
     active: boolean;
 }
 
+interface DraftState<V> {
+    session: DraftSession<V>;
+    draft: string;
+    touched: boolean;
+    writeError: Error | null;
+}
+
 /**
  * Bind a model field to a controlled text input, owning the edit-lifecycle
  * UI state (draft text, `touched`, error gating) so the rendering component
@@ -115,10 +122,6 @@ export function useDraftField<
         []
     );
 
-    // Seed on mount: pending dirty value if any, else committed value.
-    const [draft, setDraft] = useState(() => seedDraft(model, field, committed, display));
-    const [touched, setTouched] = useState(false);
-    const [writeError, setWriteError] = useState<Error | null>(null);
     const session = useMemo<DraftSession<T[K]>>(() => ({
         committed: model.getField(field),
         pending: new Set<() => void>(),
@@ -127,25 +130,24 @@ export function useDraftField<
         active: false,
     }), [model, field]);
 
-    // A model/field change starts a new editing session. Re-seed from that
-    // field's pending value and clear UI-only state before tracking commits.
-    const previous = useRef(session);
-    useEffect(() => {
-        if (previous.current !== session) {
-            previous.current = session;
-            setDraft(seedDraft(model, field, committed, display));
-            setTouched(false);
-            setWriteError(null);
-            return;
-        }
+    const seedState = (): DraftState<T[K]> => ({
+        session,
+        draft: seedDraft(model, field, committed, (value) => toDisplay(value, options.format ?? String)),
+        touched: false,
+        writeError: null,
+    });
+    const [state, setState] = useState(seedState);
+    // Reset before effects can edit the new session; abandoned renders stay isolated.
+    const current = state.session === session ? state : seedState();
+    if (current !== state) setState(current);
+    const { draft, touched, writeError } = current;
+    const updateState = useCallback((patch: Partial<Omit<DraftState<T[K]>, 'session'>>) => {
+        setState((value) => value.session === session ? { ...value, ...patch } : value);
+    }, [session]);
 
-        // Edit/commit reconciliation: docs/REACT.md "useDraftField".
-        if (session.pending.size > 0 || Object.is(session.committed, committed)) return;
-        session.committed = committed;
-        setDraft(display(committed));
-    }, [model, field, committed, display, session]);
-
+    const activeSession = useRef(session);
     useEffect(() => {
+        activeSession.current = session;
         session.active = true;
         return () => {
             session.active = false;
@@ -155,10 +157,16 @@ export function useDraftField<
         };
     }, [session]);
 
+    useEffect(() => {
+        // Edit/commit reconciliation: docs/REACT.md "useDraftField".
+        if (session.pending.size > 0 || Object.is(session.committed, committed)) return;
+        session.committed = committed;
+        updateState({ draft: display(committed) });
+    }, [committed, display, session, updateState]);
+
     const edit = useCallback(
         (next: string) => {
-            setDraft(next); // show what was typed, valid or not
-            setWriteError(null);
+            updateState({ draft: next, writeError: null });
             const editId = ++session.edit;
             let ownCommitted = session.committed;
             let observed = false;
@@ -167,7 +175,7 @@ export function useDraftField<
             session.pending.add(stopObserving);
             // Register before this write resumes, after any reentrant dispatch; see docs/REACT.md.
             queueMicrotask(() => {
-                if (!session.active || previous.current !== session) return;
+                if (!session.active || activeSession.current !== session) return;
                 unsubscribe = model.on(ModelEvents.FIELD_VALIDATION_COMPLETE, (event) => {
                     if (event.field !== String(field) || observed) return;
                     observed = true;
@@ -183,22 +191,22 @@ export function useDraftField<
             }).finally(() => {
                 session.pending.delete(stopObserving);
                 stopObserving();
-                if (!session.active || previous.current !== session || session.pending.size > 0) return;
+                if (!session.active || activeSession.current !== session || session.pending.size > 0) return;
                 const current = model.getField(field);
                 if (!Object.is(session.committed, current)) {
                     session.committed = current;
-                    setDraft(display(current));
+                    updateState({ draft: display(current) });
                 }
             }).catch((error: unknown) => {
-                if (session.active && previous.current === session && editId === session.edit) {
-                    setWriteError(asWriteError(error));
+                if (session.active && activeSession.current === session && editId === session.edit) {
+                    updateState({ writeError: asWriteError(error) });
                 }
             });
         },
-        [model, field, setValue, display, session]
+        [model, field, setValue, display, session, updateState]
     );
 
-    const onBlur = useCallback(() => setTouched(true), []);
+    const onBlur = useCallback(() => updateState({ touched: true }), [updateState]);
     const showError = Boolean(touched && (writeError || meta.errors.length > 0));
 
     return { draft, setDraft: edit, meta, writeError, touched, onBlur, showError, committed };

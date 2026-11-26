@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { json, read, sha, suite, write } from './lib/environment.mjs';
+import { json, read, sha, suite, writeNew as write } from './lib/environment.mjs';
 import { tasks } from './lib/tasks.mjs';
 import { grade, immutable } from './lib/grader.mjs';
 import { agentConfig, runAgent } from './lib/agent.mjs';
 import { inspectExports, diagnostic } from './review-types.mjs';
+import { assertResultStatus, rejectLastStage } from './lib/result-status.mjs';
 
 const [id, outputArg] = process.argv.slice(2);
 if (!/^AI-\d{2}-r[123]$/.test(id ?? '')) throw new Error('Usage: node continue-reviewed.mjs AI-05-r1 [output]');
@@ -23,12 +24,13 @@ const root = path.join(environment.runtime, 'attempts', id, 'project');
 const home = path.join(environment.runtime, 'attempts', id, 'codex');
 const policy = read(path.join(evidence, 'policy.json'));
 const expectedImmutable = immutable(root);
-const finding = inspectExports(root);
+assertResultStatus(original, id);
+const finding = await inspectExports(root, environment, path.join(evidence, 'adjudication.sandbox.json'));
 assert.ok(finding.violations.length, 'No semantic type escape to adjudicate');
 const originalStage = original.stages.at(-1);
 write(path.join(evidence, `stage-${originalStage.stage}`, 'manual-types.json'), finding);
 write(path.join(evidence, `stage-${originalStage.stage}`, 'manual-constraints.log'), diagnostic(finding) + '\n');
-const result = structuredClone(original);
+const result = rejectLastStage(original, finding);
 result.automated_result_path = 'result.json';
 result.adjudication = {
   rule: 'Existing baseline no-type-escape constraint, enforced through manual review with TypeScript evidence',
@@ -36,10 +38,6 @@ result.adjudication = {
   semantic_inspector_sha256: sha(read(path.join(suite, 'review-types.mjs'))),
   original_automated_final_status: original.final_status,
 };
-result.stages.at(-1).automated_status = originalStage.status;
-result.stages.at(-1).status = 'FAIL';
-result.stages.at(-1).manual_constraints = finding;
-if (originalStage.stage === 0) result.initial_status = 'FAIL';
 let nextDiagnostic = diagnostic(finding);
 let session = originalStage.agent.session_id;
 for (let stage = originalStage.stage + 1; stage <= agentConfig.repair_limit; stage++) {
@@ -53,20 +51,25 @@ for (let stage = originalStage.stage + 1; stage <= agentConfig.repair_limit; sta
   });
   session = agent.session_id;
   fs.cpSync(path.join(root, 'src'), path.join(stageOutput, 'submission'), { recursive: true });
-  const acceptance = grade(task, root, stageOutput, expectedImmutable);
-  const manual = inspectExports(root);
+  const acceptance = await grade(task, root, stageOutput, expectedImmutable, environment);
+  const manual = acceptance.status === 'BLOCKED' ? { violations: [], skipped: acceptance.diagnostic } :
+    await inspectExports(root, environment, path.join(stageOutput, 'manual-types.sandbox.json'));
   write(path.join(stageOutput, 'manual-types.json'), manual);
-  write(path.join(stageOutput, 'manual-constraints.log'), diagnostic(manual) || 'PASS semantic export type review\n');
-  const blocked = !agent.completed && !agent.timed_out && agent.code !== 0;
+  write(path.join(stageOutput, 'manual-constraints.log'), manual.skipped ? `SKIPPED: ${manual.skipped}\n` :
+    diagnostic(manual) || 'PASS semantic export type review\n');
+  const blocked = acceptance.status === 'BLOCKED' || (!agent.completed && !agent.timed_out && agent.code !== 0);
   const status = blocked ? 'BLOCKED' : agent.timed_out || manual.violations.length ? 'FAIL' : acceptance.status;
   result.stages.push({ stage, status, agent, acceptance, manual_constraints: manual });
   result.final_status = status;
   result.repair_rounds = stage;
-  result.blocked_reason = blocked ? 'Continuation infrastructure terminated without a completed turn' : null;
+  result.blocked_reason = acceptance.status === 'BLOCKED' ? acceptance.diagnostic :
+    blocked ? 'Continuation infrastructure terminated without a completed turn' : null;
   console.log(`END reviewed ${id} stage=${stage} ${status}`);
   if (status === 'PASS' || status === 'BLOCKED') break;
   nextDiagnostic = [acceptance.diagnostic, diagnostic(manual)].filter(Boolean).join('\n') || 'Agent stage time budget exceeded.';
 }
+result.final_status = result.stages.at(-1).status;
+assertResultStatus(result, id);
 result.completed_at = new Date().toISOString();
 write(path.join(evidence, 'reviewed-result.json'), result);
 console.log(`RESULT reviewed ${id} initial=${result.initial_status} final=${result.final_status}`);

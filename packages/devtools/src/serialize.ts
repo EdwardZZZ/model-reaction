@@ -85,16 +85,29 @@ export function serializeValue(
     value: unknown,
     options: SerializeOptions = DEFAULT_SERIALIZE_OPTIONS
 ): SerializedValue {
-    return serialize(value, new Budget(options), 0, new WeakSet());
+    return serialize(() => value, new Budget(options), 0, new WeakSet());
 }
 
 function serialize(
-    value: unknown,
+    read: () => unknown,
     budget: Budget,
     depth: number,
     seen: WeakSet<object>
 ): SerializedValue {
     if (!budget.take()) return budgetMarker;
+    try {
+        return serializeReadable(read(), budget, depth, seen);
+    } catch {
+        return budget.marker('value could not be inspected');
+    }
+}
+
+function serializeReadable(
+    value: unknown,
+    budget: Budget,
+    depth: number,
+    seen: WeakSet<object>
+): SerializedValue {
     if (value === null) return { t: 'primitive', v: null };
     switch (typeof value) {
         case 'undefined': return { t: 'undefined' };
@@ -114,6 +127,10 @@ function serialize(
     if (value instanceof Date) {
         return { t: 'date', v: Number.isNaN(value.getTime()) ? 'Invalid Date' : value.toISOString() };
     }
+    if (value instanceof RegExp) {
+        const flags = budget.text(value.flags);
+        return { t: 'regexp', source: budget.text(value.source), flags };
+    }
     if (seen.has(value as object)) return { t: 'circular' };
     if (depth >= budget.options.maxDepth) {
         return budget.marker(`max depth ${budget.options.maxDepth} reached`);
@@ -123,6 +140,39 @@ function serialize(
     if (!budget.take()) return budgetMarker;
     seen.add(value as object);
     try {
+        if (value instanceof Map) {
+            const entries: Array<[SerializedValue, SerializedValue]> = [];
+            const truncated = (note: string): SerializedValue => {
+                budget.truncated = true;
+                return { t: 'map', entries, note };
+            };
+            for (const [key, child] of Map.prototype.entries.call(value)) {
+                if (entries.length >= budget.options.maxItems) {
+                    return truncated(`${value.size - entries.length} more item(s)`);
+                }
+                if (!budget.canTake()) return truncated('serialization budget exhausted');
+                const serializedKey = serialize(() => key, budget, depth + 1, seen);
+                // A complex key may exhaust the budget; never emit half a pair.
+                if (!budget.canTake()) return truncated('serialization budget exhausted');
+                entries.push([serializedKey, serialize(() => child, budget, depth + 1, seen)]);
+            }
+            return { t: 'map', entries };
+        }
+        if (value instanceof Set) {
+            const items: SerializedValue[] = [];
+            for (const child of Set.prototype.values.call(value)) {
+                if (items.length >= budget.options.maxItems) {
+                    items.push(budget.marker(`${value.size - items.length} more item(s)`));
+                    break;
+                }
+                if (!budget.canTake()) {
+                    items.push(budget.marker('serialization budget exhausted'));
+                    break;
+                }
+                items.push(serialize(() => child, budget, depth + 1, seen));
+            }
+            return { t: 'set', items };
+        }
         if (Array.isArray(value)) {
             const items: SerializedValue[] = [];
             const limit = Math.min(value.length, budget.options.maxItems);
@@ -131,7 +181,7 @@ function serialize(
                     items.push(budget.marker('serialization budget exhausted'));
                     return { t: 'array', items };
                 }
-                items.push(serialize(value[i], budget, depth + 1, seen));
+                items.push(serialize(() => value[i], budget, depth + 1, seen));
             }
             if (value.length > limit) {
                 items.push(budget.marker(`${value.length - limit} more item(s)`));
@@ -139,7 +189,8 @@ function serialize(
             return { t: 'array', items };
         }
         const entries: Array<[string, SerializedValue]> = [];
-        for (const key of ownKeys(value as Record<string, unknown>)) {
+        const record = value as Record<string | symbol, unknown>;
+        for (const key of ownValueKeys(record)) {
             if (entries.length >= budget.options.maxItems) {
                 entries.push(['…', budget.marker('object keys truncated')]);
                 break;
@@ -149,8 +200,8 @@ function serialize(
                 break;
             }
             budget.bytes -= 8;
-            const label = budget.text(key, NODE_BYTES);
-            entries.push([label, serialize((value as Record<string, unknown>)[key], budget, depth + 1, seen)]);
+            const label = budget.text(typeof key === 'symbol' ? key.toString() : key, NODE_BYTES);
+            entries.push([label, serialize(() => record[key], budget, depth + 1, seen)]);
         }
         return { t: 'object', entries };
     } finally {
@@ -164,6 +215,13 @@ function* ownKeys(record: Record<string, unknown>): Generator<string> {
     }
 }
 
+function* ownValueKeys(record: Record<string | symbol, unknown>): Generator<string | symbol> {
+    yield* ownKeys(record);
+    for (const key of Object.getOwnPropertySymbols(record)) {
+        if (Object.prototype.propertyIsEnumerable.call(record, key)) yield key;
+    }
+}
+
 function recordValues(record: Record<string, unknown>, budget: Budget): Record<string, SerializedValue> {
     const out: Record<string, SerializedValue> = {};
     let count = 0;
@@ -173,7 +231,7 @@ function recordValues(record: Record<string, unknown>, budget: Budget): Record<s
             break;
         }
         Object.defineProperty(out, key, {
-            value: serialize(record[key], budget, 0, new WeakSet()),
+            value: serialize(() => record[key], budget, 0, new WeakSet()),
             enumerable: true,
         });
     }
@@ -236,12 +294,7 @@ export function serializeSnapshot(
             }
             fields.push(field);
         }
-        let value: SerializedValue;
-        try {
-            value = serialize(entry.value, budget, 0, new WeakSet());
-        } catch {
-            value = budget.marker('value could not be inspected');
-        }
+        const value = serialize(() => entry.value, budget, 0, new WeakSet());
         derivedValues.push({
             id: entry.id, kind: entry.kind, value,
             ...(debugName === undefined ? {} : { debugName }),

@@ -35,11 +35,14 @@ export type SerializedValue =
     | { t: 'undefined' }
     | { t: 'bigint'; v: string }
     | { t: 'date'; v: string }
+    | { t: 'regexp'; source: string; flags: string }
     | { t: 'function'; name: string }
     | { t: 'symbol'; v: string }
     | { t: 'circular' }
     | { t: 'truncated'; note: string }
     | { t: 'array'; items: SerializedValue[] }
+    | { t: 'set'; items: SerializedValue[] }
+    | { t: 'map'; entries: Array<[SerializedValue, SerializedValue]>; note?: string }
     | { t: 'object'; entries: Array<[string, SerializedValue]> };
 
 // -----------------------------------------------------------------------------

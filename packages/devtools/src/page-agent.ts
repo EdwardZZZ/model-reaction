@@ -52,6 +52,7 @@ type RawDerivedValue = Omit<DerivedValue, 'value'> & { value: unknown };
 
 interface TrackedInstance {
     instance: HookModelInstance;
+    model: object | undefined;
     timeline: ChangeEntry[];
     values: Map<string, unknown>;
     derivedValues: Map<object, RawDerivedValue> | undefined;
@@ -95,7 +96,7 @@ export function installAgent(
     });
 
     const scheduleSnapshot = (entry: TrackedInstance): void => {
-        if (entry.snapshotQueued) return;
+        if (tracked.get(entry.instance.id) !== entry || entry.snapshotQueued) return;
         entry.snapshotQueued = true;
         queueMicrotask(() => {
             entry.snapshotQueued = false;
@@ -109,52 +110,76 @@ export function installAgent(
         });
     };
 
+    const release = (entry: TrackedInstance): void => {
+        if (tracked.get(entry.instance.id) === entry) tracked.delete(entry.instance.id);
+        if (entry.model !== undefined && modelIds.get(entry.model) === entry.instance.id) {
+            modelIds.delete(entry.model);
+        }
+        entry.values.clear();
+        entry.derivedValues?.clear();
+        entry.timeline.length = 0;
+        entry.unsubscribe();
+    };
+
     const hook = {
         register(instance: HookModelInstance, model?: object): void {
+            if (tracked.has(instance.id)) throw new Error(`DevTools instance ${instance.id} is already registered`);
+            const unsubscribers: Array<() => void> = [];
             const entry: TrackedInstance = {
                 instance,
+                model,
                 timeline: [],
                 values: new Map(Object.entries(instance.getSnapshot().data)),
                 derivedValues: model === undefined ? undefined : new Map(),
                 nextDerivedId: 1,
-                unsubscribe: () => {},
+                unsubscribe: () => {
+                    for (const unsubscribe of unsubscribers.splice(0)) {
+                        try {
+                            unsubscribe();
+                        } catch {
+                            // Attempt every cleanup without masking a registration failure.
+                        }
+                    }
+                },
                 seq: 0,
                 snapshotQueued: false,
             };
-            const unsubscribeChanges = instance.subscribe((change) => {
-                const record: ChangeEntry = {
-                    seq: entry.seq++,
-                    field: change.field,
-                    value: serializeValue(change.value),
-                    previous: serializeValue(entry.values.get(change.field)),
-                    timestamp: change.timestamp,
-                };
-                entry.values.set(change.field, change.value);
-                // Ring buffer: drop the oldest entry past the cap.
-                entry.timeline.push(record);
-                if (entry.timeline.length > timelineLimit) {
-                    entry.timeline.shift();
-                }
-                post({ source: AGENT_SOURCE, kind: 'change', id: instance.id, change: record });
-                // A committed change may also move other fields (reactions), so
-                // refresh the whole instance once at the end of this microtask.
-                scheduleSnapshot(entry);
-            });
-            const unsubscribeSnapshot = instance.subscribeSnapshot?.(() => scheduleSnapshot(entry));
-            entry.unsubscribe = () => {
-                unsubscribeChanges();
-                unsubscribeSnapshot?.();
-            };
-            tracked.set(instance.id, entry);
-            if (model !== undefined) modelIds.set(model, instance.id);
-            post({ source: AGENT_SOURCE, kind: 'instance-added', instance: toState(entry) });
+            try {
+                unsubscribers.push(instance.subscribe((change) => {
+                    if (tracked.get(instance.id) !== entry) return;
+                    const record: ChangeEntry = {
+                        seq: entry.seq++,
+                        field: change.field,
+                        value: serializeValue(change.value),
+                        previous: serializeValue(entry.values.get(change.field)),
+                        timestamp: change.timestamp,
+                    };
+                    entry.values.set(change.field, change.value);
+                    // Ring buffer: drop the oldest entry past the cap.
+                    entry.timeline.push(record);
+                    if (entry.timeline.length > timelineLimit) {
+                        entry.timeline.shift();
+                    }
+                    post({ source: AGENT_SOURCE, kind: 'change', id: instance.id, change: record });
+                    // A committed change may also move other fields (reactions), so
+                    // refresh the whole instance once at the end of this microtask.
+                    scheduleSnapshot(entry);
+                }));
+                const unsubscribeSnapshot = instance.subscribeSnapshot?.(() => scheduleSnapshot(entry));
+                if (unsubscribeSnapshot) unsubscribers.push(unsubscribeSnapshot);
+                const state = toState(entry);
+                tracked.set(instance.id, entry);
+                if (model !== undefined) modelIds.set(model, instance.id);
+                post({ source: AGENT_SOURCE, kind: 'instance-added', instance: state });
+            } catch (error) {
+                release(entry);
+                throw error;
+            }
         },
         unregister(id: number): void {
             const entry = tracked.get(id);
             if (!entry) return;
-            entry.unsubscribe();
-            entry.derivedValues?.clear();
-            tracked.delete(id);
+            release(entry);
             post({ source: AGENT_SOURCE, kind: 'instance-removed', id });
         },
         getDerivedObserver(model: object): HookModelInstance['observeSelector'] {
@@ -200,8 +225,7 @@ export function installAgent(
 
     return () => {
         win.removeEventListener('message', onMessage);
-        tracked.forEach((entry) => entry.unsubscribe());
-        tracked.clear();
+        tracked.forEach(release);
         delete (win as unknown as Record<string, unknown>)[HOOK_KEY];
     };
 }

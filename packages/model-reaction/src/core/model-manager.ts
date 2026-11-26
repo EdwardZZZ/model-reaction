@@ -377,7 +377,7 @@ export class ModelManager<
         this.errorsSnapshot = null;
     }
 
-    private requireField(field: string): FieldSchema {
+    private requireField(field: string): FieldSchema<FieldSchema['type'], T[string]> {
         if (!Object.prototype.hasOwnProperty.call(this.schema, field)) {
             const error: ModelError = {
                 code: 'field_not_found',

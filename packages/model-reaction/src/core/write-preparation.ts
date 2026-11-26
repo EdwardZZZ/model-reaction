@@ -3,7 +3,7 @@ import type { FieldSchema } from '../types';
 /** A field's transformed input and schema, ready for validation. */
 export interface PreparedFieldWrite {
     field: string;
-    schema: FieldSchema;
+    schema: FieldSchema<FieldSchema['type'], any>;
     value: unknown;
 }
 
@@ -14,7 +14,7 @@ export interface PreparedFieldWrite {
  */
 export function prepareFieldWrites(
     fields: Readonly<Record<string, unknown>>,
-    resolveSchema: (field: string) => FieldSchema
+    resolveSchema: (field: string) => FieldSchema<FieldSchema['type'], any>
 ): PreparedFieldWrite[] {
     const resolved = Object.keys(fields).map((field) => ({
         field,

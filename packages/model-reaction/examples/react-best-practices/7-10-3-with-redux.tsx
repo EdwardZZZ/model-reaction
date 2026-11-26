@@ -31,7 +31,7 @@ declare function selectCurrentUserId(state: unknown): string;
 declare function saveUser(data: User): { type: string; payload: User };
 
 function UserForm({ onSubmit }: { onSubmit: () => void }) {
-    return <button onClick={onSubmit}>Save</button>;
+    return <button type="button" onClick={onSubmit}>Save</button>;
 }
 
 export function EditUserPage() {

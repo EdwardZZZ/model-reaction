@@ -29,12 +29,160 @@ function flush(): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
+function getObserver(model: object): unknown {
+    return (window as unknown as {
+        __MODEL_REACTION_DEVTOOLS_HOOK__: { getDerivedObserver(model: object): unknown };
+    }).__MODEL_REACTION_DEVTOOLS_HOOK__.getDerivedObserver(model);
+}
+
+async function getInit(received: AgentMessage[]) {
+    window.postMessage({ source: PANEL_SOURCE, kind: 'get-init' }, '*');
+    await flush();
+    await flush();
+    const inits = received.filter((message) => message.kind === 'init');
+    return inits[inits.length - 1]!;
+}
+
 describe('library ↔ page-agent end-to-end', () => {
     let dispose: () => void = () => {};
 
     afterEach(() => {
         dispose();
         dispose = () => {};
+    });
+
+    test('unreadable committed and dirty values do not poison healthy models or survive disposal', async () => {
+        class LazyValue {
+            constructor() {
+                Object.defineProperty(this, 'unloaded', {
+                    enumerable: true,
+                    get() { throw new Error('value is not loaded'); },
+                });
+            }
+        }
+        const unreadable = {
+            t: 'object',
+            entries: [['unloaded', { t: 'truncated', note: 'value could not be inspected' }]],
+        };
+        const received = collect();
+        dispose = installAgent(window);
+        const rejected = new LazyValue();
+        const bad = createModel<{ payload: unknown }>({
+            payload: {
+                type: 'object', default: new LazyValue(),
+                validator: [{ type: 'available', message: 'not available', validate: (v) => v !== rejected }],
+            },
+        });
+        const healthy = createModel({ healthy: { type: 'number', default: 7 } });
+        try {
+            const initial = await getInit(received);
+            expect(initial.instances).toHaveLength(2);
+            expect(received.filter((message) => message.kind === 'instance-added')).toHaveLength(2);
+            const badState = initial.instances.find((instance) => 'payload' in instance.fields)!;
+            expect(badState.snapshot.data.payload).toEqual(unreadable);
+            expect(badState.snapshot.truncated).toBe(true);
+            expect(typeof getObserver(bad)).toBe('function');
+            await bad.setField('payload', new LazyValue());
+            await bad.setField('payload', { loaded: true });
+            expect(await bad.setField('payload', rejected)).toBe(false);
+            await healthy.setField('healthy', 8);
+            const current = await getInit(received);
+            const updated = current.instances.find((instance) => instance.id === badState.id)!;
+            expect(updated.timeline).toHaveLength(2);
+            expect(updated.timeline[0]).toMatchObject({ value: unreadable, previous: unreadable });
+            expect(updated.timeline[1]).toMatchObject({
+                previous: unreadable,
+                value: { t: 'object', entries: [['loaded', { t: 'primitive', v: true }]] },
+            });
+            expect(updated.snapshot.dirtyData.payload).toEqual(unreadable);
+            expect(updated.snapshot.errors.payload![0]!.message).toBe('not available');
+            bad.dispose();
+            expect(getObserver(bad)).toBeUndefined();
+            const remaining = await getInit(received);
+            expect(remaining.instances).toHaveLength(1);
+            expect(remaining.instances[0]!.snapshot.data.healthy).toEqual({ t: 'primitive', v: 8 });
+        } finally {
+            bad.dispose();
+            healthy.dispose();
+        }
+    });
+
+    test('preserves built-in values in initial snapshots and timeline replacements', async () => {
+        const received = collect();
+        dispose = installAgent(window);
+        const model = createModel({
+            lookup: { type: 'object', default: new Map([['total', 42]]) },
+            tags: { type: 'object', default: new Set(['paid']) },
+            pattern: { type: 'object', default: /invoice/i },
+        });
+        try {
+            const initial = (await getInit(received)).instances[0]!;
+            expect(initial.snapshot.data).toEqual({
+                lookup: { t: 'map', entries: [[{ t: 'primitive', v: 'total' }, { t: 'primitive', v: 42 }]] },
+                tags: { t: 'set', items: [{ t: 'primitive', v: 'paid' }] },
+                pattern: { t: 'regexp', source: 'invoice', flags: 'i' },
+            });
+            expect(initial.snapshot.truncated).toBeUndefined();
+            await model.setField('lookup', new Map([['total', 99]]));
+            await model.setField('tags', new Set(['pending']));
+            await model.setField('pattern', /receipt/g);
+            const current = (await getInit(received)).instances[0]!;
+            expect(current.snapshot.data).toEqual({
+                lookup: { t: 'map', entries: [[{ t: 'primitive', v: 'total' }, { t: 'primitive', v: 99 }]] },
+                tags: { t: 'set', items: [{ t: 'primitive', v: 'pending' }] },
+                pattern: { t: 'regexp', source: 'receipt', flags: 'g' },
+            });
+            expect(current.timeline.map(({ field, previous, value }) => ({ field, previous, value })))
+                .toEqual(['lookup', 'tags', 'pattern'].map((field) => ({
+                    field, previous: initial.snapshot.data[field], value: current.snapshot.data[field],
+                })));
+        } finally {
+            model.dispose();
+        }
+    });
+
+    test.each([0, 1])('retains independent wrapper observers and updates after disposing model %i', async (disposeFirst) => {
+        const loadCopy = (): typeof createModel => {
+            let copy!: typeof createModel;
+            jest.isolateModules(() => {
+                copy = jest.requireActual<typeof import('model-reaction/devtools')>('model-reaction/devtools').createModel;
+            });
+            return copy;
+        };
+        const firstCopy = loadCopy();
+        const secondCopy = loadCopy();
+        const received = collect();
+        dispose = installAgent(window);
+        const first = firstCopy({ value: { type: 'number', default: 1 } });
+        const firstObserver = getObserver(first);
+        const second = secondCopy({ value: { type: 'number', default: 2 } });
+        const models = [first, second];
+        try {
+            expect(typeof firstObserver).toBe('function');
+            expect(getObserver(first)).toBe(firstObserver);
+            expect(getObserver(second)).not.toBe(firstObserver);
+            const ids = (await getInit(received)).instances.map((instance) => instance.id);
+            expect(new Set(ids).size).toBe(2);
+            await first.setField('value', 11);
+            await second.setField('value', 22);
+            const states = (await getInit(received)).instances;
+            expect(states.map((instance) => [instance.id, instance.timeline[0]!.value])).toEqual([
+                [ids[0], { t: 'primitive', v: 11 }],
+                [ids[1], { t: 'primitive', v: 22 }],
+            ]);
+            models[disposeFirst]!.dispose();
+            expect(getObserver(models[disposeFirst]!)).toBeUndefined();
+            const remaining = 1 - disposeFirst;
+            await models[remaining]!.setField('value', 33);
+            const live = (await getInit(received)).instances;
+            expect(live).toHaveLength(1);
+            expect(live[0]!.id).toBe(ids[remaining]);
+            const timeline = live[0]!.timeline;
+            expect(timeline[timeline.length - 1]!.value).toEqual({ t: 'primitive', v: 33 });
+            expect(typeof getObserver(models[remaining]!)).toBe('function');
+        } finally {
+            models.forEach((model) => model.dispose());
+        }
     });
 
     test('a real model registers, reports its graph, and streams changes', async () => {
@@ -166,7 +314,7 @@ describe('library ↔ page-agent end-to-end', () => {
         });
         await flush();
 
-        // Capture the library-assigned instance id (a module-level counter, so
+        // Capture the library-assigned instance id (a page-wide counter, so
         // it is not guaranteed to be 0 across a multi-test run).
         const added = received.find(
             (m): m is Extract<AgentMessage, { kind: 'instance-added' }> =>

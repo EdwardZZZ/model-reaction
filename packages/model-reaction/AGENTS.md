@@ -65,6 +65,9 @@ and actions.
 `action` is an optional array of functions receiving `{ field, value }`: the
 owning field and its latest committed value read immediately before each call.
 No-argument functions remain valid; read other fields through a model closure.
+In inferred schemas, narrow the action's `unknown` value before use. Explicit
+`createModel<T>` supplies the owning `T[K]`; reusable inferred-schema reactions
+use `Reaction<Computed, unknown>`. TypeScript consumers require 5.4 or newer.
 Successful computations queue functions by reference; the last registration
 replaces the earlier pending record, supplies its context field, and moves
 to the end.

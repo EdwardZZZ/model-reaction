@@ -4,6 +4,7 @@ import { json, read, sha, suite, treeHash, write } from './lib/environment.mjs';
 import { tasks, prompt } from './lib/tasks.mjs';
 import { project, grade } from './lib/grader.mjs';
 import { agentConfig, createAgentHome, isolation, runAgent } from './lib/agent.mjs';
+import { assertResultStatus } from './lib/result-status.mjs';
 
 const [id, repeatArg = 'all', outputArg] = process.argv.slice(2);
 const output = path.resolve(outputArg ?? path.join(suite, 'runs/baseline-v1'));
@@ -15,6 +16,7 @@ for (const [file, hash] of Object.entries(manifest.source_files)) {
 }
 if (calibration.results.length !== 12 || calibration.results.some(r => r.status !== 'PASS')) throw new Error('All 12 references must pass before sampling');
 if (calibration.checks_hash !== treeHash(path.join(suite, 'checks')) ||
+    calibration.harness_hash !== treeHash(path.join(suite, 'lib')) ||
     calibration.grader_hash !== sha(read(path.join(suite, 'lib/grader.mjs'))) ||
     calibration.tasks_hash !== sha(read(path.join(suite, 'lib/tasks.mjs'))) ||
     calibration.fixtures_hash !== treeHash(path.join(suite, 'fixtures'))) throw new Error('Frozen evaluator changed; recalibrate before sampling');
@@ -41,17 +43,22 @@ for (const repeat of repeats) {
     const agent = await runAgent({ root, home, policy, prompt: nextPrompt, stage, session, output: stageOutput });
     session = agent.session_id;
     fs.cpSync(path.join(root, 'src'), path.join(stageOutput, 'submission'), { recursive: true });
-    const acceptance = grade(task, root, stageOutput, immutable);
-    if (!agent.completed && !agent.timed_out && agent.code !== 0) {
+    const acceptance = await grade(task, root, stageOutput, immutable, environment);
+    if (acceptance.status === 'BLOCKED') blockedReason = acceptance.diagnostic;
+    if (!blockedReason && !agent.completed && !agent.timed_out && agent.code !== 0) {
       blockedReason = 'Agent infrastructure terminated without a completed turn; inspect raw stderr/events.';
     }
     const status = blockedReason ? 'BLOCKED' : agent.timed_out ? 'FAIL' : acceptance.status;
     stages.push({ stage, status, agent, acceptance });
     console.log(`END ${attemptId} stage=${stage} ${status} ${agent.active_duration_ms}ms`);
     if (status === 'PASS' || status === 'BLOCKED') break;
-    if (!session) { blockedReason = 'Missing session identifier prevents repair'; break; }
+    if (!session) {
+      blockedReason = 'Missing session identifier prevents repair';
+      stages.at(-1).status = 'BLOCKED';
+      break;
+    }
     nextPrompt = `交付后的原始验收诊断如下。请在原接口约束下修复 src/，可自行检查；完成后重新交付。\n\n${acceptance.diagnostic || 'Agent stage time budget exceeded.'}`;
-    // Hidden type assertions and compiled evaluator files are removed by grade before repair.
+    // Evaluator type assertions and compiled output are removed by the worker before repair.
   }
   const result = {
     suite_version: 'ai-integration-v1', task_id: id, repeat_id: repeat,
@@ -59,10 +66,11 @@ for (const repeat of repeats) {
     evaluator_hash: sha(calibration.checks_hash + calibration.grader_hash), reference_check: 'PASS',
     agent_model: agentConfig.model, agent_config_hash: sha(JSON.stringify(agentConfig)),
     tool_policy_hash: sha(policy), initial_status: stages[0].status,
-    final_status: blockedReason ? 'BLOCKED' : stages.at(-1).status,
+    final_status: stages.at(-1).status,
     repair_rounds: stages.length - 1, blocked_reason: blockedReason,
     stages, completed_at: new Date().toISOString(),
   };
+  assertResultStatus(result, attemptId);
   write(path.join(evidence, 'result.json'), result);
   console.log(`RESULT ${attemptId} initial=${result.initial_status} final=${result.final_status}`);
 }

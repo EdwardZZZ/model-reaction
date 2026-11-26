@@ -91,7 +91,7 @@ export function MultiInstance() {
             <h2>Multiple instances</h2>
             <p className="scenario-desc">
                 Two separate models on one page. Open the DevTools panel and use
-                the instance picker (top-right) to switch between them.
+                the model buttons below the panel header to switch between them.
             </p>
             <div className="row">
                 <LineItemCard

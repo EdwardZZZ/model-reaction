@@ -264,7 +264,8 @@ Schema 推导反映运行时值：默认值会绕过校验，因此与 `type` �
   `debounceReactions` 只延迟派生计算。
 - 使用字段或 selector 订阅缩小更新范围。Hook 选择、draft 缓冲与所有权统一见
   [React 绑定](REACT_CN.md)。
-- 写入返回 `false` 表示校验失败，Promise reject 属于另一类异常。
+- 写入返回 `false` 可能表示校验失败，也可能表示写入被后续请求取代或因模型已销毁而未提交；
+  Promise reject 属于另一类异常。应读取模型当前状态和错误，不要根据过期调用的结果创建新错误。
   读取 `validationErrors[field]`，或从 `model-reaction/validation` 导入
   `formatValidationErrors` 汇总错误。用类型化错误事件记录日志，cleanup 中解绑。
   文本绑定在 `showError` 时展示 `writeError?.message ?? meta.errors[0]?.message`。

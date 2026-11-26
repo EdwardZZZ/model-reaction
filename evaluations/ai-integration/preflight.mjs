@@ -1,16 +1,21 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { json, suite, write, read, repo } from './lib/environment.mjs';
+import { json, suite, write, writeNew, read, repo } from './lib/environment.mjs';
 import { createAgentHome, isolation, runAgent, permissionArgs } from './lib/agent.mjs';
 import { project } from './lib/grader.mjs';
 import { tasks } from './lib/tasks.mjs';
+import { sandboxWorker } from './lib/sandbox.mjs';
 
 const output = path.resolve(process.argv[2] ?? path.join(suite, 'runs/baseline-v1'));
 const env = json(path.join(output, 'environment.json'));
+if (fs.existsSync(path.join(output, 'preflight/result.json'))) throw new Error('Preflight result already exists');
 const probeRoot = fs.mkdtempSync(path.join(env.runtime, 'preflight-'));
 const root = path.join(probeRoot, 'project'), home = path.join(probeRoot, 'codex');
 const fixed = project(tasks[0], root, env);
+const gradingProbe = await sandboxWorker(root, env, { mode: 'probe' });
+writeNew(path.join(output, 'preflight', path.basename(probeRoot), 'grading-sandbox.json'), gradingProbe.record);
+if (!gradingProbe.ok) throw new Error(gradingProbe.limitation);
 createAgentHome(home);
 const policy = isolation(env, root, home, Object.keys(fixed));
 write(path.join(root, 'src/probe.mjs'), `
@@ -61,4 +66,4 @@ for (const stage of [0, 1]) {
   stages.push({ directory: path.relative(output, dir), ...result });
   console.log(`Preflight stage ${stage} PASS: ${session}`);
 }
-write(path.join(output, 'preflight/result.json'), { status: 'PASS', session, policy, stages });
+writeNew(path.join(output, 'preflight/result.json'), { status: 'PASS', session, policy, stages });

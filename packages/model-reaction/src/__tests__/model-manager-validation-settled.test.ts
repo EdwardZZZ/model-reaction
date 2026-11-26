@@ -417,7 +417,7 @@ describe('ModelManager - full validation settlement', () => {
                 return other;
             },
         });
-        const model = own(createModel(schema));
+        const model = own(createModel<{ source: number; target: number; other: number }>(schema));
         const complete = jest.fn();
         await model.settled();
         await model.setField('source', 1);

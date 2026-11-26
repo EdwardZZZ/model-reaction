@@ -28,7 +28,7 @@ See the [source architecture guide](docs/ARCHITECTURE.md) for the module map and
 
 ## Installation
 
-Requires Node.js 18 or later.
+Requires Node.js 18 or later; TypeScript consumers need TypeScript 5.4 or later.
 
 ```bash
 npm install model-reaction          # core only

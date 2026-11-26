@@ -18,10 +18,10 @@ describe('createModel type inference', () => {
                 create({ count: { type: 'number' } }, { strictMode: true });
                 // @ts-expect-error field validation always stops at the first error
                 create({ count: { type: 'number' } }, { failFast: true });
+                // @ts-expect-error even a single-element reaction array is rejected
                 create({
                     count: {
                         type: 'number',
-                        // @ts-expect-error even a single-element reaction array is rejected
                         reaction: [{ fields: [], computed: () => 1 }],
                     },
                 });
@@ -43,7 +43,7 @@ describe('createModel type inference', () => {
             label: 'double', fields: ['source'], computed: ({ source }) => source * 2,
             action: [action, async () => { await model.setField('note', 'saved'); }],
         };
-        const model = createModel({
+        const model = createModel<{ source: number; target: number; note: string }>({
             source: { type: 'number', default: 1 },
             target: { type: 'number', default: 0, reaction },
             note: { type: 'string', default: '' },
@@ -130,9 +130,9 @@ describe('createModel type inference', () => {
             verifyPublicTypeContracts(factory);
         });
 
-        test('infers action context values from the target field type', async () => {
+        test('types action contexts from the explicit model value contract', async () => {
             const contexts: Array<{ field: string; value: number | string }> = [];
-            const model = factory({
+            const model = factory<{ source: number; total: number; label: string }>({
                 source: { type: 'number', default: 2 },
                 total: {
                     type: 'number',
@@ -230,7 +230,7 @@ describe('createModel type inference', () => {
 
     describe('reaction.computed return type', () => {
         test('follows the target field type tag', async () => {
-            const doubled: Reaction<number> = {
+            const doubled: Reaction<number, unknown> = {
                 fields: ['price'],
                 computed: (v) => v.price * 2,
             };
@@ -247,19 +247,19 @@ describe('createModel type inference', () => {
                 },
             });
             const invalidSchemas = () => {
+                // @ts-expect-error a number field rejects a string result
                 createModel({
                     price: { type: 'number', default: 2 },
-                    // @ts-expect-error a number field rejects a string result
                     total: {
                         type: 'number',
                         reaction: { fields: ['price'], computed: () => '4' },
                     },
                 });
+                // @ts-expect-error reaction arrays are no longer supported
                 createModel({
                     price: { type: 'number', default: 2 },
                     total: {
                         type: 'number',
-                        // @ts-expect-error reaction arrays are no longer supported
                         reaction: [doubled, { fields: ['price'], computed: () => true }],
                     },
                 });
@@ -268,9 +268,9 @@ describe('createModel type inference', () => {
                     // @ts-expect-error explicit data types are checked too
                     label: { type: 'string', reaction: { fields: ['price'], computed: () => 1 } },
                 });
+                // @ts-expect-error numeric computed results do not fit a string field
                 createModel({
                     price: { type: 'number', default: 2 },
-                    // @ts-expect-error Reaction<number> does not fit a string field
                     label: { type: 'string', reaction: doubled },
                 });
             };

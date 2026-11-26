@@ -276,8 +276,10 @@ demonstrates schema composition and DTO conversion.
   every keystroke. `debounceReactions` only delays derived calculations.
 - Use field or selector subscriptions for narrow views. Hook choice, draft
   buffering, and model ownership are documented in [React bindings](REACT.md).
-- A `false` write result is a validation failure; rejected writes are separate
-  exceptions. Read `validationErrors[field]` or use
+- A `false` write result can mean validation failure or a write that was not
+  committed because it was superseded or the model was disposed; rejected writes
+  are separate exceptions. Read current model state and errors rather than
+  creating a new error from a stale call's result. Read `validationErrors[field]` or use
   `formatValidationErrors` from `model-reaction/validation` for a summary.
   Subscribe to typed error events for logging and always unsubscribe in cleanup.
   Text bindings display `writeError?.message ?? meta.errors[0]?.message` under `showError`.

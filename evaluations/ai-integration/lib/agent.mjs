@@ -13,7 +13,7 @@ export const agentConfig = {
 };
 export function isolation(environment, root, home, immutablePaths) {
   const hidden = [
-    repo, path.join(environment.runtime, 'calibration'),
+    repo, ...(environment.source_repo ? [environment.source_repo] : []), path.join(environment.runtime, 'calibration'),
     path.join(os.homedir(), '.codex'), path.join(os.homedir(), '.trae-cn'),
     path.join(os.homedir(), 'Library/Application Support/Trae CN'),
     path.join(home, 'auth.json'),

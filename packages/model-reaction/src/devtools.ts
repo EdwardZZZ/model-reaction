@@ -13,6 +13,7 @@ import { eachReactionEdge } from './reaction/reaction-graph';
 import { observeModelSelectors, type SelectorObserver } from './devtools-observer';
 
 const DEVTOOLS_HOOK_KEY = '__MODEL_REACTION_DEVTOOLS_HOOK__';
+const NEXT_INSTANCE_ID = Symbol.for('model-reaction.devtools.nextInstanceId');
 
 interface DevtoolsFieldInfo {
     type: FieldSchema['type'];
@@ -73,18 +74,21 @@ function getDevtoolsHook(): ModelReactionDevtoolsHook | undefined {
     return undefined;
 }
 
-let nextInstanceId = 0;
-
 /** Register the model instance and return cleanup, swallowing registration and cleanup failures. */
 function attachToDevtools(
     hook: ModelReactionDevtoolsHook,
     instance: Omit<DevtoolsModelInstance, 'id'>,
     model: object
 ): () => void {
-    const id = nextInstanceId++;
-    const full: DevtoolsModelInstance = { id, ...instance };
+    let id: number;
     try {
-        hook.register(full, model);
+        // Share numeric IDs across CJS, ESM, and independent bundle copies.
+        const globalIds = globalThis as typeof globalThis & { [NEXT_INSTANCE_ID]?: number };
+        id = globalIds[NEXT_INSTANCE_ID] ?? 0;
+        Object.defineProperty(globalIds, NEXT_INSTANCE_ID, {
+            value: id + 1, writable: true, configurable: true,
+        });
+        hook.register({ id, ...instance }, model);
     } catch {
         return () => {};
     }
@@ -145,7 +149,7 @@ function buildDependencyGraph(
 
 /** Create a model with DevTools inspection and disposal cleanup when a valid global hook exists. */
 export const createModel: typeof baseCreateModel = (
-    schema: Record<string, FieldSchema>,
+    schema: Record<string, FieldSchema<FieldSchema['type'], any>>,
     options: ModelOptions = {}
 ): ModelReturn<any> => {
     const model = baseCreateModel(schema as Model<Record<string, any>>, options);

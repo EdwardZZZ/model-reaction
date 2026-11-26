@@ -286,6 +286,10 @@ when updating the draft. If local validations are still in flight, outside
 updates are reconciled when those calls finish. Older calls cannot overwrite a
 newer edit or a new model/field session.
 
+Switching the model or field resets the draft, touched state, and write error
+before effects can edit that new session. An edit started by a layout or child
+effect keeps its text through the subsequent commit.
+
 Field bindings support numeric schema keys such as `useDraftField(model, 0)`;
 event filtering uses their string representation. Reentrant edits from a
 `field:change` listener preserve their own text too. `setDraft` updates local
@@ -522,6 +526,10 @@ Equality is opt-in and does not avoid computing the next result. Neither hook
 guarantees exactly one selector call per commit or render: subscriptions and
 snapshot reads can both evaluate it. Keep selectors pure, and measure expensive
 derivations before adding memoization.
+
+If a selector or equality function throws for a committed snapshot, the error
+surfaces during React rendering and can be handled by an error boundary.
+Subscription-side failures do not silently leave an earlier selection on screen.
 
 ## Side effects from derived values
 

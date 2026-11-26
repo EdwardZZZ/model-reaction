@@ -14,6 +14,7 @@ interface SelectionSource<T extends Record<string, any>, R> {
     select(data: Readonly<T>): R;
     fields?: readonly string[] | undefined;
     latest?: { data: Readonly<T>; selection: ObservedSelection<R> };
+    failure?: { data: Readonly<T>; error: unknown };
     onEvaluate?: (selection: ObservedSelection<R>) => void;
 }
 
@@ -144,7 +145,26 @@ function useSelectorValue<T extends Record<string, any>, R>(
 
     const subscribe = useCallback(
         (notify: () => void) =>
-            model.subscribe(source.select, () => notify(), isEqual),
+            model.subscribe(
+                (data) => {
+                    try {
+                        return { value: source.select(data) };
+                    } catch (error) {
+                        source.failure = { data, error };
+                        return null;
+                    }
+                },
+                () => notify(),
+                (next, previous) => {
+                    if (next === null || previous === null) return false;
+                    try {
+                        return isEqual(next.value, previous.value);
+                    } catch (error) {
+                        source.failure = { data: model.data, error };
+                        return false;
+                    }
+                }
+            ),
         [model, source, isEqual]
     );
     const subscribeComputed = useCallback(
@@ -181,6 +201,8 @@ function useSelectionSnapshot<T extends Record<string, any>, R>(
             select: (data) => evaluate(data).value,
             getSnapshot: () => {
                 const data = model.data;
+                // Subscription errors must surface through React, not the event emitter.
+                if (source.failure?.data === data) throw source.failure.error;
                 if (previous !== null && Object.is(previous.data, data)) return previous.value;
                 const selection = evaluate(data);
                 const value = committed.current !== null && isEqual(committed.current.value, selection.value)

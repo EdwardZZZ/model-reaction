@@ -132,6 +132,103 @@ describe('page agent', () => {
         expect(kinds).toContain('instance-removed');
     });
 
+    test.each(['subscribe', 'subscribeSnapshot', 'serialization', 'post'] as const)(
+        'rolls back registration after a %s failure and allows a healthy retry',
+        async (stage) => {
+            const received: AgentMessage[] = [];
+            const post = jest.spyOn(window, 'postMessage').mockImplementation((message: AgentMessage) => {
+                received.push(message);
+            });
+            dispose = installAgent(window);
+            const hook = getHook();
+            const model = {};
+            const inst = makeFakeInstance(30);
+            const unsubscribe = jest.fn();
+            const unsubscribeSnapshot = jest.fn();
+            let lateChange: Parameters<typeof inst.subscribe>[0] = () => {};
+            let lateSnapshot: () => void = () => {};
+            const error = new Error(`${stage} failed`);
+            const getSnapshot = jest.fn(inst.getSnapshot);
+            if (stage === 'serialization') {
+                getSnapshot.mockReturnValueOnce(inst.getSnapshot()).mockReturnValue({
+                    ...inst.getSnapshot(),
+                    dirtyData: new Proxy({}, { ownKeys() { throw error; } }),
+                });
+            }
+            const failed = {
+                ...inst,
+                getSnapshot,
+                observeSelector: jest.fn(),
+                subscribe: jest.fn((listener: typeof lateChange) => {
+                    lateChange = listener;
+                    if (stage === 'subscribe') throw error;
+                    return unsubscribe;
+                }),
+                subscribeSnapshot: jest.fn((listener: () => void) => {
+                    lateSnapshot = listener;
+                    if (stage === 'subscribeSnapshot') throw error;
+                    return unsubscribeSnapshot;
+                }),
+            };
+            if (stage === 'post') {
+                post.mockImplementationOnce(() => {
+                    lateSnapshot();
+                    throw error;
+                });
+            }
+            expect(() => hook.register(failed, model)).toThrow(error);
+            expect(unsubscribe).toHaveBeenCalledTimes(stage === 'subscribe' ? 0 : 1);
+            expect(unsubscribeSnapshot).toHaveBeenCalledTimes(
+                stage === 'serialization' || stage === 'post' ? 1 : 0
+            );
+            expect(hook.getDerivedObserver(model)).toBeUndefined();
+            received.length = 0;
+            const healthy = makeFakeInstance(30);
+            const healthyModel = {};
+            const observer = jest.fn();
+            hook.register({ ...healthy, observeSelector: observer }, healthyModel);
+            expect(hook.getDerivedObserver(model)).toBeUndefined();
+            expect(hook.getDerivedObserver(healthyModel)).toBe(observer);
+            lateChange({ field: 'stale', value: 9, timestamp: 0 });
+            lateSnapshot();
+            healthy.emitChange('firstName', 'healthy');
+            window.dispatchEvent(new MessageEvent('message', {
+                data: { source: PANEL_SOURCE, kind: 'get-init' },
+            }));
+            await flush();
+            const init = received.find((message) => message.kind === 'init')!;
+            expect(init.instances).toHaveLength(1);
+            expect(init.instances[0]!.timeline.map((change) => change.field)).toEqual(['firstName']);
+            expect(received.filter((message) => message.kind === 'change')).toHaveLength(1);
+            expect(received.filter((message) => message.kind === 'snapshot')).toHaveLength(1);
+            hook.unregister(30);
+            expect(hook.getDerivedObserver(healthyModel)).toBeUndefined();
+        }
+    );
+
+    test('finishes rollback even if an acquired subscription throws during cleanup', () => {
+        dispose = installAgent(window);
+        const hook = getHook();
+        const model = {};
+        const cleanup = jest.fn(() => { throw new Error('cleanup failed'); });
+        const snapshotCleanup = jest.fn();
+        const post = jest.spyOn(window, 'postMessage').mockImplementationOnce(() => {
+            throw new Error('posting failed');
+        });
+        expect(() => hook.register({
+            ...makeFakeInstance(31),
+            subscribe: () => cleanup,
+            subscribeSnapshot: () => snapshotCleanup,
+            observeSelector: jest.fn(),
+        }, model)).toThrow('posting failed');
+        expect(cleanup).toHaveBeenCalledTimes(1);
+        expect(snapshotCleanup).toHaveBeenCalledTimes(1);
+        expect(hook.getDerivedObserver(model)).toBeUndefined();
+        post.mockClear();
+        expect(() => hook.unregister(31)).not.toThrow();
+        expect(post).not.toHaveBeenCalled();
+    });
+
     test('forwards changes and refreshed snapshots', async () => {
         const received = collectAgentMessages();
         dispose = installAgent(window);

@@ -1,4 +1,5 @@
 import { isPlainObject } from './is-plain-object';
+import { ownEnumerableKeys } from './own-enumerable-keys';
 
 /**
  * Clone a schema `default` so mutable defaults (arrays / plain objects) are
@@ -28,11 +29,11 @@ export function cloneDefault<V>(value: V, seen?: WeakMap<object, any>): V {
         return copy as unknown as V;
     }
 
-    const copy: Record<string, unknown> = {};
+    const copy: Record<PropertyKey, unknown> = Object.create(Object.getPrototypeOf(value));
     seen.set(value as object, copy);
-    for (const key of Object.keys(value as Record<string, unknown>)) {
+    for (const key of ownEnumerableKeys(value)) {
         Object.defineProperty(copy, key, {
-            value: cloneDefault((value as Record<string, unknown>)[key], seen),
+            value: cloneDefault((value as Record<PropertyKey, unknown>)[key], seen),
             enumerable: true,
             writable: true,
             configurable: true,

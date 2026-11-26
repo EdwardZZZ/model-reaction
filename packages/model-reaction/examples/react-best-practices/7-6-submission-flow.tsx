@@ -1,7 +1,9 @@
 /**
  * docs/REACT.md#submission-flow — Submission flow
  *
- * Submission and lifecycle contract: docs/REACT.md.
+ * Only the model-validation portion of submission is shown here.
+ * The application owns duplicate-submission guards, input readiness/locking,
+ * submitting state, and exceptional failure handling; see docs/REACT.md.
  */
 import * as React from 'react';
 void React;
@@ -34,7 +36,7 @@ export function SubmitButton() {
         if (!ok) return;
         await api.save(model.data);
     }
-    return <button onClick={onSubmit}>Submit</button>;
+    return <button type="button" onClick={onSubmit}>Submit</button>;
 }
 
 export { userModel };

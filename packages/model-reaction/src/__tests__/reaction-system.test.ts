@@ -876,10 +876,9 @@ describe('ReactionSystem - settled() waits for chained reactions and async actio
         const action = jest.fn();
         const errorMessage =
             'reaction.computed must return synchronously; move async work to reaction.action';
+        // @ts-expect-error exercise the runtime guard for async computed values
         const model = createModel({
             source: { type: 'number' as const },
-            // @ts-expect-error a Promise is not a number; bypass the types to
-            // exercise the runtime guard.
             target: {
                 type: 'number' as const,
                 default: 0,
@@ -1134,7 +1133,7 @@ describe('ReactionSystem - lifecycle and rejected actions', () => {
                 reaction: { fields: ['source'], computed: () => 1, action: [action] },
             },
         };
-        const model = createModel(schema);
+        const model = createModel<{ source: number; target: number }>(schema);
         await model.setField('source', 1);
         await new Promise((resolve) => setTimeout(resolve, 0));
         expect(action).not.toHaveBeenCalled();

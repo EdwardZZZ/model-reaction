@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { json, read, sha, suite, treeHash, write, files } from './lib/environment.mjs';
+import { json, read, sha, suite, treeHash, writeNew, files } from './lib/environment.mjs';
 import { agentConfig } from './lib/agent.mjs';
 import { tasks, prompt } from './lib/tasks.mjs';
 
@@ -8,7 +8,9 @@ const output = path.resolve(process.argv[2] ?? path.join(suite, 'runs/baseline-v
 const env = json(path.join(output, 'environment.json'));
 const preflight = json(path.join(output, 'preflight/result.json'));
 const calibration = json(path.join(output, 'calibration.json'));
-if (preflight.status !== 'PASS' || calibration.results.some(r => r.status !== 'PASS')) throw new Error('Calibration/preflight incomplete');
+if (preflight.status !== 'PASS' || calibration.results.length !== tasks.length ||
+    calibration.results.some(r => r.status !== 'PASS')) throw new Error('Calibration/preflight incomplete');
+if (calibration.harness_hash !== treeHash(path.join(suite, 'lib'))) throw new Error('Harness changed after calibration');
 const sourceFiles = [
   ...files(path.join(suite, 'checks')), ...files(path.join(suite, 'fixtures')),
   ...files(path.join(suite, 'references')), ...files(path.join(suite, 'lib')),
@@ -25,5 +27,5 @@ const manifest = {
   calibration, backend_model_snapshot: 'unavailable; CLI model alias is fixed, provider snapshot is not exposed',
   system_prompt: 'Codex session_meta base_instructions SHA-256 recorded per stage when exposed; server-side system prompt unavailable',
 };
-write(path.join(output, 'manifest.json'), manifest);
+writeNew(path.join(output, 'manifest.json'), manifest);
 console.log(`Frozen ${sourceFiles.length} evaluator files and 12 prompts`);
