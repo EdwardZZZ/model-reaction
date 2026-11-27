@@ -15,7 +15,7 @@
       "model-reaction": ["../model-reaction/src/index.ts"],
       "model-reaction/validation": ["../model-reaction/src/validation/index.ts"],
       "model-reaction/react": ["../model-reaction/src/react/index.ts"],
-      "model-reaction/devtools": ["../model-reaction/src/devtools.ts"]
+      "model-reaction/devtools": ["../model-reaction/src/devtools/index.ts"]
     }
   },
   "include": ["src", "build.mjs", "types"]

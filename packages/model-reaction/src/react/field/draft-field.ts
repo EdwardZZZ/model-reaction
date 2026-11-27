@@ -3,40 +3,6 @@ import { ModelEvents } from '../../types';
 import type { ModelFieldKey, ModelReturn } from '../../types';
 import { useModelFieldState, type FieldMeta } from './field-state';
 
-/**
- * Render a committed/pending value as input text (hydration path only, never
- * live keystrokes). `format` defaults to `String`; nullish and non-finite
- * numbers collapse to `''` first, so an unset field or an unparseable `NaN`
- * (e.g. "12a" via `transform: Number`) shows blank rather than "null"/"NaN".
- */
-function toDisplay<V>(value: V, format: (value: V) => string): string {
-    if (value == null) return '';
-    if (typeof value === 'number' && !Number.isFinite(value)) return '';
-    return format(value);
-}
-
-function seedDraft<T extends Record<string, any>, K extends ModelFieldKey<T>>(
-    model: ModelReturn<T>,
-    field: K,
-    committed: T[K],
-    display: (value: T[K]) => string
-): string {
-    const dirtyData = model.getDirtyData();
-    const value = Object.prototype.hasOwnProperty.call(dirtyData, field)
-        ? dirtyData[field]
-        : committed;
-    return display(value as T[K]);
-}
-
-function asWriteError(error: unknown): Error {
-    if (error instanceof Error) return error;
-    try {
-        return new Error(String(error));
-    } catch {
-        return new Error('Field write failed');
-    }
-}
-
 /** What {@link useDraftField} hands back to a controlled input. */
 export interface DraftField<V> {
     /** Text shown in the input; updates on every keystroke regardless of validity. */
@@ -69,38 +35,10 @@ export interface UseDraftFieldOptions<V> {
     format?: (value: V) => string;
 }
 
-interface DraftSession<V> {
-    committed: V;
-    pending: Set<() => void>;
-    edit: number;
-    acceptedEdit: number;
-    active: boolean;
-}
-
-interface DraftState<V> {
-    session: DraftSession<V>;
-    draft: string;
-    touched: boolean;
-    writeError: Error | null;
-}
-
 /**
- * Bind a model field to a controlled text input, owning the edit-lifecycle
- * UI state (draft text, `touched`, error gating) so the rendering component
- * stays presentational. This is the recommended form binding for text inputs;
- * use {@link useModelFieldState} directly for non-text controls.
- *
- * The draft — "the text being edited" — lives in local state, not the model:
- * under verify-then-commit an invalid or still-in-flight keystroke never reaches
- * `data`, so binding an input straight to the model makes it feel un-typeable.
- * Full rationale in docs/REACT.md.
- *
- * On mount the draft seeds from `dirtyData` (the last failed input), then the
- * committed value, so a model that outlives the input restores a not-yet-valid
- * entry across remount. Live editing never reads back from the model.
- *
- * Field-type contract (string-only; non-string needs a schema `transform`) and
- * the `format` option: see docs/REACT.md "Field-type contract".
+ * Bind a text input with local draft, touched state, and error gating.
+ * Seeds from dirty/committed data; non-string fields need a schema transform.
+ * Lifecycle and formatting contracts: docs/REACT.md.
  */
 export function useDraftField<
     T extends Record<string, any>,
@@ -210,4 +148,48 @@ export function useDraftField<
     const showError = Boolean(touched && (writeError || meta.errors.length > 0));
 
     return { draft, setDraft: edit, meta, writeError, touched, onBlur, showError, committed };
+}
+
+interface DraftSession<V> {
+    committed: V;
+    pending: Set<() => void>;
+    edit: number;
+    acceptedEdit: number;
+    active: boolean;
+}
+
+interface DraftState<V> {
+    session: DraftSession<V>;
+    draft: string;
+    touched: boolean;
+    writeError: Error | null;
+}
+
+/** Format reseeded values; live edits keep their original text. See docs/REACT.md. */
+function toDisplay<V>(value: V, format: (value: V) => string): string {
+    if (value == null) return '';
+    if (typeof value === 'number' && !Number.isFinite(value)) return '';
+    return format(value);
+}
+
+function seedDraft<T extends Record<string, any>, K extends ModelFieldKey<T>>(
+    model: ModelReturn<T>,
+    field: K,
+    committed: T[K],
+    display: (value: T[K]) => string
+): string {
+    const dirtyData = model.getDirtyData();
+    const value = Object.prototype.hasOwnProperty.call(dirtyData, field)
+        ? dirtyData[field]
+        : committed;
+    return display(value as T[K]);
+}
+
+function asWriteError(error: unknown): Error {
+    if (error instanceof Error) return error;
+    try {
+        return new Error(String(error));
+    } catch {
+        return new Error('Field write failed');
+    }
 }

@@ -12,10 +12,7 @@ import {
     type FieldSetter,
 } from './field/field-state';
 
-/**
- * Internal context. Stored as `unknown` because a single Provider may host
- * any model shape; consumers narrow via `useModel<T>()`.
- */
+/** Shared context accepts any model shape; consumers select their type with useModel<T>(). */
 const ModelContext = createContext<ModelReturn<any> | null>(null);
 
 /** Props for `<ModelProvider>`. */

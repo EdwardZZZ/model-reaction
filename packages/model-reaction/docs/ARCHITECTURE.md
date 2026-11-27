@@ -7,6 +7,34 @@ behavior is specified by [API.md](API.md), [REACT.md](REACT.md), and the READMEs
 
 ## Module map
 
+```text
+src/
+├── index.ts                 # Core factory and public exports
+├── types.ts                 # Public contracts and private type helpers
+├── core/
+│   ├── model-manager.ts     # State ownership and the write pipeline
+│   ├── write-preparation.ts
+│   ├── event-emitter.ts
+│   ├── pending-tasks.ts
+│   └── value/               # clone-default, deep-equal, object helpers
+├── reaction/                # Dependency graph, scheduling, action execution
+├── validation/              # Optional index.ts plus rules and field validation
+├── react/
+│   ├── index.ts             # React public exports
+│   ├── context.ts
+│   ├── selectors.ts
+│   └── field/               # Committed field state and input drafts
+├── devtools/
+│   ├── index.ts             # Optional model factory and registration
+│   └── selector-observer.ts # Private selector observation capability
+└── __tests__/               # Behavior, integration, and type contracts
+```
+
+Optional package entries use their directory's `index.ts`; internal directories
+have no forwarding barrels. Keep public APIs before private implementation in
+each module. Single-owner helpers stay local; shared helpers have a concrete
+domain such as value inspection.
+
 ```mermaid
 flowchart LR
     Consumer[Consumer] --> Entry[src/index.ts]
@@ -19,7 +47,7 @@ flowchart LR
     Actions --> Tasks
     ReactEntry[model-reaction/react] --> ReactAdapter[react/*]
     ReactAdapter --> PublicModel[ModelReturn / ModelEvents]
-    DevEntry[model-reaction/devtools] --> DevAdapter[devtools.ts]
+    DevEntry[model-reaction/devtools] --> DevAdapter[devtools/index.ts]
     DevAdapter --> Entry
     DevAdapter --> Graph
 ```
@@ -31,25 +59,24 @@ flowchart LR
 | `src/validation/` | Field validation, rule builders, and error formatting | Core calls `validate-field.ts`; rules and formatting have a separate entry |
 | `src/reaction/` | Dependency indexing, scheduling, computed writeback, and action lifecycle | Uses `ReactionSystem` callbacks to access the model; owns no model data |
 | `src/react/` | Provider, field bindings, draft state, and selector hooks | Reads the public model surface; ships through `model-reaction/react` |
-| `src/devtools.ts` | Optional hook and model-inspection adapter | Exports only `createModel`; reads through the public model API and shares dependency parsing |
+| `src/devtools/index.ts` | Optional hook and model-inspection adapter | Exports only `createModel`; reads through the public model API and shares dependency parsing |
 | `src/react/selectors.ts` | Selector Hooks, snapshot caching, and committed derived-value reporting | Only committed values seed equality; the extension owns observations; no additional model subscriptions |
-| `src/devtools-observer.ts` | Stable shallow snapshots, synchronous top-level read collection, and private observation types | Opt-in adapter only; React imports types only; no package exports |
+| `src/devtools/selector-observer.ts` | Stable shallow snapshots, synchronous top-level read collection, and private observation types | Opt-in adapter only; React imports types only; no package exports |
 | `src/__tests__/` | Core behavior, React adapter, and integration tests | Integration tests also protect README examples |
 
 `core/write-preparation.ts` owns the prepared-write type and stateless preparation
 helpers; none are added to package exports. Default cloning and structural
-comparison stay in separate files under `core/value/` and share the internal
-`core/value/is-plain-object.ts` predicate for objects whose prototype is
-`Object.prototype` or `null`.
+comparison stay in separate files under `core/value/`. Both use `object.ts`
+for plain-object detection and own enumerable string/Symbol keys.
 `validation/index.ts` exports rule builders and implements the small error
 formatter. React and DevTools remain separate package entry points.
 Single-field bindings live in `react/field/`: `field-state.ts` subscribes to
 committed values and validation results, and tracks pending writes in React
 state. `draft-field.ts` handles draft input.
-`devtools.ts` keeps its hook types and helpers private. Tests observe registered
+`devtools/index.ts` keeps its hook types and helpers private. Tests observe registered
 instances through a capturing global hook instead of importing internal helpers.
 Selector cache and reporting helpers remain private within `react/selectors.ts`;
-`devtools-observer.ts` keeps collection and its shared type contract together.
+`devtools/selector-observer.ts` keeps collection and its shared type contract together.
 
 `types.ts` groups schema/inference, errors/events, and instance APIs. Field tag
 values share one map; inferred reads also include defaults and computed results.
@@ -62,6 +89,26 @@ that same contract against built declarations through Bundler and NodeNext
 ESM/CommonJS consumers in a temporary directory, then removes the directory.
 `tsconfig.build.json` excludes the whole test directory, including helpers;
 the default typecheck project still checks all source and tests.
+
+## Value handling
+
+`core/value/object.ts` recognizes `Object.prototype` and `null` as plain-object
+prototypes and enumerates own enumerable string/Symbol keys without reading
+their values. Cloning and equality share these rules.
+
+| Value | Default cloning | Equality |
+| --- | --- | --- |
+| Primitives | Return unchanged | `===`: `NaN` differs from itself, signed zeros match |
+| Arrays | Recursively clone elements | Compare length and elements |
+| Plain objects | Recursively clone enumerable own values, preserving the prototype | Compare enumerable own keys/values; prototype differences are ignored |
+| Date / RegExp | Keep the original reference | Compare timestamp or source/flags |
+| Map / Set / class instances | Keep the original reference | Reference identity |
+
+`cloneDefault` uses one WeakMap to preserve shared references and cycles within
+each cloned default. `deepEqual` tracks only the current comparison path in a
+WeakSet; it removes nodes on return so sibling branches sharing a value are
+still compared structurally. Encountering a cycle falls back to reference
+identity instead of comparing distinct cyclic graphs structurally.
 
 ## Write path
 
@@ -109,6 +156,9 @@ definition from fixed schema without a job or definition cache. A trigger pass
 uses `firstSourceByOwner: Map<owner, first triggering source>`, preserving changed-field traversal
 and first owner appearance order and appending only the actual source to the
 reaction stack.
+
+`eachReactionEdge` visits every declared dependency → computed-field edge,
+including duplicates. Runtime indexing and DevTools choose their own grouping.
 
 Index deduplication does not alter `reaction.fields`; computation reads the
 original array, including repeated reads. `initializingFields` retains owners
@@ -207,7 +257,9 @@ side-effect writeback cycles.
 3. `react` consumes `ModelReturn` and model events; it does not import `core/` or `reaction/` implementations.
 4. `devtools` reads through the public model surface. Shared `eachReactionEdge` keeps dependency graph interpretation consistent.
 5. `types.ts` describes public contracts. Internal options and intermediate types stay in their owning modules and are not re-exported from the package entry.
-6. `eslint.config.mjs` enforces the main reverse-dependency boundaries; DevTools' dependency on the shared reaction graph is intentional.
+6. `eslint.config.mjs` enforces these boundaries at nested directory depths.
+   React may import DevTools observation types, but not its runtime.
+   DevTools' dependency on the shared reaction graph is intentional.
 
 ## Where to start
 
@@ -220,7 +272,7 @@ side-effect writeback cycles.
 | Action eligibility and execution | `reaction/reaction-system.ts`, `reaction/action-executor.ts` |
 | React field state and subscriptions | `react/field/field-state.ts`, `react/field/draft-field.ts`, `react/selectors.ts` |
 | Application field UI state | [React UI recipe](REACT.md#field-ui-state) |
-| DevTools hook, graph, and snapshots | `devtools.ts` |
+| DevTools hook, graph, and snapshots | `devtools/index.ts`, `devtools/selector-observer.ts` |
 
 For public contract changes, check `src/index.ts`, both READMEs, and integration
 tests. For dependency graph changes, check both Reaction and DevTools consumers of

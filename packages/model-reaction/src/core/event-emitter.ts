@@ -22,22 +22,21 @@ export class EventEmitter<
     }
 
     emit<E extends keyof Events>(event: E, data: Events[E]): void {
-        if (this.events[event]) {
-            // Snapshot listeners so on/off during dispatch don't affect this iteration
-            const listeners = this.events[event].slice();
-            listeners.forEach((callback) => {
-                try {
-                    callback(data);
-                } catch (err) {
-                    /* eslint-disable no-console */
-                    console.error(
-                        `[EventEmitter] listener for event "${String(event)}" threw`,
-                        err
-                    );
-                    /* eslint-enable no-console */
-                }
-            });
-        }
+        // Snapshot listeners so on/off during dispatch don't affect this iteration.
+        const listeners = this.events[event]?.slice();
+        if (!listeners) return;
+        listeners.forEach((callback) => {
+            try {
+                callback(data);
+            } catch (err) {
+                /* eslint-disable no-console */
+                console.error(
+                    `[EventEmitter] listener for event "${String(event)}" threw`,
+                    err
+                );
+                /* eslint-enable no-console */
+            }
+        });
     }
 
     clear(): void {

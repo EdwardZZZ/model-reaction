@@ -28,11 +28,19 @@ export default tseslint.config(
   {
     files: ['src/react/**/*.{ts,tsx}'],
     rules: {
-      'no-restricted-imports': ['error', {
-        patterns: [{
-          regex: '^(?:\\.\\./)+(?:core(?:/|$)|reaction(?:/|$)|devtools(?:\\.ts)?$)',
-          message: 'React adapters must depend on the public model contract, not internal runtime modules.',
-        }],
+      'no-restricted-imports': 'off',
+      '@typescript-eslint/no-restricted-imports': ['error', {
+        patterns: [
+          {
+            regex: '^(?:\\.\\./)+(?:core|reaction)(?:/|$)',
+            message: 'React adapters must depend on the public model contract, not internal runtime modules.',
+          },
+          {
+            regex: '^(?:\\.\\./)+devtools(?:/|\\.ts$|$)',
+            allowTypeImports: true,
+            message: 'React may share DevTools types but must not import its runtime.',
+          },
+        ],
       }],
     },
   },
@@ -41,7 +49,7 @@ export default tseslint.config(
     rules: {
       'no-restricted-imports': ['error', {
         patterns: [{
-          regex: '^(?:\\.\\./)+(?:react(?:/|$)|devtools(?:\\.ts)?$)',
+          regex: '^(?:\\.\\./)+(?:react|devtools)(?:/|\\.ts$|$)',
           message: 'Core runtime modules must not depend on UI adapters or DevTools.',
         }],
       }],
@@ -52,7 +60,7 @@ export default tseslint.config(
     rules: {
       'no-restricted-imports': ['error', {
         patterns: [{
-          group: ['../core/**', '../reaction/**', '../react/**', '../devtools', '../devtools.ts'],
+          regex: '^(?:\\.\\./)+(?:core|reaction|react|devtools)(?:/|\\.ts$|$)',
           message: 'Validation helpers must remain independent of model runtime and adapters.',
         }],
       }],
@@ -63,18 +71,18 @@ export default tseslint.config(
     rules: {
       'no-restricted-imports': ['error', {
         patterns: [{
-          group: ['../react/**', '../devtools', '../devtools.ts', '../core/model-manager'],
+          regex: '^(?:\\.\\./)+(?:(?:react|devtools)(?:/|\\.ts$|$)|core/model-manager(?:\\.ts)?$)',
           message: 'Reaction scheduling must not depend on UI, DevTools, or the ModelManager implementation.',
         }],
       }],
     },
   },
   {
-    files: ['src/devtools.ts'],
+    files: ['src/devtools/**/*.{ts,tsx}'],
     rules: {
       'no-restricted-imports': ['error', {
         patterns: [{
-          group: ['./core/**', './react/**'],
+          regex: '^(?:\\.\\./)+(?:core|react)(?:/|$)',
           message: 'DevTools must observe models through the public API, not core or React internals.',
         }],
       }],

@@ -1,24 +1,6 @@
 import type { Model, Reaction } from '../types';
 
-/**
- * The single definition of how a schema's `reaction` declarations are read as
- * dependency edges.
- *
- * Both the runtime reaction index ({@link ReactionSystem.collectReactions}) and
- * the DevTools field / graph derivation consume this, so the
- * "`reaction.fields` → edge" reading lives in exactly one place and cannot
- * drift between them.
- *
- * For every reaction on every field, `visit` is invoked once per declared
- * dependency. Direction is data-flow: `dependencyField` feeds `computedField`
- * (when `dependencyField` changes, the reaction that produces `computedField`
- * re-runs).
- *
- * Raw and undeduped: a repeated dependency yields that edge twice.
- * Consumers that want unique edges dedupe
- * themselves (e.g. via a `Set`) — this keeps the primitive faithful to the
- * schema and lets each consumer choose its own grouping.
- */
+/** Visit declared dependency → computed edges without deduplication; see docs/ARCHITECTURE.md. */
 export function eachReactionEdge(
     schema: Model,
     visit: (computedField: string, dependencyField: string, reaction: Reaction) => void

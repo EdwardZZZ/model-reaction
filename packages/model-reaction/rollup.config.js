@@ -79,7 +79,7 @@ export default [
   },
   // DevTools-enabled entry (opt-in via `model-reaction/devtools`).
   {
-    input: 'src/devtools.ts',
+    input: 'src/devtools/index.ts',
     output: [
       { file: 'dist/devtools.mjs', format: 'esm', sourcemap: true },
       { file: 'dist/devtools.cjs.js', format: 'cjs', sourcemap: true },

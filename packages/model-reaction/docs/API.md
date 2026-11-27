@@ -18,7 +18,7 @@ Reference for the public `model-reaction` API surface.
 - [Validation Rules](#validation-rules)
 - [Error Formatting](#error-formatting)
 - [Type Definitions](#type-definitions)
-- [Migrating to 2.0.0](#migrating-to-200)
+- [Migrating to 2.0.*](#migrating-to-20)
 
 ---
 
@@ -611,9 +611,10 @@ The core entry exports `createModel`, `ModelEvents`, and `SKIP_REACTION`.
 
 For full type definitions, see [`src/types.ts`](../src/types.ts).
 
-## Migrating to 2.0.0
+## Migrating to 2.0.*
 
-These changes are breaking and require updating consumers:
+This guide consolidates the breaking changes in the 2.0 series. When upgrading,
+apply the changes relevant to the version and APIs you currently use:
 
 - Inferred object/array reads now include computed result shapes. Narrow the
   union before using shape-specific members. Fragments annotated with a broad

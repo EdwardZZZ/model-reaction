@@ -7,6 +7,33 @@
 
 ## 模块地图
 
+```text
+src/
+├── index.ts                 # 核心工厂与公开导出
+├── types.ts                 # 公开契约与私有类型辅助
+├── core/
+│   ├── model-manager.ts     # 状态所有权与写入流程
+│   ├── write-preparation.ts
+│   ├── event-emitter.ts
+│   ├── pending-tasks.ts
+│   └── value/               # 默认值克隆、结构判等、对象属性工具
+├── reaction/                # 依赖图、调度、action 执行
+├── validation/              # 可选 index.ts 入口、规则与字段校验
+├── react/
+│   ├── index.ts             # React 公开导出
+│   ├── context.ts
+│   ├── selectors.ts
+│   └── field/               # 已提交字段状态与输入草稿
+├── devtools/
+│   ├── index.ts             # 可选模型工厂与注册
+│   └── selector-observer.ts # 私有 selector 观测能力
+└── __tests__/               # 行为、集成与类型契约
+```
+
+可选包入口统一使用所属目录的 `index.ts`；内部目录不增加转发入口。
+模块内先放公开接口，再放私有实现。仅供单个模块使用的辅助函数留在本地，
+共享工具按值检查等具体职责组织。
+
 ```mermaid
 flowchart LR
     Consumer[调用方] --> Entry[src/index.ts]
@@ -19,7 +46,7 @@ flowchart LR
     Actions --> Tasks
     ReactEntry[model-reaction/react] --> ReactAdapter[react/*]
     ReactAdapter --> PublicModel[ModelReturn / ModelEvents]
-    DevEntry[model-reaction/devtools] --> DevAdapter[devtools.ts]
+    DevEntry[model-reaction/devtools] --> DevAdapter[devtools/index.ts]
     DevAdapter --> Entry
     DevAdapter --> Graph
 ```
@@ -31,23 +58,22 @@ flowchart LR
 | `src/validation/` | 单字段校验、规则构造、错误格式化 | `validate-field.ts` 供 core 调用；规则和格式化器由独立入口导出 |
 | `src/reaction/` | 依赖索引、反应调度、计算写回和 action 生命周期 | 通过 `ReactionSystem` 回调读写模型，不持有模型数据 |
 | `src/react/` | Provider、字段绑定、draft 和 selector Hooks | 读取公开模型接口；通过独立 `model-reaction/react` 入口发布 |
-| `src/devtools.ts` | 可选 hook 和模型观测适配 | 只导出 `createModel`；通过公开模型接口读取状态，使用共享依赖解析器保持图语义一致 |
+| `src/devtools/index.ts` | 可选 hook 和模型观测适配 | 只导出 `createModel`；通过公开模型接口读取状态，使用共享依赖解析器保持图语义一致 |
 | `src/react/selectors.ts` | selector Hooks、快照缓存与已提交派生值上报 | 只有已提交值可作为 equality 基准；扩展管理观测记录，不增加模型订阅 |
-| `src/devtools-observer.ts` | 稳定浅层快照、同步顶层读取采集与私有观测类型 | 仅用于可选适配层；React 仅导入类型，不加入包的公开导出 |
+| `src/devtools/selector-observer.ts` | 稳定浅层快照、同步顶层读取采集与私有观测类型 | 仅用于可选适配层；React 仅导入类型，不加入包的公开导出 |
 | `src/__tests__/` | 按核心行为、React 适配和集成场景组织测试 | 集成测试同时约束 README 示例契约 |
 
 `core/write-preparation.ts` 保存待写入字段类型和无状态准备函数，
 都不加入包的公开导出。默认值克隆和结构比较分别保留独立文件，归入 `core/value/`。
-两者共用内部的 `core/value/is-plain-object.ts`，将原型为 `Object.prototype` 或 `null`
-的对象识别为普通对象。
+两者共用 `object.ts` 中的普通对象判断与自有可枚举字符串/Symbol 键枚举。
 `validation/index.ts` 导出规则构造器，并直接实现小型错误格式化函数。
 React 和 DevTools 也各自保持独立的发布入口。
 单字段绑定放在 `react/field/`：`field-state.ts` 订阅已提交的值和校验结果，
 并用 React state 追踪尚未结束的写入。`draft-field.ts` 负责输入草稿。
-`devtools.ts` 的 hook 类型和辅助函数保持私有。测试通过全局 hook 捕获注册实例，
+`devtools/index.ts` 的 hook 类型和辅助函数保持私有。测试通过全局 hook 捕获注册实例，
 不直接导入内部辅助函数。
 selector 缓存及上报辅助函数作为 `react/selectors.ts` 的私有实现；
-`devtools-observer.ts` 统一保存依赖采集及其共享类型契约。
+`devtools/selector-observer.ts` 统一保存依赖采集及其共享类型契约。
 
 `types.ts` 按 Schema/推导、错误/事件和实例 API 分区。字段标签共用一个值类型映射，
 推导读值还包含默认值与 computed 结果；适配层共用 `ValidationErrors` 和
@@ -60,6 +86,23 @@ selector 缓存及上报辅助函数作为 `react/selectors.ts` 的私有实现�
 声明文件，结束后清理目录。
 `tsconfig.build.json` 排除整个测试目录，包括辅助文件；
 默认类型检查项目仍检查全部源码和测试。
+
+## 值处理
+
+`core/value/object.ts` 将原型为 `Object.prototype` 或 `null` 的对象识别为普通对象，
+枚举其自有可枚举字符串/Symbol 键时不读取属性值。克隆与判等共用这些规则。
+
+| 值 | 默认值克隆 | 判等 |
+| --- | --- | --- |
+| 基本类型 | 原样返回 | 使用 `===`：`NaN` 与自身不同，正负零相同 |
+| 数组 | 递归克隆元素 | 比较长度与元素 |
+| 普通对象 | 递归克隆自有可枚举属性值，保留原型 | 比较自有可枚举键和值，不比较原型 |
+| Date / RegExp | 保留原引用 | 比较时间戳或 source/flags |
+| Map / Set / 类实例 | 保留原引用 | 比较引用 |
+
+`cloneDefault` 用一个 WeakMap 保留单个默认值内部的共享引用与循环关系。
+`deepEqual` 的 WeakSet 只记录当前比较路径，返回时移除节点，保证兄弟分支中
+共享的值仍按结构比较。遇到循环时退回引用判等，不对不同的循环对象图做结构匹配。
 
 ## 写入调用链
 
@@ -98,6 +141,9 @@ setFields ┘     ├─ prepareFieldWrites：先解析整批 schema，再各执
 `dependentsByField: Map<依赖字段, Set<宿主字段>>`；执行时从固定 Schema 读取宿主定义，不另存 job
 或 reaction 定义缓存。单次 pass 使用 `firstSourceByOwner: Map<宿主字段, 首次触发来源>`，保持
 变更字段遍历顺序与宿主首次出现顺序，并只将真实来源追加到 reaction stack。
+
+`eachReactionEdge` 按声明逐条遍历“依赖字段 → 计算字段”的边，保留重复项；
+运行时索引和 DevTools 各自选择归组方式。
 
 索引去重不改变 `reaction.fields` 声明；计算仍按原数组读取依赖，包括重复读取。
 `initializingFields` 保留尚未完成初始化的宿主，普通重调度不会丢失标记。
@@ -174,7 +220,8 @@ action 计数覆盖唯一待执行函数及已启动调用。reaction 不等待 
 3. `react` 通过 `ModelReturn` 和事件订阅模型；不导入 `core/` 或 `reaction/` 实现。
 4. `devtools` 通过公开模型表面读取数据；共享 `eachReactionEdge` 仅用于保持依赖图解释一致。
 5. `types.ts` 描述公开契约；内部选项与中间态类型放在相应目录，不从包入口重导出。
-6. `eslint.config.mjs` 对主要的反向依赖做静态限制；DevTools 到共享 reaction graph 的依赖是明确允许的边界。
+6. `eslint.config.mjs` 在嵌套目录中同样约束依赖边界。React 可以导入 DevTools
+   观测类型，但不能导入其运行时代码；DevTools 到共享 reaction graph 的依赖是明确允许的边界。
 
 ## 按改动定位
 
@@ -187,7 +234,7 @@ action 计数覆盖唯一待执行函数及已启动调用。reaction 不等待 
 | action 资格和执行 | `reaction/reaction-system.ts`、`reaction/action-executor.ts` |
 | React 字段状态与订阅 | `react/field/field-state.ts`、`react/field/draft-field.ts`、`react/selectors.ts` |
 | 应用侧字段 UI 状态 | [React UI 示例](REACT_CN.md#字段-ui-状态) |
-| DevTools hook、字段图和快照 | `devtools.ts` |
+| DevTools hook、字段图和快照 | `devtools/index.ts`、`devtools/selector-observer.ts` |
 
 改动公开契约时同步检查 `src/index.ts`、两个 README 和集成测试；改动依赖图解释时，
 同时检查 Reaction 与 DevTools 对 `eachReactionEdge` 的使用。

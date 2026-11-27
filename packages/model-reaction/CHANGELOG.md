@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.1] - 2026-11-28
+
+For the API and TypeScript changes across the 2.0 series, see the unified
+[2.0.* migration guide](docs/API.md#migrating-to-20).
+
 ### Fixed
 
 - Plain-object defaults preserve enumerable own Symbol properties and null
@@ -36,6 +41,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Use [field UI state](docs/REACT.md#field-ui-state) to migrate existing extensions.
 
 ### Internal
+- Group DevTools registration and selector observation under `src/devtools/`,
+  consolidate value inspection helpers, and put public APIs before private
+  implementation. Package imports and runtime behavior remain unchanged.
 - Track each write through its enclosing batch or scheduled reaction, and
   share the same field validation and commit pipeline.
 

@@ -19,19 +19,11 @@ import { PendingTasks } from './pending-tasks';
 import {
     createValidationSnapshot,
     prepareFieldWrites,
+    type PreparedFieldWrite,
 } from './write-preparation';
-import type { PreparedFieldWrite } from './write-preparation';
 import { ReactionSystem, type ReactionWriteContext } from '../reaction/reaction-system';
 
-/**
- * Core class behind `createModel(...)`.
- *
- * Owns:
- *   - the data store (`data`) and dirty buffer (`dirtyData`)
- *   - per-field async validation request IDs (race guard)
- *   - in-flight validation counter (drives `settled()`)
- *   - lifecycle (`dispose`, `disposed` guard)
- */
+/** Owns model state, validation freshness, and lifecycle; see docs/ARCHITECTURE.md. */
 export class ModelManager<
     T extends Record<string, any> = Record<string, any>,
 > implements ModelReturn<T> {
@@ -79,9 +71,7 @@ export class ModelManager<
         this.initializeDefaults();
     }
 
-    // -------------------------------------------------------------------------
     // Public read API
-    // -------------------------------------------------------------------------
 
     get data(): Readonly<T> {
         if (this.dataSnapshot === null) {
@@ -108,16 +98,7 @@ export class ModelManager<
         return this.dirtyDataSnapshot;
     };
 
-    // -------------------------------------------------------------------------
     // Public mutation API
-    // -------------------------------------------------------------------------
-
-    /**
-     * Direct writes follow one pipeline: prepare every input, validate against
-     * a shared candidate snapshot, commit each valid field, then trigger one
-     * reaction pass for the fields that actually changed. A batch is not atomic:
-     * one field can commit even when a sibling fails validation.
-     */
 
     setField = async <K extends ModelFieldKey<T>>(
         field: K,
@@ -166,9 +147,7 @@ export class ModelManager<
         }
     };
 
-    // -------------------------------------------------------------------------
     // Public subscriptions
-    // -------------------------------------------------------------------------
 
     on = <E extends keyof ModelEventMap<T>>(
         event: E,
@@ -197,9 +176,7 @@ export class ModelManager<
         });
     };
 
-    // -------------------------------------------------------------------------
     // Settled / dispose
-    // -------------------------------------------------------------------------
 
     settled = (): Promise<void> => {
         return this.pendingTasks.settled();
@@ -222,9 +199,7 @@ export class ModelManager<
         this.dirtyDataSnapshot = null;
     };
 
-    // -------------------------------------------------------------------------
     // Internal initialization
-    // -------------------------------------------------------------------------
 
     /** Seed defaults and bootstrap derived values; see docs/API.md. */
     private initializeDefaults(): void {
@@ -232,10 +207,8 @@ export class ModelManager<
         Object.entries(this.schema).forEach(([field, schema]) => {
             // Own undefined values keep prototype-named fields safe in snapshots.
             this.modelData[field as keyof T] = cloneDefault(schema.default) as T[keyof T];
-            if (schema.default !== undefined) {
-                if (schema.reaction === undefined) {
-                    seededInputs.push(field);
-                }
+            if (schema.default !== undefined && schema.reaction === undefined) {
+                seededInputs.push(field);
             }
         });
 
@@ -244,9 +217,7 @@ export class ModelManager<
         }
     }
 
-    // -------------------------------------------------------------------------
     // Internal write pipeline
-    // -------------------------------------------------------------------------
 
     /** Track the whole batch, including reactions from partial commits on rejection. */
     private async runBatch(
@@ -363,9 +334,7 @@ export class ModelManager<
         return dataChanged;
     }
 
-    // -------------------------------------------------------------------------
     // Internal helpers
-    // -------------------------------------------------------------------------
 
     /** Store an error before its owner emits the corresponding typed event. */
     private recordError(field: string, error: ValidationError): void {

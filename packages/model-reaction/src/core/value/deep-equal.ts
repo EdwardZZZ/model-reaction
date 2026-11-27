@@ -1,24 +1,6 @@
-import { isPlainObject } from './is-plain-object';
-import { ownEnumerableKeys } from './own-enumerable-keys';
+import { isPlainObject, ownEnumerableKeys } from './object';
 
-/**
- * Deep structural equality check.
- *
- * Handles:
- *   - primitives (===)
- *   - Date / RegExp
- *   - Arrays
- *   - Plain objects
- *   - Other objects by reference identity
- *   - Cyclic references (via WeakSet so infinite recursion is avoided)
- *
- * The `seen` set tracks only the nodes on the *current* comparison path:
- * each node is added before descending into its children and removed on the
- * way back up. This means a value shared by sibling branches (a DAG, e.g.
- * `{ x: shared, y: shared }`) is compared structurally each time, while a
- * true cycle (a node reachable from itself) short-circuits to reference
- * identity to stop the recursion.
- */
+/** Structural comparison with path-local cycle guards; see docs/ARCHITECTURE.md#value-handling. */
 export function deepEqual(
     a: unknown,
     b: unknown,

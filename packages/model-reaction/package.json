@@ -1,6 +1,6 @@
 {
   "name": "model-reaction",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "main": "dist/index.cjs.js",
   "module": "dist/index.mjs",
   "types": "dist/types/index.d.ts",
@@ -23,7 +23,7 @@
       "require": "./dist/react.cjs.js"
     },
     "./devtools": {
-      "types": "./dist/types/devtools.d.ts",
+      "types": "./dist/types/devtools/index.d.ts",
       "import": "./dist/devtools.mjs",
       "require": "./dist/devtools.cjs.js"
     }

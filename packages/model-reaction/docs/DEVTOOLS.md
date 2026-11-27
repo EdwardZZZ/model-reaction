@@ -96,7 +96,7 @@ panel           (React UI: data tree · dependency graph with derived values · 
 ```
 
 The opt-in wrapper and its internal hook contract live in
-[src/devtools.ts](../src/devtools.ts), which exports only `createModel`. The extension
+[src/devtools/index.ts](../src/devtools/index.ts), which exports only `createModel`. The extension
 lives under [packages/devtools](../../devtools). The package root
 (`model-reaction`) imports none of the integration code.
 
@@ -223,9 +223,9 @@ model only through its public API (`data` / `getDirtyData()` /
 `validationErrors` / `on`) plus the schema it was handed — it needs no
 privileged access to `ModelManager` internals.
 
-The registration contract lives in [src/devtools.ts](../src/devtools.ts);
+The registration contract lives in [src/devtools/index.ts](../src/devtools/index.ts);
 React reporting lives in [src/react/selectors.ts](../src/react/selectors.ts);
-collection and its private types live in [src/devtools-observer.ts](../src/devtools-observer.ts):
+collection and its private types live in [src/devtools/selector-observer.ts](../src/devtools/selector-observer.ts):
 
 ```ts
 interface ModelReactionDevtoolsHook {

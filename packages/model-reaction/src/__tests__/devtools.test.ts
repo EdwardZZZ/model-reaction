@@ -1,5 +1,5 @@
 /**
- * Tests for the `model-reaction/devtools` wrapper entry (`src/devtools.ts`):
+ * Tests for the `model-reaction/devtools` wrapper entry (`src/devtools/index.ts`):
  * registration through the global hook, snapshots via the public API, and the
  * zero-touch pass-through when no DevTools front-end is present.
  */

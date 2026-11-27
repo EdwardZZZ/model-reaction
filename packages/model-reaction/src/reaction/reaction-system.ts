@@ -36,35 +36,19 @@ interface ScheduledReaction {
     endTask: () => void;
 }
 
-function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
-    return (
-        value !== null &&
-        (typeof value === 'object' || typeof value === 'function') &&
-        typeof (value as PromiseLike<unknown>).then === 'function'
-    );
-}
-
 export class ReactionSystem {
-    private dependentsByField = new Map<string, Set<string>>();
-    private initializingFields = new Set<string>();
-    private reactionTimeouts = new Map<string, ScheduledReaction>();
-    private schema: Model;
-    private options: ModelOptions;
-    private callbacks: ReactionCallbacks;
-    private pendingTasks: PendingTasks;
-    private actionExecutor: ActionExecutor;
+    private readonly dependentsByField = new Map<string, Set<string>>();
+    private readonly initializingFields = new Set<string>();
+    private readonly reactionTimeouts = new Map<string, ScheduledReaction>();
+    private readonly actionExecutor: ActionExecutor;
     private disposed = false;
 
     constructor(
-        schema: Model,
-        options: ModelOptions,
-        callbacks: ReactionCallbacks,
-        pendingTasks: PendingTasks
+        private readonly schema: Model,
+        private readonly options: ModelOptions,
+        private readonly callbacks: ReactionCallbacks,
+        private readonly pendingTasks: PendingTasks
     ) {
-        this.schema = schema;
-        this.options = options;
-        this.callbacks = callbacks;
-        this.pendingTasks = pendingTasks;
         this.actionExecutor = new ActionExecutor(
             pendingTasks,
             callbacks.getValue,
@@ -73,19 +57,7 @@ export class ReactionSystem {
         this.collectReactions();
     }
 
-    private collectReactions(): void {
-        // Shared dependency parsing with DevTools; see docs/ARCHITECTURE.md.
-        eachReactionEdge(this.schema, (field, depField) => {
-            let dependents = this.dependentsByField.get(depField);
-            if (!dependents) {
-                dependents = new Set<string>();
-                this.dependentsByField.set(depField, dependents);
-            }
-            dependents.add(field);
-        });
-    }
-
-    public triggerReactionsForFields(
+    triggerReactionsForFields(
         changedFields: string[],
         reactionStack: string[] = [],
         initializeReactions = false
@@ -115,6 +87,32 @@ export class ReactionSystem {
 
             if (initializeReactions) this.initializingFields.add(field);
             this.scheduleReaction(field, debounceTime, [...reactionStack, changedField]);
+        });
+    }
+
+    dispose(): void {
+        if (this.disposed) return;
+        this.disposed = true;
+        this.actionExecutor.dispose();
+        this.reactionTimeouts.forEach(({ timeoutId, endTask }) => {
+            clearTimeout(timeoutId);
+            endTask();
+        });
+        this.reactionTimeouts.clear();
+        this.dependentsByField.clear();
+        this.initializingFields.clear();
+        // The shared PendingTasks is owned and disposed by ModelManager.
+    }
+
+    private collectReactions(): void {
+        // Shared dependency parsing with DevTools; see docs/ARCHITECTURE.md.
+        eachReactionEdge(this.schema, (field, depField) => {
+            let dependents = this.dependentsByField.get(depField);
+            if (!dependents) {
+                dependents = new Set<string>();
+                this.dependentsByField.set(depField, dependents);
+            }
+            dependents.add(field);
         });
     }
 
@@ -215,17 +213,12 @@ export class ReactionSystem {
         this.callbacks.reportError(ModelEvents.REACTION_ERROR, modelError);
     }
 
-    public dispose(): void {
-        if (this.disposed) return;
-        this.disposed = true;
-        this.actionExecutor.dispose();
-        this.reactionTimeouts.forEach(({ timeoutId, endTask }) => {
-            clearTimeout(timeoutId);
-            endTask();
-        });
-        this.reactionTimeouts.clear();
-        this.dependentsByField.clear();
-        this.initializingFields.clear();
-        // The shared PendingTasks is owned and disposed by ModelManager.
-    }
+}
+
+function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
+    return (
+        value !== null &&
+        (typeof value === 'object' || typeof value === 'function') &&
+        typeof (value as PromiseLike<unknown>).then === 'function'
+    );
 }

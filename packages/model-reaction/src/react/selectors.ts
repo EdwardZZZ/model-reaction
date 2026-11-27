@@ -7,28 +7,7 @@ import {
 } from 'react';
 import { ModelEvents } from '../types';
 import type { ModelFieldKey, ModelReturn } from '../types';
-import type { ObservedSelection, SelectorObserver } from '../devtools-observer';
-
-interface SelectionSource<T extends Record<string, any>, R> {
-    getSnapshot(): R;
-    select(data: Readonly<T>): R;
-    fields?: readonly string[] | undefined;
-    latest?: { data: Readonly<T>; selection: ObservedSelection<R> };
-    failure?: { data: Readonly<T>; error: unknown };
-    onEvaluate?: (selection: ObservedSelection<R>) => void;
-}
-
-interface DerivedSelection {
-    kind: 'useModelSelector' | 'useModelComputed';
-    value: unknown;
-    debugName?: string;
-    fields?: string[];
-}
-
-interface DevtoolsHook {
-    updateDerived?(model: object, token: object, selection: DerivedSelection | null): void;
-    getDerivedObserver?(model: object): SelectorObserver | undefined;
-}
+import type { ObservedSelection, SelectorObserver } from '../devtools/selector-observer';
 
 /**
  * Shallow equality for plain objects / arrays. Useful as the `isEqual`
@@ -134,11 +113,32 @@ export function useModelFields<
     return useSelectorValue(model, pick, shallow);
 }
 
+interface SelectionSource<T extends Record<string, any>, R> {
+    getSnapshot(): R;
+    select(data: Readonly<T>): R;
+    fields?: readonly string[] | undefined;
+    latest?: { data: Readonly<T>; selection: ObservedSelection<R> };
+    failure?: { data: Readonly<T>; error: unknown };
+    onEvaluate?: (selection: ObservedSelection<R>) => void;
+}
+
+interface DerivedSelection {
+    kind: 'useModelSelector' | 'useModelComputed';
+    value: unknown;
+    debugName?: string;
+    fields?: string[];
+}
+
+interface DevtoolsHook {
+    updateDerived?(model: object, token: object, selection: DerivedSelection | null): void;
+    getDerivedObserver?(model: object): SelectorObserver | undefined;
+}
+
 function useSelectorValue<T extends Record<string, any>, R>(
     model: ModelReturn<T>,
     selector: (data: Readonly<T>) => R,
     isEqual: (a: R, b: R) => boolean,
-    kind?: 'useModelSelector' | 'useModelComputed'
+    kind?: DerivedSelection['kind']
 ): R {
     const observer = useMemo(() => kind ? getDerivedObserver(model) : undefined, [model, kind]);
     const { source, committed } = useSelectionSnapshot(model, selector, isEqual, observer);
@@ -231,8 +231,7 @@ function useDerivedValue<T extends Record<string, any>, R>(
     const debugName = useMemo(() => {
         if (!kind) return undefined;
         try {
-            const hook = (globalThis as Record<string, unknown>)
-                .__MODEL_REACTION_DEVTOOLS_HOOK__ as DevtoolsHook | undefined;
+            const hook = getDevtoolsHook();
             if (typeof hook?.updateDerived !== 'function') return undefined;
             if (selector.name) return selector.name;
             const text = Function.prototype.toString.call(selector).trim();
@@ -281,9 +280,7 @@ function useDerivedValue<T extends Record<string, any>, R>(
 
 function getDerivedObserver(model: object): SelectorObserver | undefined {
     try {
-        const hook = (globalThis as Record<string, unknown>)
-            .__MODEL_REACTION_DEVTOOLS_HOOK__ as DevtoolsHook | undefined;
-        return hook?.getDerivedObserver?.(model);
+        return getDevtoolsHook()?.getDerivedObserver?.(model);
     } catch {
         return undefined;
     }
@@ -291,10 +288,13 @@ function getDerivedObserver(model: object): SelectorObserver | undefined {
 
 function report(model: object, token: object, selection: DerivedSelection | null): void {
     try {
-        const hook = (globalThis as Record<string, unknown>)
-            .__MODEL_REACTION_DEVTOOLS_HOOK__ as DevtoolsHook | undefined;
-        hook?.updateDerived?.(model, token, selection);
+        getDevtoolsHook()?.updateDerived?.(model, token, selection);
     } catch {
         // Debugging must not interrupt a React commit or cleanup.
     }
+}
+
+function getDevtoolsHook(): DevtoolsHook | undefined {
+    return (globalThis as Record<string, unknown>)
+        .__MODEL_REACTION_DEVTOOLS_HOOK__ as DevtoolsHook | undefined;
 }

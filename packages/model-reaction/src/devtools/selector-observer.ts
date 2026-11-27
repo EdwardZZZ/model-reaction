@@ -1,4 +1,4 @@
-import type { ModelReturn } from './types';
+import type { ModelReturn } from '../types';
 
 /** Private in-page capability; not part of the package's public exports. */
 export interface ObservedSelection<R> {

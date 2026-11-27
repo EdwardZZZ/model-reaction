@@ -8,8 +8,8 @@ interface PendingAction {
 
 /** Last-registration action queue; see docs/ARCHITECTURE.md#action-scheduling. */
 export class ActionExecutor {
-    private pending = new Map<ReactionAction, PendingAction>();
-    private unsubscribe: () => void;
+    private readonly pending = new Map<ReactionAction, PendingAction>();
+    private readonly unsubscribe: () => void;
     private flushScheduled = false;
     private disposed = false;
 
@@ -29,6 +29,14 @@ export class ActionExecutor {
             this.pending.set(action, { field, endTask });
         }
         if (this.pending.size && this.tasks.isComputeIdle) this.scheduleFlush();
+    }
+
+    dispose(): void {
+        if (this.disposed) return;
+        this.disposed = true;
+        this.unsubscribe();
+        for (const pending of this.pending.values()) pending.endTask();
+        this.pending.clear();
     }
 
     private scheduleFlush(): void {
@@ -58,13 +66,5 @@ export class ActionExecutor {
         } finally {
             pending.endTask();
         }
-    }
-
-    dispose(): void {
-        if (this.disposed) return;
-        this.disposed = true;
-        this.unsubscribe();
-        for (const pending of this.pending.values()) pending.endTask();
-        this.pending.clear();
     }
 }

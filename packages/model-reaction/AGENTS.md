@@ -53,7 +53,7 @@ Put old-value preconditions in the business write entry point.
 Import rule builders and error formatting from `model-reaction/validation`.
 Field `type` metadata does not perform runtime validation; defaults may be
 invalid until explicitly validated. Structural equality remains unchanged.
-Migration details: [API.md](docs/API.md#migrating-to-200).
+Migration details: [API.md](docs/API.md#migrating-to-20).
 
 ## 3. Reactions and React
 

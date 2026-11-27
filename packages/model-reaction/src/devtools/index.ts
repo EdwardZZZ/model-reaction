@@ -1,5 +1,5 @@
 /** Optional DevTools integration; see docs/DEVTOOLS.md. */
-import { createModel as baseCreateModel } from './index';
+import { createModel as baseCreateModel } from '../index';
 import type {
     FieldSchema,
     Model,
@@ -7,13 +7,67 @@ import type {
     ModelReturn,
     ReactionAction,
     ValidationError,
-} from './types';
-import { ModelEvents } from './types';
-import { eachReactionEdge } from './reaction/reaction-graph';
-import { observeModelSelectors, type SelectorObserver } from './devtools-observer';
+} from '../types';
+import { ModelEvents } from '../types';
+import { eachReactionEdge } from '../reaction/reaction-graph';
+import { observeModelSelectors, type SelectorObserver } from './selector-observer';
 
 const DEVTOOLS_HOOK_KEY = '__MODEL_REACTION_DEVTOOLS_HOOK__';
 const NEXT_INSTANCE_ID = Symbol.for('model-reaction.devtools.nextInstanceId');
+
+/** Create a model with DevTools inspection and disposal cleanup when a valid global hook exists. */
+export const createModel: typeof baseCreateModel = (
+    schema: Record<string, FieldSchema<FieldSchema['type'], any>>,
+    options: ModelOptions = {}
+): ModelReturn<any> => {
+    const model = baseCreateModel(schema as Model<Record<string, any>>, options);
+
+    const hook = getDevtoolsHook();
+    if (!hook) return model;
+
+    const fields = buildFieldInfo(schema as Model);
+    const graph = buildDependencyGraph(fields);
+    const detach = attachToDevtools(hook, {
+        ...(typeof hook.getDerivedObserver === 'function'
+            ? { observeSelector: observeModelSelectors(model) } : {}),
+        getFields: () => fields,
+        getDependencyGraph: () => graph,
+        getSnapshot: () => ({
+            data: model.data,
+            dirtyData: model.getDirtyData(),
+            errors: Object.fromEntries(
+                Object.entries(model.validationErrors).map(([field, errors]) => [
+                    field,
+                    [...errors],
+                ])
+            ),
+        }),
+        subscribe: (listener) =>
+            model.on(ModelEvents.FIELD_CHANGE, ({ field, value }) =>
+                listener({
+                    field: field as string,
+                    value,
+                    timestamp: Date.now(),
+                })
+            ),
+        subscribeSnapshot: (listener) => {
+            const unsubscribers = [
+                model.on(ModelEvents.FIELD_VALIDATION_COMPLETE, listener),
+                model.on(ModelEvents.DIRTY_DATA_CLEARED, listener),
+                model.on(ModelEvents.REACTION_ERROR, listener),
+            ];
+            return () => unsubscribers.forEach((unsubscribe) => unsubscribe());
+        },
+    }, model);
+
+    const originalDispose = model.dispose;
+    model.dispose = () => {
+        detach();
+        originalDispose();
+    };
+
+    return model;
+};
 
 interface DevtoolsFieldInfo {
     type: FieldSchema['type'];
@@ -146,57 +200,3 @@ function buildDependencyGraph(
     }
     return { nodes, edges };
 }
-
-/** Create a model with DevTools inspection and disposal cleanup when a valid global hook exists. */
-export const createModel: typeof baseCreateModel = (
-    schema: Record<string, FieldSchema<FieldSchema['type'], any>>,
-    options: ModelOptions = {}
-): ModelReturn<any> => {
-    const model = baseCreateModel(schema as Model<Record<string, any>>, options);
-
-    const hook = getDevtoolsHook();
-    if (!hook) return model;
-
-    const fields = buildFieldInfo(schema as Model);
-    const graph = buildDependencyGraph(fields);
-    const detach = attachToDevtools(hook, {
-        ...(typeof hook.getDerivedObserver === 'function'
-            ? { observeSelector: observeModelSelectors(model) } : {}),
-        getFields: () => fields,
-        getDependencyGraph: () => graph,
-        getSnapshot: () => ({
-            data: model.data,
-            dirtyData: model.getDirtyData(),
-            errors: Object.fromEntries(
-                Object.entries(model.validationErrors).map(([field, errors]) => [
-                    field,
-                    [...errors],
-                ])
-            ),
-        }),
-        subscribe: (listener) =>
-            model.on(ModelEvents.FIELD_CHANGE, ({ field, value }) =>
-                listener({
-                    field: field as string,
-                    value,
-                    timestamp: Date.now(),
-                })
-            ),
-        subscribeSnapshot: (listener) => {
-            const unsubscribers = [
-                model.on(ModelEvents.FIELD_VALIDATION_COMPLETE, listener),
-                model.on(ModelEvents.DIRTY_DATA_CLEARED, listener),
-                model.on(ModelEvents.REACTION_ERROR, listener),
-            ];
-            return () => unsubscribers.forEach((unsubscribe) => unsubscribe());
-        },
-    }, model);
-
-    const originalDispose = model.dispose;
-    model.dispose = () => {
-        detach();
-        originalDispose();
-    };
-
-    return model;
-};

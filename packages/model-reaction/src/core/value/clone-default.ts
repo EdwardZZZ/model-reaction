@@ -1,15 +1,6 @@
-import { isPlainObject } from './is-plain-object';
-import { ownEnumerableKeys } from './own-enumerable-keys';
+import { isPlainObject, ownEnumerableKeys } from './object';
 
-/**
- * Clone a schema `default` so mutable defaults (arrays / plain objects) are
- * not shared across model instances created from the same schema literal.
- *
- * Primitives are returned as-is. `Date` / `RegExp` and other non-plain objects
- * are returned by reference intentionally — they are treated as immutable
- * leaves here, matching how `deepEqual` compares them. Cyclic structures are
- * guarded via a `WeakMap`.
- */
+/** Isolate mutable schema defaults; clone boundaries are in docs/ARCHITECTURE.md#value-handling. */
 export function cloneDefault<V>(value: V, seen?: WeakMap<object, any>): V {
     if (value === null || typeof value !== 'object') return value;
     if (value instanceof Date || value instanceof RegExp) return value;

@@ -5,7 +5,7 @@ import { renderToString } from 'react-dom/server';
 import { createModel } from '../devtools';
 import { createModel as createPlainModel } from '../index';
 import { shallow, useModelComputed, useModelFields, useModelSelector } from '../react';
-import type { SelectorObserver } from '../devtools-observer';
+import type { SelectorObserver } from '../devtools/selector-observer';
 
 interface Observation {
     kind: string;

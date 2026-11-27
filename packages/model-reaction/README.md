@@ -111,7 +111,7 @@ Each field accepts one `reaction`. Validation follows rule order and stops at
 the first error. Unknown write keys emit `field:not-found` and reject before
 the batch starts. `setField` and `setFields` validators read transformed
 candidates, including their own field. Structural field equality is unchanged.
-See the [breaking migration guide](docs/API.md#migrating-to-200).
+See the [breaking migration guide](docs/API.md#migrating-to-20).
 
 ## Core Concepts
 
@@ -220,8 +220,8 @@ hook selection, model ownership, selector subscriptions, SSR, and submission.
 For draft behavior, non-text controls, transforms, and error display, see
 [Controlled inputs](docs/REACT.md#controlled-inputs-under-strict--async-validation).
 
-For the breaking API changes in 2.0.0, see the
-[migration guide](docs/API.md#migrating-to-200).
+For the breaking API changes in 2.0.*, see the
+[migration guide](docs/API.md#migrating-to-20).
 
 ## Documentation
 
